@@ -1,9 +1,10 @@
 from .model import KModel
+from dataclasses import dataclass
 from huggingface_hub import hf_hub_download
+from loguru import logger
 from misaki import en, espeak
 from numbers import Number
 from typing import Generator, List, Optional, Tuple, Union
-from loguru import logger
 import re
 import torch
 
@@ -134,6 +135,7 @@ class KPipeline:
     def load_voice(self, voice: str, delimiter: str = ",") -> torch.FloatTensor:
         if voice in self.voices:
             return self.voices[voice]
+        logger.debug(f"Loading voice: {voice}")
         packs = [self.load_single_voice(v) for v in voice.split(delimiter)]
         if len(packs) == 1:
             return packs[0]
@@ -194,26 +196,52 @@ class KPipeline:
     @classmethod
     def infer(
         cls,
-        model: Optional[KModel],
+        model: KModel,
         ps: str,
         pack: torch.FloatTensor,
-        speed: Number
-    ) -> Optional[torch.FloatTensor]:
-        return model(ps, pack[len(ps)-1], speed) if model else None
+        speed: Number = 1
+    ) -> KModel.Output:
+        return model(ps, pack[len(ps)-1], speed, return_output=True)
+
+    @dataclass
+    class Result:
+        graphemes: str
+        phonemes: str
+        output: Optional[KModel.Output] = None
+
+        @property
+        def audio(self) -> Optional[torch.FloatTensor]:
+            return None if self.output is None else self.output.audio
+
+        @property
+        def pred_dur(self) -> Optional[torch.LongTensor]:
+            return None if self.output is None else self.output.pred_dur
+
+        ### MARK: BEGIN BACKWARD COMPAT ###
+        def __iter__(self):
+            yield self.graphemes
+            yield self.phonemes
+            yield self.audio
+
+        def __getitem__(self, index):
+            return [self.graphemes, self.phonemes, self.audio][index]
+
+        def __len__(self):
+            return 3
+        #### MARK: END BACKWARD COMPAT ####
 
     def __call__(
         self,
         text: Union[str, List[str]],
-        voice: str,
+        voice: Optional[str] = None,
         speed: Number = 1,
         split_pattern: Optional[str] = r'\n+',
         model: Optional[KModel] = None
-    ) -> Generator[Tuple[str, str, Optional[torch.FloatTensor]], None, None]:
-        logger.debug(f"Loading voice: {voice}")
-        pack = self.load_voice(voice)
+    ) -> Generator['KPipeline.Result', None, None]:
         model = model or self.model
-        pack = pack.to(model.device) if model else pack
-        logger.debug(f"Voice loaded on device: {pack.device if hasattr(pack, 'device') else 'N/A'}")
+        if model and voice is None:
+            raise ValueError('Specify a voice: en_us_pipeline(text="Hello world!", voice="af_heart")')
+        pack = self.load_voice(voice).to(model.device) if model else None
         if isinstance(text, str):
             text = re.split(split_pattern, text.strip()) if split_pattern else [text]
         for graphemes in text:
@@ -227,7 +255,8 @@ class KPipeline:
                     elif len(ps) > 510:
                         logger.warning(f"Unexpected len(ps) == {len(ps)} > 510 and ps == '{ps}'")
                         ps = ps[:510]
-                    yield gs, ps, KPipeline.infer(model, ps, pack, speed)
+                    output = KPipeline.infer(model, ps, pack, speed) if model else None
+                    yield self.Result(graphemes=gs, phonemes=ps, output=output)
             else:
                 ps = self.g2p(graphemes)
                 if not ps:
@@ -235,4 +264,5 @@ class KPipeline:
                 elif len(ps) > 510:
                     logger.warning(f'Truncating len(ps) == {len(ps)} > 510')
                     ps = ps[:510]
-                yield graphemes, ps, KPipeline.infer(model, ps, pack, speed)
+                output = KPipeline.infer(model, ps, pack, speed) if model else None
+                yield self.Result(graphemes=graphemes, phonemes=ps, output=output)

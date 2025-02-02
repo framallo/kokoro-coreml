@@ -2,18 +2,18 @@ from setuptools import setup, find_packages
 
 setup(
     name='kokoro',
-    version='0.3.4',
+    version='0.3.5',
     packages=find_packages(),
     install_requires=[
         'huggingface_hub',
         'loguru',
-        'misaki[en]>=0.6.5',
+        'misaki[en]>=0.6.7',
         'numpy==1.26.4',
         'scipy',
         'torch',
         'transformers',
     ],
-    python_requires='>=3.6',
+    python_requires='>=3.7',
     author='hexgrad',
     author_email='hello@hexgrad.com',
     description='TTS',
