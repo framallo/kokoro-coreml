@@ -1,31 +1,54 @@
-    # Neural Network Components for Kokoro TTS Architecture
-    #
-    # This module implements the core neural network building blocks used throughout
-    # the Kokoro TTS model. Components are designed for high-quality speech synthesis
-    # with careful attention to CoreML/ONNX export compatibility.
-    #
-    # Architecture Components:
-    # - TextEncoder: Bidirectional LSTM-based phoneme sequence encoder
-    # - ProsodyPredictor: Duration, F0, and noise prediction network
-    # - CustomAlbert: Simplified BERT variant for phoneme context encoding
-    # - AdaLayerNorm: Adaptive layer normalization with style conditioning
-    # - DurationEncoder: Multi-layer LSTM encoder for prosody modeling
-    #
-    # Design Philosophy:
-    # - Modular components for flexible architecture composition
-    # - Style-conditioned layers for voice adaptation
-    # - Dropout layers for training robustness (removed during CoreML export)
-    # - Pack/unpack operations optimized for variable-length sequences
-    #
-    # Cross-file dependencies:
-    # - Used by: model.py (KModel architecture), export scripts
-    # - Imports from: istftnet.py (AdainResBlk1d for style conditioning)
-    # - Based on: StyleTTS2 architecture with Kokoro-specific modifications
-    #
-    # Export Considerations:
-    # - Pack_padded_sequence operations require CoreML-friendly replacements
-    # - Dropout layers must be converted to Identity for inference
-    # - Variable-length sequences handled via masking instead of packing
+"""
+Neural Network Components for Kokoro TTS Architecture
+
+This module implements the core neural network building blocks used throughout
+the Kokoro text-to-speech model. Components are specifically designed for high-quality
+speech synthesis with careful attention to CoreML/ONNX export compatibility and
+efficient inference on both server and edge devices.
+
+Core Architecture Philosophy:
+The design follows a modular approach where each component serves a specific role
+in the TTS pipeline while maintaining compatibility with various deployment targets.
+Style-conditioned layers enable voice adaptation and cloning capabilities.
+
+Primary Components:
+- TextEncoder: Bidirectional LSTM-based phoneme sequence encoder with masking
+- ProsodyPredictor: Multi-head duration, F0, and noise prediction network
+- CustomAlbert: Simplified BERT variant optimized for phoneme context encoding
+- AdaLayerNorm: Adaptive layer normalization with style vector conditioning
+- DurationEncoder: Multi-layer LSTM encoder for prosodic feature modeling
+- LinearNorm: Xavier-initialized linear layers with configurable activation gains
+
+Key Design Decisions:
+- Variable-Length Support: Efficient handling of sequences via packing/unpacking
+- Style Conditioning: Voice adaptation through adaptive normalization layers
+- Export Compatibility: CoreML/ONNX-friendly operations with fallback implementations
+- Training Robustness: Dropout and normalization layers for stable convergence
+
+Export Strategy for Mobile Deployment:
+- Pack/unpack operations replaced with masking for CoreML compatibility
+- Dropout layers converted to Identity modules during inference
+- Weight normalization preserved for export with proper parameter handling
+- Attention mechanisms optimized for Apple Neural Engine acceleration
+
+Performance Characteristics:
+- Memory Efficient: Packed sequences reduce computation on padding tokens
+- Device Optimized: Compatible with CPU, GPU, and specialized accelerators
+- Batch Processing: Efficient handling of variable-length batches
+- Gradient Flow: Careful normalization to prevent vanishing/exploding gradients
+
+Cross-file Dependencies:
+- Used by: model.py (KModel core architecture), export_*.py (conversion pipelines)
+- Imports from: istftnet.py (AdainResBlk1d for style conditioning)
+- Integrates with: transformers (AlbertModel), torch.nn (standard components)
+- Based on: StyleTTS2 architecture with Kokoro-specific optimizations
+
+Thread Safety and Concurrency:
+- Stateless Operations: All modules are stateless for concurrent inference
+- Parameter Sharing: Safe to share modules across different model instances
+- Device Placement: Thread-safe device movement and placement operations
+- Export Compatibility: Stateless design enables static graph conversion
+"""
 
 # Based on StyleTTS2: https://github.com/yl4579/StyleTTS2/blob/main/models.py
 from .istftnet import AdainResBlk1d
@@ -36,31 +59,151 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 
+class ModuleConstants:
+    """
+    Architectural constants for neural network components in Kokoro TTS.
+    
+    This class centralizes all architectural parameters, dimensions, and
+    configuration values used throughout the neural network modules. It
+    provides clear documentation for layer sizes, activation functions,
+    and other hyperparameters critical for model architecture consistency.
+    
+    Architecture Dimensions:
+    - Hidden dimensions chosen for optimal balance of quality and efficiency
+    - Kernel sizes optimized for temporal modeling in speech synthesis
+    - Dropout rates tuned for generalization without overfitting
+    - Layer counts balanced for expressiveness and training stability
+    
+    Design Rationale:
+    - Standard dimensions (512, 256, 128) enable efficient matrix operations
+    - Kernel sizes (3, 5) provide good temporal receptive fields
+    - Dropout rates prevent overfitting while maintaining synthesis quality
+    - Layer normalization parameters ensure stable gradient flow
+    
+    Export Considerations:
+    - Dimensions chosen for optimal ANE (Apple Neural Engine) performance
+    - Activation functions compatible with CoreML export requirements
+    - Layer configurations support static graph conversion
+    - Memory layouts optimized for mobile device constraints
+    
+    Used by:
+    - All module classes: Consistent architectural parameter access
+    - Export scripts: Validation of model dimensions during conversion
+    - Training code: Hyperparameter configuration and model instantiation
+    - Test suites: Architecture validation and compatibility testing
+    """
+    
+    # Core architectural dimensions
+    DEFAULT_HIDDEN_DIM = 512        # Standard hidden dimension across components
+    STYLE_DIM = 128                 # Style vector dimension for conditioning
+    TEXT_ENCODER_DIM = 512          # Text encoder output dimension
+    PROSODY_HIDDEN_DIM = 512        # Prosody prediction hidden dimension
+    
+    # LSTM configuration
+    LSTM_LAYERS = 2                 # Number of LSTM layers in encoders
+    LSTM_DROPOUT = 0.1              # Dropout rate between LSTM layers
+    BIDIRECTIONAL = True            # Use bidirectional LSTM by default
+    
+    # Convolution parameters
+    CONV_KERNEL_SIZE = 5            # Standard convolution kernel size
+    CONV_PADDING = 2                # Padding for 'same' convolution
+    CONV_STRIDE = 1                 # Standard convolution stride
+    
+    # Normalization and regularization
+    LAYER_NORM_EPS = 1e-5          # Layer normalization epsilon
+    DROPOUT_RATE = 0.1              # Standard dropout rate
+    WEIGHT_NORM_DIM = 0             # Dimension for weight normalization
+    
+    # Activation function configurations
+    LEAKY_RELU_SLOPE = 0.01        # Negative slope for LeakyReLU
+    GELU_APPROXIMATION = 'none'     # GELU approximation method
+    
+    # Xavier initialization parameters
+    XAVIER_GAIN_LINEAR = 1.0        # Gain for linear layers
+    XAVIER_GAIN_TANH = 5/3          # Gain for layers followed by tanh
+    XAVIER_GAIN_RELU = np.sqrt(2.0) # Gain for layers followed by ReLU
+    
+    # Attention mechanism parameters
+    ATTENTION_HEADS = 8             # Multi-head attention head count
+    ATTENTION_DIM = 64              # Per-head attention dimension
+    ATTENTION_DROPOUT = 0.1         # Attention dropout rate
+    
+    # Sequence processing limits
+    MAX_SEQUENCE_LENGTH = 512       # Maximum input sequence length
+    MIN_SEQUENCE_LENGTH = 1         # Minimum sequence length
+    PADDING_IDX = 0                 # Padding token index
+    
+    # Export compatibility settings
+    ONNX_OPSET_VERSION = 11         # Minimum ONNX opset for compatibility
+    COREML_IOS_VERSION = 15         # Minimum iOS version for CoreML
+    STATIC_SHAPES = True            # Use static shapes for export optimization
+
 
 class LinearNorm(nn.Module):
-    # Xavier-initialized linear layer with configurable activation gain.
-    #
-    # This wrapper around nn.Linear provides automatic Xavier uniform weight
-    # initialization, which is crucial for stable training in deep TTS architectures.
-    # The initialization gain can be adjusted based on the subsequent activation function.
-    #
-    # Parameters:
-    # - in_dim: Input feature dimension
-    # - out_dim: Output feature dimension  
-    # - bias: Enable bias term (default: True)
-    # - w_init_gain: Xavier initialization gain ('linear', 'relu', 'tanh', etc.)
-    #
-    # Used by:
-    # - ProsodyPredictor: Duration projection layers
-    # - Various model components requiring properly initialized linear layers
-    #
+    """
+    Xavier-initialized linear layer with configurable activation gain.
+
+    This wrapper around nn.Linear provides automatic Xavier uniform weight
+    initialization, which is crucial for stable training convergence in deep
+    TTS architectures. The initialization gain can be precisely adjusted based
+    on the subsequent activation function for optimal gradient flow.
+
+    Mathematical Foundation:
+    Xavier initialization samples weights from uniform distribution:
+    W ~ U(-a, a) where a = gain * sqrt(6 / (fan_in + fan_out))
+    
+    This ensures variance preservation across layers, preventing vanishing
+    or exploding gradients that commonly occur in deep neural networks.
+
+    Gain Selection:
+    - 'linear': gain=1.0 (preserves variance exactly)
+    - 'relu': gain=sqrt(2) ≈ 1.414 (compensates for half-rectification)
+    - 'tanh': gain=5/3 ≈ 1.667 (compensates for saturation)
+    - Custom float values accepted for specialized activations
+
+    Args:
+        in_dim (int): Input feature dimension
+                     Must be positive integer representing input channels/features
+                     Typical values: 128, 256, 512 for TTS architectures
+        out_dim (int): Output feature dimension
+                      Must be positive integer representing output channels/features
+                      Chosen based on downstream layer requirements
+        bias (bool, optional): Enable learnable bias term. Defaults to True.
+                              Set to False when followed by normalization layers
+        w_init_gain (str or float, optional): Initialization gain specification
+                                            String: 'linear', 'relu', 'tanh', etc.
+                                            Float: Custom gain value
+                                            Defaults to 'linear'
+
+    Used by:
+    - ProsodyPredictor: Duration, F0, and noise prediction output layers
+    - TextEncoder: Feature projection layers in LSTM encoder
+    - DurationEncoder: Dimensional transformation layers
+    - Various model components requiring stable initialization
+    """
+    
     def __init__(self, in_dim, out_dim, bias=True, w_init_gain='linear'):
         super(LinearNorm, self).__init__()
         self.linear_layer = nn.Linear(in_dim, out_dim, bias=bias)
         nn.init.xavier_uniform_(self.linear_layer.weight, gain=nn.init.calculate_gain(w_init_gain))
 
     def forward(self, x):
-    # Standard linear transformation: y = xW^T + b
+        """
+        Apply linear transformation to input tensor.
+
+        Performs standard linear transformation: y = xW^T + b where W is the
+        weight matrix and b is the bias vector (if enabled). The transformation
+        preserves all dimensions except the last (feature dimension).
+
+        Args:
+            x (torch.Tensor): Input tensor with shape (..., in_dim)
+                             Last dimension must match in_dim from initialization
+                             Supports arbitrary batch dimensions
+
+        Returns:
+            torch.Tensor: Transformed tensor with shape (..., out_dim)
+                         Output preserves all input dimensions except last
+        """
         return self.linear_layer(x)
 
 

@@ -134,7 +134,7 @@ with gr.Blocks() as generate_tab:
     out_audio = gr.Audio(label='Output Audio', interactive=False, streaming=False, autoplay=True)
     generate_btn = gr.Button('Generate', variant='primary')
     with gr.Accordion('Output Tokens', open=True):
-        out_ps = gr.Textbox(interactive=False, show_label=False, info='Tokens used to generate the audio, up to 510 context length.')
+        out_ps = gr.Textbox(interactive=False, show_label=False, info=f'Tokens used to generate the audio, up to {Config.MAX_TOKEN_LENGTH} context length.')
         tokenize_btn = gr.Button('Tokenize', variant='secondary')
         gr.Markdown(TOKEN_NOTE)
         predict_btn = gr.Button('Predict', variant='secondary', visible=False)

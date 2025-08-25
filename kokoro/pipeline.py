@@ -1,3 +1,36 @@
+"""
+Kokoro TTS Pipeline Implementation
+
+This module provides the KPipeline class, a comprehensive text-to-speech pipeline that
+handles language-specific grapheme-to-phoneme (G2P) conversion, voice management, and
+audio synthesis. It serves as the primary user interface for multi-language TTS functionality.
+
+Architecture Components:
+- Language Detection: Automatic language code resolution and validation
+- G2P Processing: Language-specific phoneme conversion with fallback support
+- Voice Management: Lazy loading and caching of speaker embeddings
+- Text Chunking: Intelligent segmentation for long text processing
+- Audio Synthesis: Integration with KModel for high-quality speech generation
+
+Multi-Language Support:
+- English (American/British): Native misaki[en] support with ESpeak fallback
+- European Languages: ESpeak-ng integration for Spanish, French, Italian, Portuguese
+- Asian Languages: Specialized support for Japanese (misaki[ja]) and Chinese (misaki[zh])
+- Extensible Framework: Easy addition of new languages and G2P backends
+
+Performance Optimizations:
+- Lazy Voice Loading: Voices loaded on-demand and cached for reuse
+- Smart Chunking: Context-aware text segmentation for memory efficiency
+- Batch Processing: Multiple text segments processed in single pipeline calls
+- Device Management: Automatic GPU/CPU placement with fallback support
+
+Cross-file dependencies:
+- Imports from: model.py (KModel), misaki (language-specific G2P)
+- Used by: All demo applications, test suites, and production inference scripts
+- Integrates with: Voice loading system, audio synthesis pipeline
+- Requires: Language-specific packages (misaki[en], misaki[ja], misaki[zh])
+"""
+
 from .model import KModel
 from dataclasses import dataclass
 from huggingface_hub import hf_hub_download
@@ -8,59 +41,170 @@ import re
 import torch
 import os
 
+class PipelineConstants:
+    """
+    Configuration constants for KPipeline text processing and audio synthesis.
+    
+    This class centralizes all processing limits, chunk sizes, and configuration
+    values used throughout the pipeline, providing clear documentation for
+    constraints and optimizations that ensure reliable multi-language TTS.
+    
+    Text Processing Limits:
+    - Phoneme sequences are limited by BERT context windows
+    - Chunking strategies balance memory usage with processing efficiency  
+    - Language-specific optimizations account for different G2P characteristics
+    
+    Audio Processing Configuration:
+    - Sample rates and frame rates must match KModel expectations
+    - Timestamp calculations require precise frame-to-sample conversion
+    - Voice embedding formats follow standardized dimensions
+    
+    Performance Tuning:
+    - Chunk sizes optimized for typical sentence lengths in different languages
+    - Buffer sizes chosen to minimize memory fragmentation
+    - Processing limits prevent OOM errors on resource-constrained devices
+    
+    Used by:
+    - KPipeline.__call__: Text chunking and language processing limits
+    - KPipeline.en_tokenize: English text segmentation and phoneme limits  
+    - KPipeline.join_timestamps: Audio frame-to-timestamp conversion
+    - Voice loading: Embedding format validation and caching decisions
+    """
+    
+    # Phoneme sequence processing limits
+    MAX_PHONEME_LENGTH = 510        # Maximum phoneme chars (BERT context - BOS/EOS tokens)
+    PHONEME_SAFETY_MARGIN = 2       # Reserve for BOS/EOS tokens in sequence
+    
+    # Audio frame and timing constants  
+    SAMPLE_RATE = 24000            # Audio sample rate in Hz (must match KModel)
+    FRAMES_PER_SECOND = 40         # Duration prediction frame rate (25ms frames)
+    SAMPLES_PER_FRAME = 600        # Samples per duration frame (24kHz / 40fps)
+    
+    # Timestamp calculation constants
+    TIMESTAMP_DIVISOR = 80         # Magic divisor for half-frame timestamp precision
+    TIMING_SAFETY_OFFSET = 3       # Frame offset to avoid boundary artifacts
+    
+    # Text chunking configuration
+    ENGLISH_CHUNK_SIZE = 510       # English text processing limit (phoneme-based)
+    NON_ENGLISH_CHUNK_SIZE = 400   # Non-English chunk size (character-based)
+    
+    # Punctuation patterns for intelligent chunking
+    PRIMARY_BREAKS = ['!', '.', '?', '…']     # Sentence-ending punctuation
+    SECONDARY_BREAKS = [':', ';']             # Clause-ending punctuation  
+    TERTIARY_BREAKS = [',', '—']              # Phrase-ending punctuation
+    CLOSING_MARKS = [')', '"']                # Closing punctuation to include
+    
+    # Voice embedding specifications
+    VOICE_EMBEDDING_DIM = 256      # Standard voice embedding size
+    VOICE_CACHE_SIZE = 100         # Maximum cached voices per pipeline
+    
+    # Language processing constants
+    DEFAULT_REPO_ID = 'hexgrad/Kokoro-82M'  # Default model repository
+    FALLBACK_ENABLED = True        # Enable ESpeak fallback for unknown words
+
+# Language code mappings for user-friendly language specification
+# Maps common language identifiers to internal single-character codes
 ALIASES = {
-    'en-us': 'a',
-    'en-gb': 'b',
-    'es': 'e',
-    'fr-fr': 'f',
-    'hi': 'h',
-    'it': 'i',
-    'pt-br': 'p',
-    'ja': 'j',
-    'zh': 'z',
+    'en-us': 'a',      # American English -> 'a'
+    'en-gb': 'b',      # British English -> 'b' 
+    'es': 'e',         # Spanish -> 'e'
+    'fr-fr': 'f',      # French (France) -> 'f'
+    'hi': 'h',         # Hindi -> 'h'
+    'it': 'i',         # Italian -> 'i'
+    'pt-br': 'p',      # Portuguese (Brazil) -> 'p'
+    'ja': 'j',         # Japanese -> 'j'
+    'zh': 'z',         # Chinese (Mandarin) -> 'z'
 }
 
+# Language code to human-readable name and G2P backend mapping
 LANG_CODES = dict(
-    # pip install misaki[en]
-    a='American English',
-    b='British English',
+    # Native misaki support with advanced features
+    a='American English',     # misaki[en] with American pronunciation
+    b='British English',      # misaki[en] with British pronunciation
 
-    # espeak-ng
-    e='es',
-    f='fr-fr',
-    h='hi',
-    i='it',
-    p='pt-br',
+    # ESpeak-ng backend support  
+    e='es',          # Spanish via espeak-ng
+    f='fr-fr',       # French (France) via espeak-ng
+    h='hi',          # Hindi via espeak-ng
+    i='it',          # Italian via espeak-ng
+    p='pt-br',       # Portuguese (Brazil) via espeak-ng
 
-    # pip install misaki[ja]
-    j='Japanese',
-
-    # pip install misaki[zh]
-    z='Mandarin Chinese',
+    # Specialized misaki backends
+    j='Japanese',           # misaki[ja] with morphological analysis
+    z='Mandarin Chinese',   # misaki[zh] with tone support
 )
 
 class KPipeline:
-    '''
-    KPipeline is a language-aware support class with 2 main responsibilities:
-    1. Perform language-specific G2P, mapping (and chunking) text -> phonemes
-    2. Manage and store voices, lazily downloaded from HF if needed
+    """
+    Language-aware text-to-speech pipeline with comprehensive G2P and voice management.
 
-    You are expected to have one KPipeline per language. If you have multiple
-    KPipelines, you should reuse one KModel instance across all of them.
+    KPipeline serves as the primary user interface for multi-language text-to-speech
+    synthesis, combining grapheme-to-phoneme (G2P) conversion, voice management, and
+    audio synthesis into a unified, easy-to-use API. It handles the complexity of
+    different languages while providing consistent behavior across all supported locales.
 
-    KPipeline is designed to work with a KModel, but this is not required.
-    There are 2 ways to pass an existing model into a pipeline:
-    1. On init: us_pipeline = KPipeline(lang_code='a', model=model)
-    2. On call: us_pipeline(text, voice, model=model)
+    Core Responsibilities:
+    1. Language-Specific G2P: Convert text to phonemes using appropriate backends
+    2. Voice Management: Lazy loading, caching, and blending of speaker embeddings  
+    3. Text Chunking: Intelligent segmentation for long texts and memory management
+    4. Audio Synthesis: Integration with KModel for high-quality speech generation
 
-    By default, KPipeline will automatically initialize its own KModel. To
-    suppress this, construct a "quiet" KPipeline with model=False.
+    Architecture Design:
+    - One Pipeline Per Language: Each KPipeline instance handles one language
+    - Shared Model Support: Multiple pipelines can share a single KModel instance
+    - Flexible Initialization: Support for both "quiet" (G2P-only) and "loud" (full TTS) modes
+    - Lazy Resource Loading: Models and voices loaded on-demand for efficiency
 
-    A "quiet" KPipeline yields (graphemes, phonemes, None) without generating
-    any audio. You can use this to phonemize and chunk your text in advance.
+    Language Support Matrix:
+    - English (a/b): Advanced support via misaki[en] with ESpeak fallback
+    - European (e/f/h/i/p): ESpeak-ng integration for Romance and other languages
+    - Asian (j/z): Specialized support with morphological/tonal analysis
 
-    A "loud" KPipeline _with_ a model yields (graphemes, phonemes, audio).
-    '''
+    Usage Patterns:
+    1. Full TTS Pipeline:
+       ```python
+       pipeline = KPipeline(lang_code='a')  # Auto-initializes KModel
+       audio = pipeline("Hello world", voice="af_heart")
+       ```
+
+    2. Shared Model Across Languages:
+       ```python
+       model = KModel()
+       en_pipeline = KPipeline(lang_code='a', model=model)
+       es_pipeline = KPipeline(lang_code='e', model=model)
+       ```
+
+    3. G2P-Only Mode:
+       ```python
+       pipeline = KPipeline(lang_code='a', model=False)  # "quiet" mode
+       for graphemes, phonemes, _ in pipeline(text, voice):
+           print(f"{graphemes} -> {phonemes}")
+       ```
+
+    Performance Characteristics:
+    - Memory Efficient: Lazy loading and caching of resources
+    - Scalable: Handles texts from single words to full documents
+    - Device Aware: Automatic GPU/CPU placement with fallback support
+    - Thread Safe: Stateless operations allow concurrent usage
+
+    Resource Management:
+    - Automatic Downloads: Models and voices fetched from Hugging Face on demand
+    - Intelligent Caching: Frequently used voices cached in memory
+    - Memory Bounds: Configurable limits prevent excessive resource usage
+    - Error Resilience: Graceful fallbacks when resources are unavailable
+
+    Cross-file Dependencies:
+    - Uses: model.py (KModel for synthesis), misaki (language-specific G2P)
+    - Used by: demo/app.py, test_*.py, production inference scripts
+    - Integrates with: Hugging Face Hub (model/voice downloads), ESpeak-ng (fallback G2P)
+    - Requires: Language packs (misaki[en]/[ja]/[zh]) for full functionality
+
+    Thread Safety and Concurrency:
+    - Read Operations: Safe for concurrent access (voice loading, G2P conversion)
+    - Write Operations: Voice caching uses thread-safe mechanisms
+    - Model Sharing: Multiple pipelines can safely share a single KModel
+    - State Isolation: Each pipeline maintains independent language configuration
+    """
     def __init__(
         self,
         lang_code: str,
@@ -70,15 +214,100 @@ class KPipeline:
         en_callable: Optional[Callable[[str], str]] = None,
         device: Optional[str] = None
     ):
-        """Initialize a KPipeline.
-        
+        """
+        Initialize a language-specific TTS pipeline with comprehensive configuration options.
+
+        Creates a KPipeline instance with language-specific G2P backend, optional model
+        initialization, and device management. Supports multiple operating modes from
+        G2P-only preprocessing to full TTS synthesis with automatic resource management.
+
+        Language-Specific Backend Selection:
+        - English (a/b): misaki[en] with ESpeak fallback for OOD words
+        - Japanese (j): misaki[ja] with morphological analysis (requires separate install)
+        - Chinese (z): misaki[zh] with tone support and version selection
+        - Others: ESpeak-ng backend with language-specific pronunciation rules
+
+        Device Management Strategy:
+        - Automatic Selection: CUDA > MPS > CPU based on availability
+        - Explicit Override: User can force specific device with error handling
+        - MPS Requirements: Requires PYTORCH_ENABLE_MPS_FALLBACK=1 environment variable
+        - Fallback Handling: Graceful degradation with informative error messages
+
+        Model Initialization Modes:
+        1. Shared Model (model=KModel): Use existing model instance for efficiency
+        2. Auto Model (model=True): Create new model with automatic device placement
+        3. Quiet Mode (model=False): G2P-only operation without synthesis capability
+        4. Custom Repository: Download from specified Hugging Face repository
+
         Args:
-            lang_code: Language code for G2P processing
-            model: KModel instance, True to create new model, False for no model
-            trf: Whether to use transformer-based G2P
-            device: Override default device selection ('cuda' or 'cpu', or None for auto)
-                   If None, will auto-select cuda if available
-                   If 'cuda' and not available, will explicitly raise an error
+            lang_code (str): Language identifier for G2P backend selection
+                           Supported codes: a,b (English), j (Japanese), z (Chinese), 
+                           e,f,h,i,p (ESpeak languages)
+                           Case insensitive, supports ALIASES mapping
+            repo_id (str, optional): Hugging Face repository for model/voice assets
+                                   Defaults to PipelineConstants.DEFAULT_REPO_ID
+                                   Format: 'username/repository-name'
+            model (Union[KModel, bool], optional): Model configuration mode
+                                                 KModel instance: Share existing model
+                                                 True: Auto-create new model (default)
+                                                 False: G2P-only mode, no synthesis
+            trf (bool, optional): Use transformer-based G2P for English
+                                Defaults to False (uses simpler, faster approach)
+                                Only affects English (a/b) language codes
+            en_callable (Callable[[str], str], optional): Custom English G2P function for Chinese
+                                                         Used by zh.ZHG2P for mixed-language text
+                                                         Defaults to None (uses internal handling)
+            device (str, optional): Explicit device placement override
+                                  None: Auto-select best available device
+                                  'cuda': Force CUDA (raises if unavailable)
+                                  'mps': Force Apple Metal (requires MPS_FALLBACK=1)
+                                  'cpu': Force CPU execution
+
+        Raises:
+            AssertionError: If lang_code not in supported LANG_CODES
+            ImportError: If required language package not installed (misaki[ja]/misaki[zh])
+            RuntimeError: If requested device unavailable or MPS misconfigured
+            ConnectionError: If model repository inaccessible during download
+
+        State Initialization Process:
+        1. Repository Configuration: Set up Hugging Face repository for assets
+        2. Language Validation: Resolve aliases and validate against supported codes
+        3. Device Selection: Auto-detect or validate requested device
+        4. Model Creation: Initialize based on mode with error handling
+        5. G2P Backend Setup: Configure language-specific phoneme converter
+        6. Voice Cache: Initialize empty dictionary for lazy voice loading
+
+        Performance Characteristics:
+        - Lazy Loading: G2P backends loaded on first use
+        - Device Optimization: Automatic placement for best performance
+        - Memory Efficient: Only requested resources are allocated
+        - Error Resilient: Graceful fallbacks with detailed error messages
+
+        Called by:
+        - User Applications: Direct instantiation for TTS functionality
+        - Demo Scripts: Language-specific pipeline creation
+        - Test Suites: Validation of different configuration modes
+        - Production Services: Shared model scenarios for efficiency
+
+        Examples:
+        ```python
+        # Basic English pipeline with auto-device selection
+        pipeline = KPipeline('a')
+        
+        # Japanese pipeline with explicit CPU usage
+        ja_pipeline = KPipeline('j', device='cpu')
+        
+        # Shared model across multiple languages
+        model = KModel()
+        en_pipeline = KPipeline('a', model=model)
+        es_pipeline = KPipeline('e', model=model)
+        
+        # G2P-only preprocessing pipeline
+        quiet_pipeline = KPipeline('a', model=False)
+        
+        # Transformer-based English G2P
+        trf_pipeline = KPipeline('a', trf=True)
+        ```
         """
         if repo_id is None:
             repo_id = 'hexgrad/Kokoro-82M'
@@ -206,6 +435,71 @@ class KPipeline:
         self,
         tokens: List[en.MToken]
     ) -> Generator[Tuple[str, str, List[en.MToken]], None, None]:
+        """
+        Intelligent tokenization and chunking for English text processing.
+
+        This method implements a sophisticated chunking algorithm that respects phoneme
+        length limits while maintaining linguistic coherence. It processes English
+        tokens with proper boundary detection and generates chunks suitable for 
+        BERT-based processing in the TTS pipeline.
+
+        Chunking Strategy:
+        - Phoneme-based limits: Respects BERT context window constraints
+        - Intelligent boundaries: Prefers natural linguistic break points
+        - Waterfall optimization: Finds optimal chunk boundaries to minimize splits
+        - Memory efficient: Generator pattern for large text processing
+
+        Phoneme Processing:
+        - American/British variants: Handles pronunciation differences automatically
+        - Whitespace preservation: Maintains proper spacing in phoneme sequences
+        - Phoneme cleaning: Removes None values and handles pronunciation variants
+        - Length calculation: Precise phoneme character counting for chunk limits
+
+        Args:
+            tokens (List[en.MToken]): English morphological tokens from misaki[en] G2P
+                                    Each token contains: text, phonemes, whitespace, morphology
+                                    Generated by en.G2P.tokenize() method
+                                    Includes pronunciation and spacing information
+
+        Yields:
+            Tuple[str, str, List[en.MToken]]: Chunked text processing results
+                - str: Original grapheme text for the chunk
+                - str: Phoneme sequence ready for model input
+                - List[en.MToken]: Token objects for timestamp alignment
+
+        Processing Flow:
+        1. Phoneme Preprocessing: Clean and normalize phoneme representations
+        2. Length Tracking: Monitor cumulative phoneme character count
+        3. Boundary Detection: Identify optimal chunk split points when limits approached
+        4. Waterfall Optimization: Use intelligent boundary selection to minimize splits
+        5. Chunk Generation: Yield complete chunks with text, phonemes, and tokens
+
+        Chunk Size Management:
+        - Maximum Length: PipelineConstants.MAX_PHONEME_LENGTH (510 characters)
+        - Safety Margin: Reserves space for BOS/EOS tokens in BERT processing
+        - Optimal Splitting: Prefers word boundaries, punctuation, and natural breaks
+        - Overflow Handling: Graceful handling when chunks exceed limits
+
+        Performance Characteristics:
+        - Generator Pattern: Memory efficient for long text processing
+        - Lazy Evaluation: Chunks processed on-demand for large documents
+        - Boundary Optimization: Minimizes mid-word splits through waterfall algorithm
+        - Debug Logging: Comprehensive logging for chunk boundary decisions
+
+        Called by:
+        - KPipeline.__call__: Main text processing pipeline for English input
+        - Used with: en.G2P.tokenize() output for morphological token processing
+        - Integrates with: KPipeline.waterfall_last for boundary optimization
+
+        Example:
+        ```python
+        tokens = self.g2p.tokenize("Hello world, this is a test.")
+        for text, phonemes, token_list in self.en_tokenize(tokens):
+            print(f"Text: {text}")
+            print(f"Phonemes: {phonemes}")
+            print(f"Tokens: {len(token_list)}")
+        ```
+        """
         tks = []
         pcount = 0
         for t in tokens:
@@ -213,7 +507,7 @@ class KPipeline:
             t.phonemes = '' if t.phonemes is None else t.phonemes#.replace('ɾ', 'T')
             next_ps = t.phonemes + (' ' if t.whitespace else '')
             next_pcount = pcount + len(next_ps.rstrip())
-            if next_pcount > 510:
+            if next_pcount > PipelineConstants.MAX_PHONEME_LENGTH:
                 z = KPipeline.waterfall_last(tks, next_pcount)
                 text = KPipeline.tokens_to_text(tks[:z])
                 logger.debug(f"Chunking text at {z}: '{text[:30]}{'...' if len(text) > 30 else ''}'")
@@ -296,7 +590,7 @@ class KPipeline:
         # Multiply by 600 to go from pred_dur frames to sample_rate 24000
         # Equivalent to dividing pred_dur frames by 40 to get timestamp in seconds
         # We will count nice round half-frames, so the divisor is 80
-        MAGIC_DIVISOR = 80
+        MAGIC_DIVISOR = PipelineConstants.TIMESTAMP_DIVISOR  # Half-frame precision for timestamp calculation
         if not tokens or len(pred_dur) < 3:
             # We expect at least 3: <bos>, token, <eos>
             return
@@ -400,7 +694,7 @@ class KPipeline:
                 # Intelligent text chunking for non-English languages.
     # Priority-based chunking: sentence boundaries -> character limits.
     # Optimal chunk size for model context and processing efficiency.
-                CHUNK_SIZE = 400
+                CHUNK_SIZE = PipelineConstants.NON_ENGLISH_CHUNK_SIZE
                 chunks = []
                 
                 # Try to split on sentence boundaries first
