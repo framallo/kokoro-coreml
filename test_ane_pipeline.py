@@ -81,11 +81,21 @@ except ImportError:
     SOUNDFILE_AVAILABLE = False
     print("ℹ️ soundfile not available - audio saving will be skipped")
 
+import json
+import subprocess
+from datetime import datetime
+
 BASE_DIR = Path(__file__).parent
 # Check if CoreML conversion worked (resolve relative to this file)
 COREML_MODEL_PATH = str(BASE_DIR / "coreml" / "KokoroVocoder.mlpackage")
 COREML_DECODER_HAR_PATH = str(BASE_DIR / "coreml" / "KokoroDecoder_HAR.mlpackage")
-COREML_AVAILABLE = os.path.exists(COREML_MODEL_PATH) or os.path.exists(COREML_DECODER_HAR_PATH)
+# Phase 1-specific decoder-only 5s bucket
+COREML_DECODER_ONLY_5S_PATH = str(BASE_DIR / "coreml" / "kokoro_decoder_only_5s.mlpackage")
+COREML_AVAILABLE = (
+    os.path.exists(COREML_MODEL_PATH)
+    or os.path.exists(COREML_DECODER_HAR_PATH)
+    or os.path.exists(COREML_DECODER_ONLY_5S_PATH)
+)
 
 if COREML_AVAILABLE:
     try:
@@ -204,6 +214,38 @@ class HybridPipelineConstants:
     PERFORMANCE_LOGGING = True             # Enable RTF and timing measurements
     MEMORY_PROFILING = False               # Enable memory usage tracking (development only)
     DEBUG_SAVE_INTERMEDIATES = False       # Save intermediate tensors for debugging
+
+class Phase1Constants:
+    """
+    Constants for Phase 1: Python proof-of-concept using a decoder-only 5s CoreML bucket.
+    These values are explicitly defined here to avoid magic numbers and to
+    provide a single source of truth for documentation and maintenance.
+
+    Used by:
+    - run_phase1_demo: End-to-end Phase 1 execution and artifact generation
+    - _phase1_save_artifacts: File naming and metadata generation
+    - _phase1_plot_mel: Mel spectrogram rendering configuration
+    """
+    # Fixed model info
+    DECODER_ONLY_MODEL_NAME = "kokoro_decoder_only_5s.mlpackage"
+    BUCKET_SECONDS = 5
+    SAMPLE_RATE = 24000
+
+    # Target test sentence from implementation plan
+    TEST_SENTENCE = (
+        "Hello Matt, this is Kokoro running on Apple Neural Engine."
+    )
+
+    # Mel-spectrogram visualization parameters
+    MEL_N_MELS = 80
+    MEL_HOP_LENGTH = 300
+    MEL_N_FFT = 1024
+    MEL_FMIN = 0
+    MEL_FMAX = 12000
+
+    # Output layout
+    OUTPUT_ROOT = "outputs"
+    OUTPUT_PHASE_DIR = "phase1"
 
 class HybridTTSPipeline:
     """
@@ -371,6 +413,12 @@ class HybridTTSPipeline:
             try:
                 self.coreml_vocoder = ct.models.MLModel(COREML_MODEL_PATH) if os.path.exists(COREML_MODEL_PATH) else None
                 self.coreml_decoder_har = ct.models.MLModel(COREML_DECODER_HAR_PATH) if os.path.exists(COREML_DECODER_HAR_PATH) else None
+                # Phase 1: decoder-only 5s bucket
+                self.coreml_decoder_only_5s = (
+                    ct.models.MLModel(COREML_DECODER_ONLY_5S_PATH)
+                    if os.path.exists(COREML_DECODER_ONLY_5S_PATH)
+                    else None
+                )
                 # Load synthesizer bucket models if present (search local and parent coreml dirs)
                 import glob
                 self.coreml_synth_buckets = {}
@@ -411,6 +459,8 @@ class HybridTTSPipeline:
                     print("✅ CoreML vocoder loaded successfully")
                 if self.coreml_decoder_har is not None:
                     print("✅ CoreML Decoder_HAR loaded successfully (exact hn-nsf parity)")
+                if getattr(self, 'coreml_decoder_only_5s', None) is not None:
+                    print("✅ CoreML decoder-only 5s bucket loaded successfully")
                 
                 # Print vocoder specifications
                 print("\n📋 CoreML Vocoder Info:")
@@ -429,7 +479,11 @@ class HybridTTSPipeline:
             self.use_coreml = False
             
         # Consider bucket models as CoreML availability
-        if getattr(self, 'coreml_synth_buckets', None) or getattr(self, 'coreml_decoder_har_buckets', None):
+        if (
+            getattr(self, 'coreml_synth_buckets', None)
+            or getattr(self, 'coreml_decoder_har_buckets', None)
+            or getattr(self, 'coreml_decoder_only_5s', None)
+        ):
             self.use_coreml = True
             print(f"✅ Buckets → synth: {len(getattr(self, 'coreml_synth_buckets', {}))}, decoder_har: {len(getattr(self, 'coreml_decoder_har_buckets', {}))}")
         print(f"\n🎯 Pipeline Mode: {'Hybrid (PyTorch + CoreML)' if self.use_coreml else 'PyTorch Only'}")
@@ -563,6 +617,106 @@ class HybridTTSPipeline:
             print("❌ CoreML Decoder_HAR not available")
             return None
         # Existing windowed path retained below
+
+    def run_coreml_decoder_only_5s(self, vocoder_inputs):
+        """
+        Run the decoder-only CoreML model for the fixed 5s bucket.
+
+        Inputs must include: 'asr' (1, 512, T_asr), 'f0_curve' (1, T_f0), 'n' (1, T_f0), 's' (1, 128).
+        The CoreML model will specify exact fixed temporal lengths. We pad/truncate accordingly.
+        Returns float32 1D waveform trimmed to 5 seconds (24000 Hz).
+        """
+        model = getattr(self, 'coreml_decoder_only_5s', None)
+        if model is None:
+            print("❌ Decoder-only 5s model not available")
+            return None
+
+        try:
+            spec = model.get_spec()
+            # Map expected shapes by simple name contains check
+            input_shapes = {i.name: i.type.multiArrayType.shape for i in spec.description.input}
+            # Resolve keys
+            def find_key(keys):
+                for k in input_shapes.keys():
+                    for kk in keys:
+                        if kk in k:
+                            return k
+                return None
+            asr_key = find_key(["asr", "ASR", "text_feat"]) or "asr"
+            f0_key = find_key(["f0", "F0"]) or "f0_curve"
+            n_key = find_key(["n", "noise"]) or "n"
+            s_key = find_key(["s", "style"]) or "s"
+
+            asr_shape = tuple(int(x) for x in input_shapes[asr_key])
+            f0_shape = tuple(int(x) for x in input_shapes[f0_key])
+            n_shape = tuple(int(x) for x in input_shapes[n_key])
+            s_shape = tuple(int(x) for x in input_shapes[s_key])
+
+            # Prepare inputs with padding/truncation
+            asr = vocoder_inputs['asr'].astype(np.float32)
+            f0 = vocoder_inputs['f0_curve'].astype(np.float32)
+            n = vocoder_inputs['n'].astype(np.float32)
+            s = vocoder_inputs['s'].astype(np.float32)
+
+            def pad_trunc(x, target_shape):
+                out = np.zeros(target_shape, dtype=np.float32)
+                slices = tuple(slice(0, min(x.shape[i], target_shape[i])) for i in range(len(target_shape)))
+                out[slices] = x[tuple(slice(0, s.stop) for s in slices)]
+                return out
+
+            # CoreML often expects 4D for conv inputs: (B, C, 1, T) or similar
+            def ensure_asr_shape(x, target_shape):
+                # x is (1, 512, T), target maybe (1,512,1,T_fixed) or (1,512,T_fixed)
+                if len(target_shape) == 4:
+                    tgt = (target_shape[0], target_shape[1], target_shape[2], target_shape[3])
+                    tmp = np.zeros(tgt, dtype=np.float32)
+                    T = min(x.shape[-1], tgt[-1])
+                    if tgt[2] == 1:
+                        tmp[:, :, 0, :T] = x[:, :, :T]
+                    else:
+                        # If channels-last, attempt reasonable mapping
+                        tmp[:, :, :T, 0] = x[:, :, :T]
+                    return tmp
+                return pad_trunc(x, target_shape)
+
+            def ensure_1x1xT(x, target_shape):
+                # x is (1, T)
+                if len(target_shape) == 4:
+                    tmp = np.zeros(target_shape, dtype=np.float32)
+                    T = min(x.shape[-1], target_shape[-1])
+                    tmp[:, 0, 0, :T] = x[:, :T]
+                    return tmp
+                elif len(target_shape) == 2:
+                    return pad_trunc(x, target_shape)
+                else:
+                    # Fallback to last-dim padding
+                    out = np.zeros(target_shape, dtype=np.float32)
+                    T = min(x.shape[-1], target_shape[-1])
+                    out.reshape(-1)[0:T] = x.reshape(-1)[0:T]
+                    return out
+
+            asr_cm = ensure_asr_shape(asr, asr_shape)
+            f0_cm = ensure_1x1xT(f0, f0_shape)
+            n_cm = ensure_1x1xT(n, n_shape)
+            # Style embedding usually 2D (1,128)
+            s_cm = pad_trunc(s, s_shape)
+
+            inputs = {asr_key: asr_cm, f0_key: f0_cm, n_key: n_cm, s_key: s_cm}
+            start = time.time()
+            res = model.predict(inputs)
+            coreml_time = time.time() - start
+            # First output key
+            out_key = list(res.keys())[0]
+            audio = res[out_key].squeeze().astype(np.float32)
+            # Trim strictly to 5 seconds
+            target_len = Phase1Constants.BUCKET_SECONDS * Phase1Constants.SAMPLE_RATE
+            audio = audio[:target_len]
+            return audio, coreml_time
+        except Exception as e:
+            print(f"❌ Decoder-only 5s inference failed: {e}")
+            import traceback
+            traceback.print_exc()
+            return None
 
     def _select_bucket_seconds(self, total_seconds: float) -> int | None:
         """Pick the smallest available bucket >= total_seconds from any loaded bucket set."""
@@ -1065,6 +1219,18 @@ class HybridTTSPipeline:
         print(f"\n🎵 Synthesizing: '{text}' (voice: {voice}, speed: {speed}x)")
         
         if self.use_coreml:
+            # Phase 1 priority: decoder-only 5s bucket if available
+            vocoder_inputs = None
+            if getattr(self, 'coreml_decoder_only_5s', None) is not None:
+                vocoder_inputs = self.extract_vocoder_inputs(text, voice, speed)
+                if vocoder_inputs is not None:
+                    res = self.run_coreml_decoder_only_5s(vocoder_inputs)
+                    if isinstance(res, tuple):
+                        audio, _ = res
+                    else:
+                        audio = res
+                    if audio is not None:
+                        return audio, 24000
             # Prefer single-shot buckets
             audio = self.run_coreml_synth_bucket(text, voice, speed)
             if audio is not None:
@@ -1131,6 +1297,156 @@ def check_ane_usage():
     except Exception as e:
         print(f"❌ Error checking ANE usage: {e}")
 
+def _phase1_plot_mel(audio: np.ndarray, out_png: Path):
+    """
+    Save a mel spectrogram image for the provided audio using the Phase 1 parameters.
+    Tries librosa + matplotlib; skips gracefully if dependencies unavailable.
+    """
+    try:
+        import librosa
+        import librosa.display  # noqa
+        import matplotlib.pyplot as plt
+
+        sr = Phase1Constants.SAMPLE_RATE
+        S = librosa.feature.melspectrogram(
+            y=audio,
+            sr=sr,
+            n_fft=Phase1Constants.MEL_N_FFT,
+            hop_length=Phase1Constants.MEL_HOP_LENGTH,
+            n_mels=Phase1Constants.MEL_N_MELS,
+            fmin=Phase1Constants.MEL_FMIN,
+            fmax=Phase1Constants.MEL_FMAX,
+            power=2.0,
+        )
+        S_db = librosa.power_to_db(S, ref=np.max)
+        plt.figure(figsize=(10, 4))
+        plt.imshow(S_db, aspect='auto', origin='lower', interpolation='nearest', cmap='magma')
+        plt.colorbar(format='%+2.0f dB')
+        plt.title('Mel Spectrogram')
+        plt.tight_layout()
+        plt.savefig(out_png)
+        plt.close()
+        print(f"  📈 Saved mel spectrogram: {out_png}")
+    except Exception as e:
+        print(f"  ⚠️ Skipping mel spectrogram (missing deps?): {e}")
+
+def _phase1_save_wav(audio: np.ndarray, out_wav: Path, sample_rate: int):
+    """Save audio to WAV using soundfile if available, else wave module fallback."""
+    try:
+        if SOUNDFILE_AVAILABLE:
+            sf.write(str(out_wav), audio, sample_rate)
+        else:
+            import wave
+            import struct
+            # Normalize to int16 for basic wave writing
+            maxv = np.max(np.abs(audio)) + 1e-9
+            pcm = np.clip(audio / maxv, -1.0, 1.0)
+            pcm = (pcm * 32767.0).astype(np.int16)
+            with wave.open(str(out_wav), 'wb') as wf:
+                wf.setnchannels(1)
+                wf.setsampwidth(2)
+                wf.setframerate(sample_rate)
+                wf.writeframes(pcm.tobytes())
+        print(f"  💾 Saved audio: {out_wav}")
+    except Exception as e:
+        print(f"  ❌ Failed to save WAV: {e}")
+
+def _phase1_play_audio(out_wav: Path):
+    """Play WAV via afplay if available; fallback to simpleaudio; else skip."""
+    try:
+        # Try afplay on macOS
+        subprocess.run(["afplay", str(out_wav)], check=False)
+    except Exception:
+        try:
+            import simpleaudio as sa
+            import soundfile as sf2
+            audio, sr = sf2.read(str(out_wav), dtype='float32')
+            sa.play_buffer((audio * 32767).astype(np.int16), 1, 2, sr)
+        except Exception as e:
+            print(f"  ⚠️ Audio playback skipped: {e}")
+
+def run_phase1_demo():
+    """
+    Phase 1 end-to-end demo per README/implementation-plan.md:
+    - Compute pre-decoder features in Python (phonemizer, durations, alignment)
+    - Run decoder-only CoreML model kokoro_decoder_only_5s.mlpackage
+    - Measure and report latencies
+    - Save output.wav, mel_spectrogram.png, metadata.json under outputs/phase1/<timestamp>/
+    - Play audio via afplay if available
+    """
+    print("\n🧪 Running Phase 1 (decoder-only 5s) demo...")
+    text = Phase1Constants.TEST_SENTENCE
+    voice = HybridPipelineConstants.BENCHMARK_VOICE_DEFAULT
+
+    # Initialize pipeline with CoreML enabled so model loads are attempted
+    pipeline = HybridTTSPipeline(force_engine='coreml')
+    if getattr(pipeline, 'coreml_decoder_only_5s', None) is None:
+        print(f"❌ Missing {Phase1Constants.DECODER_ONLY_MODEL_NAME}.\n   Place it at: {BASE_DIR / 'coreml' / Phase1Constants.DECODER_ONLY_MODEL_NAME}")
+        return False
+
+    # Pre-decoder timing
+    t0 = time.time()
+    vi = pipeline.extract_vocoder_inputs(text, voice=voice, speed=1.0)
+    t1 = time.time()
+    if vi is None:
+        print("❌ Failed to compute pre-decoder features")
+        return False
+
+    # CoreML inference timing
+    coreml_result = pipeline.run_coreml_decoder_only_5s(vi)
+    if isinstance(coreml_result, tuple):
+        audio, coreml_time = coreml_result
+    else:
+        audio, coreml_time = coreml_result, None
+    if audio is None:
+        print("❌ CoreML decoder-only inference failed")
+        return False
+    t2 = time.time()
+
+    # Prepare output directory
+    ts = datetime.now().strftime('%Y%m%d_%H%M%S')
+    out_dir = Path(Phase1Constants.OUTPUT_ROOT) / Phase1Constants.OUTPUT_PHASE_DIR / ts
+    out_dir.mkdir(parents=True, exist_ok=True)
+    out_wav = out_dir / 'output.wav'
+    out_png = out_dir / 'mel_spectrogram.png'
+    out_json = out_dir / 'metadata.json'
+
+    # Save artifacts
+    _phase1_save_wav(audio, out_wav, Phase1Constants.SAMPLE_RATE)
+    _phase1_plot_mel(audio, out_png)
+
+    # Metadata
+    meta = {
+        'input_text': text,
+        'bucket_seconds': Phase1Constants.BUCKET_SECONDS,
+        'model': Phase1Constants.DECODER_ONLY_MODEL_NAME,
+        'sample_rate': Phase1Constants.SAMPLE_RATE,
+        'mel_params': {
+            'n_mels': Phase1Constants.MEL_N_MELS,
+            'hop_length': Phase1Constants.MEL_HOP_LENGTH,
+            'n_fft': Phase1Constants.MEL_N_FFT,
+            'fmin': Phase1Constants.MEL_FMIN,
+            'fmax': Phase1Constants.MEL_FMAX,
+        },
+        'latency_seconds': {
+            'pre_decoder': t1 - t0,
+            'coreml_inference': coreml_time if coreml_time is not None else (t2 - t1),
+            'total': t2 - t0,
+        },
+    }
+    try:
+        out_json.write_text(json.dumps(meta, indent=2))
+        print(f"  📝 Saved metadata: {out_json}")
+    except Exception as e:
+        print(f"  ⚠️ Failed to save metadata.json: {e}")
+
+    # Playback
+    _phase1_play_audio(out_wav)
+
+    print(f"\n🎉 Phase 1 complete. Artifacts: {out_dir}")
+    return True
+
+
 def run_performance_test(pipeline, test_texts):
     """
     Run performance benchmarks comparing different pipeline modes.
@@ -1194,7 +1510,13 @@ def main():
     print("=" * 50)
     parser = argparse.ArgumentParser()
     parser.add_argument('--engine', choices=['pytorch', 'coreml'], default='pytorch')
+    parser.add_argument('--phase1', action='store_true', help='Run Phase 1 decoder-only 5s demo and save artifacts')
     args = parser.parse_args()
+
+    # Phase 1 execution path
+    if args.phase1:
+        ok = run_phase1_demo()
+        return
 
     # Initialize pipeline
     try:
