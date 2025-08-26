@@ -1,5 +1,60 @@
 # Kokoro TTS Core ML Conversion: A Playbook
 
+## 2025‑08‑26 — Exact Audio Parity: Root Cause and Fix
+
+### Symptoms observed
+- "Chipmunk/fast‑forward cassette" artifact or high‑frequency static when playing synthesized audio from the Swift app.
+
+### Root cause(s)
+- Wrong model path executed by the Swift app. We unintentionally ran the fallback windowed vocoder (`KokoroVocoder.mlpackage`) instead of the high‑fidelity HAR decoder (`KokoroDecoder_HAR_5s.mlpackage`).
+  - Evidence: `outputs/.../YYYY‑MM‑DDTHH‑MM‑SSZ.json` showed `"model": "KokoroVocoder.mlpackage"` while the golden reference uses `"model": "KokoroDecoder_HAR_5s.mlpackage"`.
+- HAR path in Swift is explicitly gated by `USE_DECODER_HAR=1`. If the environment variable is not set at process launch, the app correctly falls back to the windowed vocoder.
+- Inverse STFT parity: attempting to reconstruct HAR latent in pure Swift is fragile. Any mismatch in nFFT, hop, center padding, DC/Nyquist handling, or channel ordering yields time‑scaling artifacts (chipmunking).
+- Mel CSV baseline mismatch: our Swift mel uses HTK mel + linear power; the original golden CSV was librosa Slaney mel + dB. That hindered apples‑to‑apples comparisons.
+- Potential but non‑blocking: windowed vocoder slicing can scramble features if ASR flattening order is misinterpreted (assuming [Channels, Time] vs [Time, Channels]). The HAR path processes the whole segment and avoids this vectorization pitfall entirely.
+
+### Fix implemented (Hybrid path: ANE for decode, Python for iSTFT)
+- Keep the ANE‑accelerated Core ML step for `Decoder_HAR` in Swift.
+- When `Decoder_HAR` outputs a 2D latent, save it to CSV and call a minimal Python helper that uses the exact PyTorch `CustomSTFT.inverse` (same one as golden) to reconstruct the waveform.
+- Result: Audio parity with the golden reference while keeping the heavy decode on ANE.
+
+### How to run (verified)
+1) Generate inputs with HAR features:
+```bash
+python3 tools/dump_vocoder_inputs.py
+```
+2) Ensure the HAR model exists for the Swift target:
+```bash
+cp coreml/KokoroDecoder_HAR_5s.mlpackage Swift/KokoroPhase2/Resources/  # if not already present
+```
+3) Run the Swift app with HAR enabled:
+```bash
+USE_DECODER_HAR=1 swift build -c release --package-path Swift/KokoroPhase2
+USE_DECODER_HAR=1 Swift/KokoroPhase2/.build/release/KokoroPhase2
+```
+4) Validate the run:
+   - The run directory `outputs/…/…Z.json` should show `"model": "KokoroDecoder_HAR_5s.mlpackage"`.
+   - Audio should match golden perceptually (and numerically within tolerance of i/o formatting).
+
+### Mel CSV baseline alignment
+- We standardized the baseline by regenerating a golden mel CSV with the same pipeline used in Swift (HTK mel + linear power):
+  - `outputs/golden/golden2.csv` now reflects the Swift mel configuration.
+  - Use this file for apples‑to‑apples comparisons with new runs.
+
+### Lessons learned
+- Simpler is better (again): split responsibilities cleanly.
+  - Let ANE execute the Core ML model.
+  - Let Python’s proven `CustomSTFT.inverse` do reconstruction until the Swift port is exact.
+- Always assert the executed model in metadata and gate high‑fidelity paths behind explicit flags. A single missing env var can send you down a noisy fallback.
+- Respect data contracts:
+  - Use Float32 end‑to‑end; no `Double` arrays anywhere near `MLMultiArray(.float32)`.
+  - Honor `MLMultiArray.strides` when reading 2D tensors.
+  - When bucketing or windowing, be explicit about `[Channels, Time]` vs `[Time, Channels]` layout to avoid feature scrambling.
+
+### Next steps (tracked)
+- Port `CustomSTFT.inverse` to Swift (vDSP/Metal) with exact parity tests against Python for nFFT/hop/center/window and DC/Nyquist handling.
+- Harden windowed vocoder slicing by asserting ASR flattening layout and adding unit tests.
+
 This document captures the key challenges, architectural pivots, and solutions discovered while converting the Kokoro TTS model from PyTorch to Core ML for on-device inference on Apple Silicon. It is a living document intended as a practical engineering guide.
 
 ## 1. The Core Problem: Dynamic Shapes vs. Static Graphs

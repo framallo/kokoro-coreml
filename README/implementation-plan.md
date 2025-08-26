@@ -68,3 +68,12 @@ Goal: Convert Kokoro TTS to run fast (<2sec latency) on Apple Neural Engine usin
     4.  **Create Swift Package:** Extract the core synthesis pipeline into a new Swift Package target.
     5.  **Define Public API:** Create a clean, simple public API for the package (e.g., `Kokoro.synthesize(text: String)`).
     6.  **Update Test App:** Modify the macOS test app to consume the new Swift Package, demonstrating its usage. 
+
+
+## Implementation Progress
+
+// Update below
+
+- Phase 1: Completed
+- Phase 2: In Progress - Hybrid HAR decode on ANE with Python iSTFT reconstruction wired; audio parity validation pending
+- Phase 3: Not Started
