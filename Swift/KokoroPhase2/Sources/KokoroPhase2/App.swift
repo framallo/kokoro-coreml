@@ -337,6 +337,33 @@ func reconstructWaveformFromDecoderHAROutput(xChannelsByTime: [[Float]], nFFT: I
 @main
 struct App {
     static func main() throws {
+        // Special mode: compute mel CSV from an existing WAV file using the same HTK mel + linear power
+        if let melWavPath = ProcessInfo.processInfo.environment["MEL_WAV_PATH"], !melWavPath.isEmpty {
+            let wavURL = URL(fileURLWithPath: melWavPath)
+            // Simple 16-bit PCM mono reader (assumes standard 44-byte header)
+            let data = try Data(contentsOf: wavURL)
+            guard data.count > 44 else { throw NSError(domain: "kokoro.mel", code: -10, userInfo: [NSLocalizedDescriptionKey: "WAV too short"])}
+            // Parse sample rate (bytes 24..27 little-endian)
+            let sr: Int = data.withUnsafeBytes { raw in
+                let p = raw.bindMemory(to: UInt8.self).baseAddress!
+                let b0 = Int(p[24]), b1 = Int(p[25]), b2 = Int(p[26]), b3 = Int(p[27])
+                return b0 | (b1 << 8) | (b2 << 16) | (b3 << 24)
+            }
+            // Read PCM int16 samples from offset 44
+            let pcm = data.dropFirst(44)
+            let samplesI16: [Int16] = pcm.withUnsafeBytes { raw in
+                let buf = raw.bindMemory(to: Int16.self)
+                return Array(buf)
+            }
+            let audio = samplesI16.map { Float($0) / 32767.0 }
+            let mel = melSpectrogram(audio: audio, sampleRate: sr, nFFT: 1024, hop: 300, nMels: 80, fmin: 0, fmax: 12000)
+            let outCSV = URL(fileURLWithPath: FileManager.default.currentDirectoryPath)
+                .appendingPathComponent("outputs/golden/golden2.csv")
+            try FileManager.default.createDirectory(at: outCSV.deletingLastPathComponent(), withIntermediateDirectories: true)
+            try saveMatrixCSV(rows: mel.count, cols: mel.first?.count ?? 0, value: { r, c in mel[r][c] }, url: outCSV)
+            print("Saved: \(outCSV.path)")
+            return
+        }
         // Load JSON inputs prepared by Phase 1
         let inputsURL = locateResource(named: "inputs_vocoder.json")
         let data = try Data(contentsOf: inputsURL)
