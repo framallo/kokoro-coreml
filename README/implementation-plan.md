@@ -20,6 +20,7 @@ Goal: Convert Kokoro TTS to run fast (<2sec latency) on Apple Neural Engine usin
     3.  **Define Output Format:** The output folder should contain:
         -   `output.wav`: The synthesized audio.
         -   `mel_spectrogram.png`: A plot of the mel spectrogram.
+        -   `mel_spectrogram.csv`: A csv containing all the mel spectrogram values.
         -   `metadata.json`: A file containing input text, bucket size, and detailed latency measurements.
     4.  **Validate:** Confirm that the output audio is high-quality and the pipeline runs correctly on a Mac.
 

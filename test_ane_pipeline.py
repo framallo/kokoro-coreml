@@ -1443,6 +1443,27 @@ def _phase1_play_audio(out_wav: Path):
         except Exception as e:
             print(f"  ⚠️ Audio playback skipped: {e}")
 
+def _phase1_save_mel_csv(audio: np.ndarray, out_csv: Path):
+    """Save mel spectrogram values as CSV with Phase 1 parameters (80 x T)."""
+    try:
+        import librosa
+        sr = Phase1Constants.SAMPLE_RATE
+        S = librosa.feature.melspectrogram(
+            y=audio,
+            sr=sr,
+            n_fft=Phase1Constants.MEL_N_FFT,
+            hop_length=Phase1Constants.MEL_HOP_LENGTH,
+            n_mels=Phase1Constants.MEL_N_MELS,
+            fmin=Phase1Constants.MEL_FMIN,
+            fmax=Phase1Constants.MEL_FMAX,
+            power=2.0,
+        )
+        # Save as 80 rows x T columns
+        np.savetxt(str(out_csv), S, delimiter=",")
+        print(f"  🧾 Saved mel CSV: {out_csv}")
+    except Exception as e:
+        print(f"  ⚠️ Skipping mel CSV (missing deps?): {e}")
+
 def run_phase1_demo():
     """
     Phase 1 end-to-end demo per README/implementation-plan.md:
@@ -1491,17 +1512,20 @@ def run_phase1_demo():
         return False
     t2 = time.time()
 
-    # Prepare output directory
+    # Prepare output directory: outputs/[timestamp]/[timestamp].{wav,png,json,csv}
     ts = datetime.now().strftime('%Y%m%d_%H%M%S')
-    out_dir = Path(Phase1Constants.OUTPUT_ROOT) / Phase1Constants.OUTPUT_PHASE_DIR / ts
+    out_dir = Path(Phase1Constants.OUTPUT_ROOT) / ts
     out_dir.mkdir(parents=True, exist_ok=True)
-    out_wav = out_dir / 'output.wav'
-    out_png = out_dir / 'mel_spectrogram.png'
-    out_json = out_dir / 'metadata.json'
+    base = out_dir / ts
+    out_wav = base.with_suffix('.wav')
+    out_png = base.with_suffix('.png')
+    out_json = base.with_suffix('.json')
+    out_csv = base.with_suffix('.csv')
 
     # Save artifacts
     _phase1_save_wav(audio, out_wav, Phase1Constants.SAMPLE_RATE)
     _phase1_plot_mel(audio, out_png)
+    _phase1_save_mel_csv(audio, out_csv)
 
     # Metadata
     meta = {
@@ -1521,6 +1545,11 @@ def run_phase1_demo():
             'coreml_inference': coreml_time if coreml_time is not None else (t2 - t1),
             'total': t2 - t0,
         },
+        'artifacts': {
+            'wav': out_wav.name,
+            'png': out_png.name,
+            'csv': out_csv.name,
+        }
     }
     try:
         out_json.write_text(json.dumps(meta, indent=2))
