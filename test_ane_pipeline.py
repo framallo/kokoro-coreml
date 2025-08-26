@@ -247,6 +247,84 @@ class Phase1Constants:
     OUTPUT_ROOT = "outputs"
     OUTPUT_PHASE_DIR = "phase1"
 
+def _ensure_decoder_only_5s_model() -> str | None:
+    """
+    Ensure the Phase 1 decoder-only 5s CoreML model exists. If missing, export it.
+
+    Creates a fixed-shape CoreML model that wraps the Kokoro decoder (vocoder)
+    with inputs: asr(1,512,1,200), f0(1,1,1,400), n(1,1,1,400), s(1,128) and
+    outputs a 5s waveform at 24 kHz. Saved at coreml/kokoro_decoder_only_5s.mlpackage.
+
+    Returns:
+        str | None: Absolute path to the model if available/created, else None.
+    """
+    try:
+        target_path = (BASE_DIR / "coreml" / Phase1Constants.DECODER_ONLY_MODEL_NAME)
+        if target_path.exists():
+            return str(target_path)
+
+        print("\n📦 Missing decoder-only 5s model. Exporting on-demand...")
+        # Local import to avoid module-level coupling
+        import torch
+        import numpy as np
+        import coremltools as ct
+        from kokoro import KModel
+
+        # Load PyTorch model and extract decoder
+        model = KModel(disable_complex=True).to('cpu').eval()
+        decoder = model.decoder
+
+        # Minimal wrapper to adapt CoreML-friendly 4D inputs to decoder interface
+        class _DecoderWrapper(torch.nn.Module):
+            def __init__(self, dec: torch.nn.Module):
+                super().__init__()
+                self.dec = dec
+            def forward(self, asr_4d: torch.Tensor, f0_4d: torch.Tensor, n_4d: torch.Tensor, s: torch.Tensor):
+                asr = asr_4d.squeeze(2)               # (1,512,1,T) -> (1,512,T)
+                f0 = f0_4d.squeeze(2).squeeze(1)      # (1,1,1,T) -> (1,T)
+                n = n_4d.squeeze(2).squeeze(1)        # (1,1,1,T) -> (1,T)
+                return self.dec(asr, f0, n, s)
+
+        wrapper = _DecoderWrapper(decoder).eval()
+
+        # Fixed 5s shapes: 80 fps → f0_len=400, asr downsampled 2x → 200
+        asr_len = 200
+        f0_len = 400
+        # Create representative dummy inputs
+        ex_asr = torch.zeros(1, 512, 1, asr_len, dtype=torch.float32)
+        ex_f0  = torch.zeros(1, 1, 1, f0_len, dtype=torch.float32)
+        ex_n   = torch.zeros(1, 1, 1, f0_len, dtype=torch.float32)
+        ex_s   = torch.zeros(1, 128, dtype=torch.float32)
+
+        with torch.no_grad():
+            traced = torch.jit.trace(wrapper, (ex_asr, ex_f0, ex_n, ex_s), strict=False)
+
+        # Convert to CoreML (mlprogram, FP16, ALL compute units)
+        ml = ct.convert(
+            traced,
+            inputs=[
+                ct.TensorType(name="asr", shape=(1, 512, 1, asr_len), dtype=np.float32),
+                ct.TensorType(name="f0_curve", shape=(1, 1, 1, f0_len), dtype=np.float32),
+                ct.TensorType(name="n", shape=(1, 1, 1, f0_len), dtype=np.float32),
+                ct.TensorType(name="s", shape=(1, 128), dtype=np.float32),
+            ],
+            convert_to="mlprogram",
+            minimum_deployment_target=ct.target.macOS13,
+            compute_precision=ct.precision.FLOAT16,
+            compute_units=ct.ComputeUnit.ALL,
+        )
+
+        # Ensure coreml directory exists and save
+        (BASE_DIR / "coreml").mkdir(parents=True, exist_ok=True)
+        ml.save(str(target_path))
+        print(f"✅ Exported decoder-only 5s CoreML model → {target_path}")
+        return str(target_path)
+    except Exception as e:
+        print(f"❌ Failed to export decoder-only 5s model: {e}")
+        import traceback
+        traceback.print_exc()
+        return None
+
 class HybridTTSPipeline:
     """
     Production-ready hybrid TTS pipeline optimizing compute unit utilization for maximum performance.
@@ -1378,11 +1456,10 @@ def run_phase1_demo():
     text = Phase1Constants.TEST_SENTENCE
     voice = HybridPipelineConstants.BENCHMARK_VOICE_DEFAULT
 
+    # Ensure the decoder-only 5s model exists (export on-demand if needed)
+    _ = _ensure_decoder_only_5s_model()
     # Initialize pipeline with CoreML enabled so model loads are attempted
     pipeline = HybridTTSPipeline(force_engine='coreml')
-    if getattr(pipeline, 'coreml_decoder_only_5s', None) is None:
-        print(f"❌ Missing {Phase1Constants.DECODER_ONLY_MODEL_NAME}.\n   Place it at: {BASE_DIR / 'coreml' / Phase1Constants.DECODER_ONLY_MODEL_NAME}")
-        return False
 
     # Pre-decoder timing
     t0 = time.time()
@@ -1394,12 +1471,23 @@ def run_phase1_demo():
 
     # CoreML inference timing
     coreml_result = pipeline.run_coreml_decoder_only_5s(vi)
+    model_used = Phase1Constants.DECODER_ONLY_MODEL_NAME
     if isinstance(coreml_result, tuple):
         audio, coreml_time = coreml_result
     else:
         audio, coreml_time = coreml_result, None
     if audio is None:
-        print("❌ CoreML decoder-only inference failed")
+        print("⚠️ Decoder-only unavailable. Trying Decoder_HAR bucket...")
+        # Try HAR bucket path with CoreML models present in coreml/
+        # Estimate seconds from F0 length and predict bucket
+        T_f0 = int(vi['f0_curve'].shape[-1])
+        total_seconds = T_f0 / 80.0
+        sec_guess = pipeline._select_bucket_seconds(total_seconds) or 'unknown'
+        audio = pipeline.run_coreml_decoder_har_bucket(text, voice=voice, speed=1.0)
+        model_used = f"KokoroDecoder_HAR_{sec_guess}s.mlpackage" if sec_guess != 'unknown' else "KokoroDecoder_HAR_bucket"
+        coreml_time = None
+    if audio is None:
+        print("❌ CoreML decoder-only/HAR-bucket inference failed")
         return False
     t2 = time.time()
 
@@ -1419,7 +1507,7 @@ def run_phase1_demo():
     meta = {
         'input_text': text,
         'bucket_seconds': Phase1Constants.BUCKET_SECONDS,
-        'model': Phase1Constants.DECODER_ONLY_MODEL_NAME,
+        'model': model_used,
         'sample_rate': Phase1Constants.SAMPLE_RATE,
         'mel_params': {
             'n_mels': Phase1Constants.MEL_N_MELS,
