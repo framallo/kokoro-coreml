@@ -13,7 +13,7 @@ Goal: Convert Kokoro TTS to run fast (<2sec latency) on Apple Neural Engine usin
     2.  **Create E2E "Golden Reference" Script:** Develop a script (`test_ane_pipeline.py`) that:
         -   Takes the text "Hello Matt, this is Kokoro running on Apple Neural Engine." as input.
         -   Executes the Python pre-decoder logic from the previous step.
-        -   **Crucially, it must feed the resulting features into a converted `.mlpackage` decoder-only CoreML model.** This validates the model and the client-side logic together.
+        -   **Crucially, it must feed the resulting features into the decoder-only CoreML model `kokoro_decoder_only_5s.mlpackage` (5s bucket).** Do not use the HAR variant or any full synthesizer model in Phase 1.
         -   Measures and logs latency for each component (pre-decoder vs. CoreML inference).
         -   Plays the audio aloud 
         -   Saves the output to a unique folder in `outputs/`.
@@ -22,6 +22,23 @@ Goal: Convert Kokoro TTS to run fast (<2sec latency) on Apple Neural Engine usin
         -   `mel_spectrogram.png`: A plot of the mel spectrogram.
         -   `metadata.json`: A file containing input text, bucket size, and detailed latency measurements.
     4.  **Validate:** Confirm that the output audio is high-quality and the pipeline runs correctly on a Mac.
+
+### Phase 1 Constraints and Specs
+
+- **Decoder-only model (locked):**
+  - Use only `kokoro_decoder_only_5s.mlpackage` (5s bucket) for CoreML inference.
+  - Do not use HAR variants (e.g., `KokoroDecoder_HAR*.mlpackage`) or end-to-end synthesizers (e.g., `kokoro_synthesizer_*.mlpackage`) in Phase 1. Using any other model would validate a different pipeline and invalidate this phase's premise.
+
+- **Mel spectrogram parameters (for `mel_spectrogram.png` visualization):**
+  - `n_mels=80`, `hop_length=300`, `n_fft=1024`, `fmin=0`, `fmax=12000`, sample rate `24000` Hz.
+  - These match our prior comparison artifacts (e.g., `golden_mels.csv`) and the model’s expectations (80 mel channels; 24000/300 = 80 fps).
+
+- **Audio playback (macOS):**
+  - Default: use `afplay` to play the synthesized WAV.
+  - Fallback: `simpleaudio` (or skip playback) if `afplay` is unavailable.
+
+- **Metadata (`metadata.json`) additions:**
+  - Include: `sample_rate`, `mel_params` (the values above), `model` (set to `kokoro_decoder_only_5s.mlpackage`), `bucket_seconds=5`, in addition to the existing fields (input text and latency breakdowns).
 
 ## Phase 2: Swift Test App (5s Bucket)
 *   **Objective:** Build a minimal Swift macOS app that replicates the Python PoC using CoreML on the Apple Neural Engine.
