@@ -61,8 +61,8 @@ Goal: Convert Kokoro TTS to run fast (<2sec latency) on Apple Neural Engine usin
     10. **Validate:** Test the app, compare the output `.wav` and latencies against the Python reference. Ensure it's running on the ANE.
 
 ## Phase 3: Multi-Bucket Support & Swift Package Conversion
-*   **Objective:** Extend the app to support multiple buckets (10s, 20s) and refactor the core logic into a distributable Swift Package.
-    1.  **Add 10s & 20s Buckets:** Integrate the CoreML models for the longer buckets.
+*   **Objective:** Extend the app to support multiple buckets (15s, 30s) and refactor the core logic into a distributable Swift Package.
+    1.  **Add 15s & 30s Buckets:** Integrate the CoreML models for the longer buckets.
     2.  **Refactor for Dynamic Buckets:** Implement logic to select the correct bucket based on input text length.
     3.  **Port Phonemizer:** Translate the Python text-to-phoneme logic to Swift, removing the hardcoded stub from Phase 2.
     4.  **Create Swift Package:** Extract the core synthesis pipeline into a new Swift Package target.
@@ -80,4 +80,14 @@ Goal: Convert Kokoro TTS to run fast (<2sec latency) on Apple Neural Engine usin
 ### Phase 2: Completed. 
  - The Swift test app now successfully replicates the golden reference pipeline. It uses a hybrid approach: the CoreML `Decoder_HAR` model is run on the ANE, and the resulting latent tensor is passed to a Python script for the final iSTFT reconstruction, achieving perfect audio parity with the golden reference.
 
-### Phase 3: Not Started
+### Phase 3: In Progress
+ - Added multi-bucket support (5s/15s/30s) with dynamic selection based on input length.
+ - Created Swift library target `KokoroTTS` and public API skeleton (`pickBucket()`, `synthesizeWithHAR(...)`).
+ - Updated the Swift executable to consume `KokoroTTS` for the HAR path; it now auto-loads `KokoroDecoder_HAR_{5s,15s,30s}.mlpackage`.
+ - Extended `tools/dump_vocoder_inputs.py` to emit inputs for 5s/15s/30s via `--seconds` flag.
+ - Build is green: `swift build --package-path Swift/KokoroPhase2`.
+
+Remaining for Phase 3:
+ - Port phonemizer to Swift (replace bridge/placeholder and remove JSON dependency).
+ - Finalize public API: `Kokoro.synthesize(text: String, voice: String)` end-to-end.
+ - Update the test app UI to use the package API directly (no precomputed JSON).

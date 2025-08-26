@@ -26,6 +26,17 @@ def main():
     out_dir.mkdir(parents=True, exist_ok=True)
     out_json = out_dir / "inputs_vocoder.json"
 
+    # Optional CLI: --seconds {5,15,30}
+    seconds = 5
+    if len(sys.argv) >= 3 and sys.argv[1] == "--seconds":
+        try:
+            seconds = int(sys.argv[2])
+        except Exception:
+            pass
+        if seconds not in (5, 15, 30):
+            print(f"Unsupported seconds={seconds}; defaulting to 5")
+            seconds = 5
+
     pipeline = HybridTTSPipeline(force_engine='coreml')
     text = Phase1Constants.TEST_SENTENCE
     voice = HybridPipelineConstants.BENCHMARK_VOICE_DEFAULT
@@ -42,9 +53,9 @@ def main():
     n = vi['n']              # (1,T_f0)
     s = vi['s']              # (1,128)
 
-    # Bucket lengths
-    asr_len_target = 200
-    f0_len_target = 400
+    # Bucket lengths (heuristics): ~40 fps for ASR branch, ~80 fps for f0/n branch
+    asr_len_target = {5: 200, 15: 600, 30: 1200}[seconds]
+    f0_len_target = {5: 400, 15: 1200, 30: 2400}[seconds]
 
     # Tail-pad/truncate to bucket shapes
     def pad_tail_1d(x: np.ndarray, T: int) -> np.ndarray:

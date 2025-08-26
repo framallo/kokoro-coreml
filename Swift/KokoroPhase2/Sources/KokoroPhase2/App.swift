@@ -5,6 +5,7 @@ import Accelerate
 import CoreGraphics
 import ImageIO
 import UniformTypeIdentifiers
+import KokoroTTS
 
 // Keep a global strong reference to the audio player to prevent premature deallocation
 private var persistentAudioPlayer: AVAudioPlayer?
@@ -251,6 +252,140 @@ func saveMelPNG(mel: [[Float]], url: URL) throws {
     CGImageDestinationFinalize(dest)
 }
 
+// MARK: - Mel CSV Load & Compare vs Golden
+
+/// Loads a mel CSV where each row is a frame and each column is a mel bin.
+/// Returns matrix shaped as [nMels][T].
+func loadMelCSVTranspose(url: URL) throws -> [[Float]] {
+    let text = try String(contentsOf: url)
+    let newlineSet = CharacterSet.newlines
+    // Split on newlines robustly
+    let lines = text.components(separatedBy: newlineSet).filter { !$0.isEmpty }
+    if lines.isEmpty { return [] }
+    // Parse rows -> [[Float]] frame-major
+    var frames: [[Float]] = []
+    frames.reserveCapacity(lines.count)
+    for line in lines {
+        let parts = line.split(separator: ",", omittingEmptySubsequences: false)
+        var row: [Float] = []
+        row.reserveCapacity(parts.count)
+        for p in parts {
+            if let v = Float(p.trimmingCharacters(in: CharacterSet.whitespaces)) {
+                row.append(v)
+            } else {
+                row.append(0)
+            }
+        }
+        frames.append(row)
+    }
+    // Transpose to [nMels][T]
+    let T = frames.count
+    let nMels = frames.first?.count ?? 0
+    var mel = Array(repeating: Array(repeating: Float(0), count: T), count: nMels)
+    for t in 0..<T {
+        let row = frames[t]
+        for m in 0..<min(nMels, row.count) {
+            mel[m][t] = row[m]
+        }
+    }
+    return mel
+}
+
+func computeMSE(_ a: [[Float]], _ b: [[Float]], shift: Int = 0) -> (mse: Float, usedFrames: Int) {
+    let nMels = min(a.count, b.count)
+    guard nMels > 0 else { return (0, 0) }
+    let Ta = a.first?.count ?? 0
+    let Tb = b.first?.count ?? 0
+    var startA = 0, startB = 0
+    if shift >= 0 { startA = 0; startB = shift } else { startA = -shift; startB = 0 }
+    let T = max(0, min(Ta - startA, Tb - startB))
+    if T == 0 { return (Float.greatestFiniteMagnitude, 0) }
+    var se: Double = 0
+    var count: Int = 0
+    for m in 0..<nMels {
+        for t in 0..<T {
+            let da = a[m][startA + t]
+            let db = b[m][startB + t]
+            let d = Double(da - db)
+            se += d * d
+            count += 1
+        }
+    }
+    return (Float(se / Double(count)), T)
+}
+
+func compareAgainstGolden(currentMel: [[Float]], cwd: URL) {
+    let goldenCSVEnv = ProcessInfo.processInfo.environment["GOLDEN_CSV_PATH"]
+    let goldenCSVURL = goldenCSVEnv.flatMap { URL(fileURLWithPath: $0) } ?? cwd.appendingPathComponent("outputs/golden/golden.csv")
+    let goldenWAVEnv = ProcessInfo.processInfo.environment["GOLDEN_WAV_PATH"]
+    let goldenWAVURL = goldenWAVEnv.flatMap { URL(fileURLWithPath: $0) } ?? cwd.appendingPathComponent("outputs/golden/golden.wav")
+    // 1) Compare with CSV if available (legacy)
+    if FileManager.default.fileExists(atPath: goldenCSVURL.path) {
+        do {
+            let goldenMel = try loadMelCSVTranspose(url: goldenCSVURL)
+            let raw = computeMSE(currentMel, goldenMel, shift: 0)
+            var best = raw; var bestShift = 0
+            for s in -6...6 { let r = computeMSE(currentMel, goldenMel, shift: s); if r.mse < best.mse { best = r; bestShift = s } }
+            print(String(format: "CSV Mel MSE raw=%.6f (T=%d), best=%.6f @shift=%d (T=%d)", raw.mse, raw.usedFrames, best.mse, bestShift, best.usedFrames))
+            // Banded analysis to localize error
+            reportBandMSE(currentMel, goldenMel, label: "CSV")
+        } catch {
+            print("⚠️  Failed CSV compare: \(error)")
+        }
+    } else {
+        print("⚠️  Golden CSV not found at: \(goldenCSVURL.path)")
+    }
+    // 2) Compare with WAV mel computed using the same Swift mel
+    if FileManager.default.fileExists(atPath: goldenWAVURL.path) {
+        do {
+            let (goldenAudio, sr) = try loadWAVMono16(url: goldenWAVURL)
+            let goldenMelSwift = melSpectrogram(audio: goldenAudio, sampleRate: sr, nFFT: 1024, hop: 300, nMels: 80, fmin: 0, fmax: 12000)
+            let raw = computeMSE(currentMel, goldenMelSwift, shift: 0)
+            var best = raw; var bestShift = 0
+            for s in -6...6 { let r = computeMSE(currentMel, goldenMelSwift, shift: s); if r.mse < best.mse { best = r; bestShift = s } }
+            print(String(format: "WAV Mel MSE raw=%.6f (T=%d), best=%.6f @shift=%d (T=%d)", raw.mse, raw.usedFrames, best.mse, bestShift, best.usedFrames))
+            reportBandMSE(currentMel, goldenMelSwift, label: "WAV")
+        } catch {
+            print("⚠️  Failed WAV compare: \(error)")
+        }
+    } else {
+        print("⚠️  Golden WAV not found at: \(goldenWAVURL.path)")
+    }
+}
+
+/// Loads 16-bit PCM mono WAV, returns normalized float samples and sample rate.
+func loadWAVMono16(url: URL) throws -> ([Float], Int) {
+    let data = try Data(contentsOf: url)
+    guard data.count > 44 else { throw NSError(domain: "kokoro.wav", code: -10, userInfo: [NSLocalizedDescriptionKey: "WAV too short"]) }
+    let sr: Int = data.withUnsafeBytes { raw in
+        let p = raw.bindMemory(to: UInt8.self).baseAddress!
+        let b0 = Int(p[24]), b1 = Int(p[25]), b2 = Int(p[26]), b3 = Int(p[27])
+        return b0 | (b1 << 8) | (b2 << 16) | (b3 << 24)
+    }
+    let pcm = data.dropFirst(44)
+    let samplesI16: [Int16] = pcm.withUnsafeBytes { raw in
+        let buf = raw.bindMemory(to: Int16.self)
+        return Array(buf)
+    }
+    let audio = samplesI16.map { Float($0) / 32767.0 }
+    return (audio, sr)
+}
+
+private func reportBandMSE(_ a: [[Float]], _ b: [[Float]], label: String) {
+    let nMels = min(a.count, b.count)
+    guard nMels >= 80 else { return }
+    // Low: 0..19, Mid: 20..49, High: 50..79
+    func mseRange(_ r: Range<Int>) -> Float {
+        var se: Double = 0
+        var count = 0
+        let T = min(a.first?.count ?? 0, b.first?.count ?? 0)
+        for m in r { for t in 0..<T { let d = Double(a[m][t] - b[m][t]); se += d*d; count += 1 } }
+        return count > 0 ? Float(se / Double(count)) : 0
+    }
+    let low = mseRange(0..<20), mid = mseRange(20..<50), high = mseRange(50..<80)
+    print(String(format: "%@ band MSE: low=%.4f mid=%.4f high=%.4f", label, low, mid, high))
+}
+
 func saveMatrixCSV(rows: Int, cols: Int, value: (_ r: Int, _ c: Int) -> Float, url: URL) throws {
     var lines: [String] = []
     lines.reserveCapacity(rows)
@@ -399,120 +534,29 @@ struct App {
         }
 
         if preferHAR && harSpecPresent && modelNameUsed.contains("Decoder_HAR") {
-            // Direct HAR decoding path (exact parity with golden)
+            // Direct HAR decoding path using KokoroTTS library with dynamic bucket selection
             guard let hsShape = vocoderInputs.har_spec_shape, let hpShape = vocoderInputs.har_phase_shape,
                   let hs = vocoderInputs.har_spec, let hp = vocoderInputs.har_phase else {
                 throw NSError(domain: "kokoro.phase2", code: -3, userInfo: [NSLocalizedDescriptionKey: "HAR features missing despite presence flag"])
             }
             var hsData = hs
             var hpData = hp
-            // Models expect fixed shapes like (1, 11, 1, 24001). Pad/truncate last dim if needed.
+            // Pad/truncate last dimension to a safe minimum window; bucket logic in library chooses final model
             let hsFixed = [hsShape[0], hsShape[1], hsShape[2], max(hsShape[3], 24001)]
             let hpFixed = [hpShape[0], hpShape[1], hpShape[2], max(hpShape[3], 24001)]
             if hsShape != hsFixed { hsData = padOrTruncate4DLastDim(flat: hs, srcShape: hsShape, dstShape: hsFixed) }
             if hpShape != hpFixed { hpData = padOrTruncate4DLastDim(flat: hp, srcShape: hpShape, dstShape: hpFixed) }
+
             let hsMA = try makeMLMultiArray(shape: hsFixed, data: hsData)
             let hpMA = try makeMLMultiArray(shape: hpFixed, data: hpData)
-
-            // Also supply required conditioning inputs
             let asrMA = try makeMLMultiArray(shape: vocoderInputs.asr_shape, data: vocoderInputs.asr)
             let f0MA  = try makeMLMultiArray(shape: vocoderInputs.f0_shape, data: vocoderInputs.f0)
             let nMA   = try makeMLMultiArray(shape: vocoderInputs.n_shape, data: vocoderInputs.n)
             let sMA   = try makeMLMultiArray(shape: vocoderInputs.s_shape, data: vocoderInputs.s)
-            let start = CFAbsoluteTimeGetCurrent()
-            let out = try model.prediction(dict: [
-                "har_spec": MLFeatureValue(multiArray: hsMA),
-                "har_phase": MLFeatureValue(multiArray: hpMA),
-                "asr": MLFeatureValue(multiArray: asrMA),
-                "f0_curve": MLFeatureValue(multiArray: f0MA),
-                "n": MLFeatureValue(multiArray: nMA),
-                "s": MLFeatureValue(multiArray: sMA),
-            ])
-            let elapsed = CFAbsoluteTimeGetCurrent() - start
-            // Two possible outputs: some Decoder_HAR variants output latent x (C x T), others output waveform
-            let outName = model.modelDescription.outputDescriptionsByName.keys.first!
-            var audio: [Float]
-            if let arr = out.featureValue(for: outName)?.multiArrayValue, (arr.shape.count == 2 || (arr.shape.count == 3 && arr.shape[0].intValue == 1)) {
-                // Shape can be [C, T] or [1, C, T]. Handle both.
-                let C: Int
-                let T: Int
-                let is3D: Bool
 
-                if arr.shape.count == 2 {
-                    C = arr.shape[0].intValue
-                    T = arr.shape[1].intValue
-                    is3D = false
-                } else { // 3D with batch=1
-                    C = arr.shape[1].intValue
-                    T = arr.shape[2].intValue
-                    is3D = true
-                }
-                
-                var x = Array(repeating: Array(repeating: Float(0), count: T), count: C)
-                // Use the built-in multi-dimensional subscripting to safely access elements,
-                // which correctly handles the internal strides of the MLMultiArray.
-                if is3D {
-                    for c in 0..<C {
-                        for t in 0..<T {
-                            x[c][t] = arr[[0, c, t] as [NSNumber]].floatValue
-                        }
-                    }
-                } else {
-                    for c in 0..<C {
-                        for t in 0..<T {
-                            x[c][t] = arr[[c, t] as [NSNumber]].floatValue
-                        }
-                    }
-                }
-                
-                // Hybrid parity: save latent and call Python iSTFT to reconstruct
-                let cwd = URL(fileURLWithPath: FileManager.default.currentDirectoryPath)
-                let ts = ISO8601DateFormatter().string(from: Date()).replacingOccurrences(of: ":", with: "-")
-                let outDir = cwd.appendingPathComponent("outputs/\(ts)", isDirectory: true)
-                try FileManager.default.createDirectory(at: outDir, withIntermediateDirectories: true)
-                let latentCSV = outDir.appendingPathComponent("\(ts)_latent.csv")
-                var lines: [String] = []
-                // Write C x T: each line is a channel, comma-separated values are time steps
-                lines.reserveCapacity(C)
-                for c in 0..<C {
-                    var row = [String](); row.reserveCapacity(T)
-                    // Get the channel's data across time
-                    let channelData = x[c]
-                    for t in 0..<T { row.append(String(channelData[t])) }
-                    lines.append(row.joined(separator: ","))
-                }
-                try lines.joined(separator: "\n").write(to: latentCSV, atomically: true, encoding: .utf8)
-                let outWavHybrid = outDir.appendingPathComponent("\(ts).wav")
-                let py = "/usr/bin/env"
-                let script = cwd.appendingPathComponent("tools/reconstruct_from_latent.py").path
-                let proc = Process()
-                proc.launchPath = py
-                proc.arguments = ["python3", script, "--latent", latentCSV.path, "--out_wav", outWavHybrid.path, "--n_fft", "20", "--hop", "5", "--sr", "24000"]
-                let pipe = Pipe(); proc.standardOutput = pipe; proc.standardError = pipe
-                proc.launch(); proc.waitUntilExit()
-                if proc.terminationStatus != 0 {
-                    let data = pipe.fileHandleForReading.readDataToEndOfFile()
-                    let log = String(data: data, encoding: .utf8) ?? ""
-                    throw NSError(domain: "kokoro.phase2", code: -4, userInfo: [NSLocalizedDescriptionKey: "Python iSTFT failed", "log": log])
-                }
-                // Load WAV back for playback and mel export
-                // Simple WAV reader (16-bit PCM mono)
-                let wavData = try Data(contentsOf: outWavHybrid)
-                // Skip 44-byte header
-                let pcm = wavData.dropFirst(44)
-                let samples = pcm.withUnsafeBytes { raw -> [Int16] in
-                    let ptr = raw.bindMemory(to: Int16.self)
-                    return Array(ptr)
-                }
-                audio = samples.map { Float($0) / 32767.0 }
-            } else if let waveformArray = out.featureValue(for: outName)?.multiArrayValue {
-                let count = waveformArray.count
-                var tmp = [Float](repeating: 0, count: count)
-                for i in 0..<count { tmp[i] = waveformArray[i].floatValue }
-                audio = tmp
-            } else {
-                throw NSError(domain: "kokoro.phase2", code: -1, userInfo: [NSLocalizedDescriptionKey: "Missing waveform output"])
-            }
+            let start = CFAbsoluteTimeGetCurrent()
+            let audio = try KokoroTTS.synthesizeWithHAR(asr: asrMA, f0: f0MA, n: nMA, s: sMA, harSpec: hsMA, harPhase: hpMA)
+            let elapsed = CFAbsoluteTimeGetCurrent() - start
 
             // Save artifacts to outputs/[timestamp]/[timestamp].{wav,csv,png,json}
             let cwd = URL(fileURLWithPath: FileManager.default.currentDirectoryPath)
@@ -530,6 +574,9 @@ struct App {
             try saveMatrixCSV(rows: mel.count, cols: mel.first?.count ?? 0, value: { r, c in mel[r][c] }, url: melCSV)
             let pngURL = outDir.appendingPathComponent("\(ts).png")
             try saveMelPNG(mel: mel, url: pngURL)
+            if ProcessInfo.processInfo.environment["COMPARE_GOLDEN"] == "1" {
+                compareAgainstGolden(currentMel: mel, cwd: cwd)
+            }
 
             let meta: [String: Any] = [
                 "input_text": vocoderInputs.meta.text,
@@ -563,8 +610,11 @@ struct App {
         let f0LenTotal = vocoderInputs.f0_shape.last ?? 0
         let windowAsr = 200
         let windowF0 = 400
-        let strideAsr = windowAsr / 4   // 75% overlap
-        let strideF0 = windowF0 / 4
+        // Allow runtime override for stride denominator; default to 2 (50% overlap) for Hann COLA
+        let strideDenASR: Int = Int(ProcessInfo.processInfo.environment["ASR_STRIDE_FRAC"] ?? ProcessInfo.processInfo.environment["ASR_STRIDE_DENOM"] ?? "2") ?? 2
+        let strideDenF0: Int = Int(ProcessInfo.processInfo.environment["F0_STRIDE_FRAC"] ?? ProcessInfo.processInfo.environment["F0_STRIDE_DENOM"] ?? "2") ?? 2
+        let strideAsr = max(1, windowAsr / max(1, strideDenASR))
+        let strideF0 = max(1, windowF0 / max(1, strideDenF0))
         let samplesPerFrame = 600       // 24kHz / 40fps
 
         func sliceASR(_ flat: [Float], totalT: Int, startT: Int, winT: Int) -> [Float] {
@@ -603,7 +653,10 @@ struct App {
         let totalSamples = max(chunkSamples, (nWin - 1) * strideSamples + chunkSamples)
         var accAudio = [Float](repeating: 0, count: totalSamples)
         var accWeight = [Float](repeating: 0, count: totalSamples)
-        let windowWeight = hannWindow(chunkSamples)
+        var windowWeight = hannWindow(chunkSamples)
+        if ProcessInfo.processInfo.environment["RECT_WINDOW"] == "1" {
+            windowWeight = [Float](repeating: 1.0, count: chunkSamples)
+        }
 
         let start = CFAbsoluteTimeGetCurrent()
         for w in 0..<nWin {
@@ -649,6 +702,19 @@ struct App {
             let w = accWeight[i]
             if w > 0 { audio[i] /= w }
         }
+        // Trim to expected duration (frames * samplesPerFrame)
+        let expectedSamples = max(0, asrLenTotal * samplesPerFrame)
+        if expectedSamples > 0 && expectedSamples < audio.count {
+            audio = Array(audio[0..<expectedSamples])
+        }
+        // Optional short fade-out to suppress tail artifacts
+        let fadeSamples = min(2048, audio.count)
+        if fadeSamples > 0 {
+            for i in 0..<fadeSamples {
+                let scale = Float(fadeSamples - i) / Float(fadeSamples)
+                audio[audio.count - 1 - i] *= scale
+            }
+        }
 
         // Save artifacts to outputs/[timestamp]/[timestamp].{wav,csv,png,json}
         let cwd = URL(fileURLWithPath: FileManager.default.currentDirectoryPath)
@@ -668,6 +734,9 @@ struct App {
         try saveMatrixCSV(rows: mel.count, cols: mel.first?.count ?? 0, value: { r, c in mel[r][c] }, url: melCSV)
         let pngURL = outDir.appendingPathComponent("\(ts).png")
         try saveMelPNG(mel: mel, url: pngURL)
+        if ProcessInfo.processInfo.environment["COMPARE_GOLDEN"] == "1" {
+            compareAgainstGolden(currentMel: mel, cwd: cwd)
+        }
 
         // Save metadata.json
         let meta: [String: Any] = [
