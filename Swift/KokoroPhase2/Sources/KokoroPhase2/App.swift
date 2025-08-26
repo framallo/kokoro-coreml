@@ -48,6 +48,13 @@ func saveWAV(_ samples: [Float], sampleRate: Double, url: URL) throws {
     try file.write(from: buffer)
 }
 
+func playWAV(from url: URL) throws {
+    let player = try AVAudioPlayer(contentsOf: url)
+    player.prepareToPlay()
+    player.play()
+    RunLoop.current.run(until: Date().addingTimeInterval(player.duration))
+}
+
 @main
 struct App {
     static func main() throws {
@@ -108,5 +115,6 @@ struct App {
 
         print("Saved: \(wavURL.path)")
         print(String(format: "CoreML elapsed: %.3f s", elapsed))
+        try playWAV(from: wavURL)
     }
 }
