@@ -20,6 +20,11 @@ struct VocoderInputs: Decodable {
     let f0: [Float]
     let n: [Float]
     let s: [Float]
+    // Optional HAR features for Decoder_HAR model
+    let har_spec_shape: [Int]?
+    let har_phase_shape: [Int]?
+    let har_spec: [Float]?
+    let har_phase: [Float]?
 }
 
 func locateResource(named name: String) -> URL {
@@ -239,13 +244,98 @@ struct App {
         let data = try Data(contentsOf: inputsURL)
         let vocoderInputs = try JSONDecoder().decode(VocoderInputs.self, from: data)
 
-        // Load CoreML model from resources (use vocoder windowed model for Phase 2 MVP)
-        let rawURL = locateResource(named: "KokoroVocoder.mlpackage")
-        // Compile .mlpackage to .mlmodelc before loading
-        let modelURL = try MLModel.compileModel(at: rawURL)
-        let config = MLModelConfiguration()
-        config.computeUnits = .all
-        let model = try MLModel(contentsOf: modelURL, configuration: config)
+        // Prefer exact parity path if HAR features present
+        let harSpecPresent = (vocoderInputs.har_spec != nil && vocoderInputs.har_phase != nil && vocoderInputs.har_spec_shape != nil && vocoderInputs.har_phase_shape != nil)
+        var model: MLModel
+        var modelNameUsed = ""
+        if harSpecPresent {
+            let harURL = locateResource(named: "KokoroDecoder_HAR_5s.mlpackage")
+            if FileManager.default.fileExists(atPath: harURL.path) {
+                let compiled = try MLModel.compileModel(at: harURL)
+                let config = MLModelConfiguration(); config.computeUnits = .all
+                model = try MLModel(contentsOf: compiled, configuration: config)
+                modelNameUsed = "KokoroDecoder_HAR_5s.mlpackage"
+            } else {
+                // Fallback to vocoder
+                let rawURL = locateResource(named: "KokoroVocoder.mlpackage")
+                let compiled = try MLModel.compileModel(at: rawURL)
+                let config = MLModelConfiguration(); config.computeUnits = .all
+                model = try MLModel(contentsOf: compiled, configuration: config)
+                modelNameUsed = "KokoroVocoder.mlpackage"
+            }
+        } else {
+            let rawURL = locateResource(named: "KokoroVocoder.mlpackage")
+            let compiled = try MLModel.compileModel(at: rawURL)
+            let config = MLModelConfiguration(); config.computeUnits = .all
+            model = try MLModel(contentsOf: compiled, configuration: config)
+            modelNameUsed = "KokoroVocoder.mlpackage"
+        }
+
+        if harSpecPresent && modelNameUsed.contains("Decoder_HAR") {
+            // Direct HAR decoding path (exact parity with golden)
+            guard let hsShape = vocoderInputs.har_spec_shape, let hpShape = vocoderInputs.har_phase_shape,
+                  let hs = vocoderInputs.har_spec, let hp = vocoderInputs.har_phase else {
+                throw NSError(domain: "kokoro.phase2", code: -3, userInfo: [NSLocalizedDescriptionKey: "HAR features missing despite presence flag"])
+            }
+            let hsMA = try makeMLMultiArray(shape: hsShape, data: hs)
+            let hpMA = try makeMLMultiArray(shape: hpShape, data: hp)
+            let start = CFAbsoluteTimeGetCurrent()
+            let out = try model.prediction(dict: [
+                "har_spec": MLFeatureValue(multiArray: hsMA),
+                "har_phase": MLFeatureValue(multiArray: hpMA),
+            ])
+            let elapsed = CFAbsoluteTimeGetCurrent() - start
+            guard let outName = model.modelDescription.outputDescriptionsByName.keys.first,
+                  let waveformArray = out.featureValue(for: outName)?.multiArrayValue else {
+                throw NSError(domain: "kokoro.phase2", code: -1, userInfo: [NSLocalizedDescriptionKey: "Missing waveform output"])
+            }
+            let count = waveformArray.count
+            var audio = [Float](repeating: 0, count: count)
+            for i in 0..<count { audio[i] = waveformArray[i].floatValue }
+
+            // Save artifacts to outputs/[timestamp]/[timestamp].{wav,csv,png,json}
+            let cwd = URL(fileURLWithPath: FileManager.default.currentDirectoryPath)
+            let ts = ISO8601DateFormatter().string(from: Date()).replacingOccurrences(of: ":", with: "-")
+            let outDir = cwd.appendingPathComponent("outputs/\(ts)", isDirectory: true)
+            try FileManager.default.createDirectory(at: outDir, withIntermediateDirectories: true)
+            let wavURL = outDir.appendingPathComponent("\(ts).wav")
+            try saveWAV(audio, sampleRate: Double(vocoderInputs.meta.sample_rate), url: wavURL)
+            print("Saved: \(wavURL.path)")
+            print(String(format: "CoreML elapsed: %.3f s", elapsed))
+            try playWAV(from: wavURL)
+
+            let mel = melSpectrogram(audio: audio, sampleRate: vocoderInputs.meta.sample_rate, nFFT: 1024, hop: 300, nMels: 80, fmin: 0, fmax: 12000)
+            let melCSV = outDir.appendingPathComponent("\(ts).csv")
+            try saveMatrixCSV(rows: mel.count, cols: mel.first?.count ?? 0, value: { r, c in mel[r][c] }, url: melCSV)
+            let pngURL = outDir.appendingPathComponent("\(ts).png")
+            try saveMelPNG(mel: mel, url: pngURL)
+
+            let meta: [String: Any] = [
+                "input_text": vocoderInputs.meta.text,
+                "model": modelNameUsed,
+                "sample_rate": vocoderInputs.meta.sample_rate,
+                "mel_params": [
+                    "n_mels": 80,
+                    "hop_length": 300,
+                    "n_fft": 1024,
+                    "fmin": 0,
+                    "fmax": 12000
+                ],
+                "latency_seconds": [
+                    "coreml_inference": elapsed
+                ]
+            ]
+            var metaAug = meta
+            metaAug["artifacts"] = [
+                "wav": wavURL.lastPathComponent,
+                "csv": melCSV.lastPathComponent,
+                "png": pngURL.lastPathComponent
+            ]
+            let metaData = try JSONSerialization.data(withJSONObject: metaAug, options: [.prettyPrinted])
+            let metaURL = outDir.appendingPathComponent("\(ts).json")
+            try metaData.write(to: metaURL)
+            return
+        }
 
         // Prepare streaming synthesis (windowed vocoder with overlap-add)
         let asrLenTotal = vocoderInputs.asr_shape.last ?? 0
