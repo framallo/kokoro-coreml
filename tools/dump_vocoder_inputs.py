@@ -2,7 +2,9 @@
 import json
 from pathlib import Path
 import numpy as np
+import torch
 from test_ane_pipeline import HybridTTSPipeline, Phase1Constants, HybridPipelineConstants
+from kokoro import KModel
 
 # Dump vocoder inputs for the Phase 2 Swift app
 # Saves JSON at Swift/KokoroPhase2/Resources/inputs_vocoder.json
@@ -52,6 +54,27 @@ def main():
         "n": np_to_list(n),
         "s": np_to_list(s)
     }
+
+    # Also compute HAR features via exact PyTorch path for highest quality (Decoder_HAR)
+    try:
+        model = KModel(disable_complex=True).to('cpu').eval()
+        dec = model.decoder
+        with torch.no_grad():
+            # f0: (1, T) -> (1,1,T) then transpose to (1,T,1) to match generator expectations
+            f0_t = torch.from_numpy(f0).float()
+            f0_up = dec.generator.f0_upsamp(f0_t[:, None]).transpose(1, 2)
+            har_source, _, _ = dec.generator.m_source(f0_up)
+            har_source = har_source.transpose(1, 2).squeeze(1)
+            har_spec, har_phase = dec.generator.stft.transform(har_source)
+        # Shapes to match CoreML Decoder_HAR inputs: (1, F, 1, T)
+        har_spec_np = har_spec.detach().cpu().numpy().astype(np.float32)
+        har_phase_np = har_phase.detach().cpu().numpy().astype(np.float32)
+        payload["har_spec_shape"] = [1, int(har_spec_np.shape[1]), 1, int(har_spec_np.shape[2])]
+        payload["har_phase_shape"] = [1, int(har_phase_np.shape[1]), 1, int(har_phase_np.shape[2])]
+        payload["har_spec"] = har_spec_np.reshape(-1).tolist()
+        payload["har_phase"] = har_phase_np.reshape(-1).tolist()
+    except Exception as e:
+        print(f"⚠️ Failed to compute HAR features for dump: {e}")
 
     out_json.write_text(json.dumps(payload))
     print(f"Wrote {out_json}")
