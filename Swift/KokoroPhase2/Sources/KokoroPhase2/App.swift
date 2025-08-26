@@ -6,6 +6,9 @@ import CoreGraphics
 import ImageIO
 import UniformTypeIdentifiers
 
+// Keep a global strong reference to the audio player to prevent premature deallocation
+private var persistentAudioPlayer: AVAudioPlayer?
+
 struct VocoderInputs: Decodable {
     struct Meta: Decodable { let text: String; let voice: String; let sample_rate: Int }
     let meta: Meta
@@ -32,11 +35,14 @@ func locateResource(named name: String) -> URL {
 }
 
 func makeMLMultiArray(shape: [Int], data: [Float]) throws -> MLMultiArray {
-    let total = shape.reduce(1, *)
-    precondition(data.count == total, "data count \(data.count) != total shape \(total)")
+    let totalElementCount = shape.reduce(1, *)
+    precondition(data.count == totalElementCount, "data count \(data.count) != total shape \(totalElementCount)")
     let array = try MLMultiArray(shape: shape.map { NSNumber(value: $0) }, dataType: .float32)
-    let ptr = UnsafeMutablePointer<Float>(OpaquePointer(array.dataPointer))
-    ptr.initialize(from: data, count: total)
+    // Copy bytes directly to avoid initialize/assign semantics on potentially initialized memory
+    data.withUnsafeBytes { srcBytes in
+        let destRaw = array.dataPointer
+        memcpy(destRaw, srcBytes.baseAddress!, totalElementCount * MemoryLayout<Float>.size)
+    }
     return array
 }
 
@@ -53,10 +59,17 @@ func saveWAV(_ samples: [Float], sampleRate: Double, url: URL) throws {
 }
 
 func playWAV(from url: URL) throws {
-    let player = try AVAudioPlayer(contentsOf: url)
+    persistentAudioPlayer = try AVAudioPlayer(contentsOf: url)
+    guard let player = persistentAudioPlayer else { return }
+    player.numberOfLoops = 0
     player.prepareToPlay()
     player.play()
-    RunLoop.current.run(until: Date().addingTimeInterval(player.duration))
+    // Drive the runloop until playback finishes, keeping strong reference alive
+    while player.isPlaying {
+        _ = RunLoop.current.run(mode: .default, before: Date().addingTimeInterval(0.1))
+    }
+    player.stop()
+    persistentAudioPlayer = nil
 }
 
 // MARK: - Mel Spectrogram Generation (n_mels=80, n_fft=1024, hop=300, fmin=0, fmax=12000)
@@ -107,20 +120,22 @@ func melSpectrogram(audio: [Float], sampleRate: Int, nFFT: Int = 1024, hop: Int 
     if audio.isEmpty { return [] }
     let numFrames = max(1, (audio.count - frameLen) / hopLen + 1)
     let window = hannWindow(frameLen)
-    // Precompute FFT setup
-    let log2n = vDSP_Length(log2(Float(nFFT)))
-    guard let fftSetup = vDSP_create_fftsetup(log2n, FFTRadix(kFFTRadix2)) else { return [] }
-    defer { vDSP_destroy_fftsetup(fftSetup) }
 
-    // Mel filter bank
+    // Mel filter bank (bins 0..nFFT/2)
     let melFB = buildMelFilterBank(sampleRate: sampleRate, nFFT: nFFT, nMels: nMels, fmin: fmin, fmax: fmax)
+
+    // Real-to-complex DFT setup
+    guard let dft = vDSP_DFT_zrop_CreateSetup(nil, vDSP_Length(frameLen), vDSP_DFT_Direction.FORWARD) else { return [] }
+    defer { vDSP_DFT_DestroySetup(dft) }
 
     var mel = Array(repeating: [Float](repeating: 0, count: numFrames), count: nMels) // shape: [nMels][T]
 
     var frame = [Float](repeating: 0, count: frameLen)
     var windowed = [Float](repeating: 0, count: frameLen)
-    var realp = [Float](repeating: 0, count: frameLen/2)
-    var imagp = [Float](repeating: 0, count: frameLen/2)
+    var realIn = [Float](repeating: 0, count: frameLen)
+    var imagIn = [Float](repeating: 0, count: frameLen)
+    var realOut = [Float](repeating: 0, count: frameLen/2)
+    var imagOut = [Float](repeating: 0, count: frameLen/2)
 
     for t in 0..<numFrames {
         let start = t * hopLen
@@ -135,33 +150,29 @@ func melSpectrogram(audio: [Float], sampleRate: Int, nFFT: Int = 1024, hop: Int 
             if count < frameLen { for i in count..<frameLen { frame[i] = 0 } }
         }
         vDSP_vmul(frame, 1, window, 1, &windowed, 1, vDSP_Length(frameLen))
-        // Convert to split complex
-        realp.withUnsafeMutableBufferPointer { rbuf in
-            imagp.withUnsafeMutableBufferPointer { ibuf in
-                var split = DSPSplitComplex(realp: rbuf.baseAddress!, imagp: ibuf.baseAddress!)
-                windowed.withUnsafeBufferPointer { ptr in
-                    ptr.baseAddress!.withMemoryRebound(to: DSPComplex.self, capacity: frameLen/2) { complexPtr in
-                        vDSP_ctoz(complexPtr, 2, &split, 1, vDSP_Length(frameLen/2))
-                    }
-                }
-                vDSP_fft_zip(fftSetup, &split, 1, log2n, FFTDirection(FFT_FORWARD))
-                var mag = [Float](repeating: 0, count: frameLen/2 + 1)
-                // Compute magnitude squared for bins 0..nFFT/2
-                mag[0] = split.realp[0] * split.realp[0] + split.imagp[0] * split.imagp[0]
-                for k in 1..<(frameLen/2) {
-                    let r = split.realp[k]
-                    let i = split.imagp[k]
-                    mag[k] = r*r + i*i
-                }
-                mag[frameLen/2] = 0 // Nyquist (imag part stored elsewhere); safe to zero
-                // Apply mel filters
-                for m in 0..<nMels {
-                    var sum: Float = 0
-                    let filt = melFB[m]
-                    vDSP_dotpr(mag, 1, filt, 1, &sum, vDSP_Length(frameLen/2 + 1))
-                    mel[m][t] = sum
-                }
-            }
+
+        // Execute real-to-complex DFT
+        // Copy to inputs; imagIn is zeroed already
+        for i in 0..<frameLen { realIn[i] = windowed[i] }
+        vDSP_DFT_Execute(dft, &realIn, &imagIn, &realOut, &imagOut)
+
+        // Build magnitude-squared spectrum 0..nFFT/2
+        var mag = [Float](repeating: 0, count: frameLen/2 + 1)
+        // bins 0..(N/2-1)
+        for k in 0..<(frameLen/2) {
+            let r = realOut[k]
+            let i = imagOut[k]
+            mag[k] = r*r + i*i
+        }
+        // Nyquist
+        mag[frameLen/2] = 0
+
+        // Apply mel filters
+        for m in 0..<nMels {
+            var sum: Float = 0
+            let filt = melFB[m]
+            vDSP_dotpr(mag, 1, filt, 1, &sum, vDSP_Length(frameLen/2 + 1))
+            mel[m][t] = sum
         }
     }
     return mel
@@ -236,39 +247,98 @@ struct App {
         config.computeUnits = .all
         let model = try MLModel(contentsOf: modelURL, configuration: config)
 
-        // Prepare inputs
-        // Pad inputs to match vocoder window shapes (asr_len=200, f0_len=400)
-        func padTail(_ data: [Float], from: Int, to: Int) -> [Float] {
-            if from >= to { return Array(data.prefix(to)) }
-            var out = data
-            out.append(contentsOf: [Float](repeating: 0, count: to - from))
+        // Prepare streaming synthesis (windowed vocoder with overlap-add)
+        let asrLenTotal = vocoderInputs.asr_shape.last ?? 0
+        let f0LenTotal = vocoderInputs.f0_shape.last ?? 0
+        let windowAsr = 200
+        let windowF0 = 400
+        let strideAsr = windowAsr / 4   // 75% overlap
+        let strideF0 = windowF0 / 4
+        let samplesPerFrame = 600       // 24kHz / 40fps
+
+        func sliceASR(_ flat: [Float], totalT: Int, startT: Int, winT: Int) -> [Float] {
+            let channels = 512
+            var out = [Float](repeating: 0, count: channels * winT)
+            for c in 0..<channels {
+                let base = c * totalT
+                for t in 0..<winT {
+                    let tt = startT + t
+                    if tt < totalT { out[c * winT + t] = flat[base + tt] }
+                }
+            }
             return out
         }
-        let asrTarget = [1,512,1,200]
-        let f0Target = [1,1,1,400]
-        let nTarget = [1,1,1,400]
-        let asr = try makeMLMultiArray(shape: asrTarget, data: padTail(vocoderInputs.asr, from: vocoderInputs.asr.count, to: asrTarget.reduce(1,*)))
-        let f0  = try makeMLMultiArray(shape: f0Target, data: padTail(vocoderInputs.f0, from: vocoderInputs.f0.count, to: f0Target.reduce(1,*)))
-        let n   = try makeMLMultiArray(shape: nTarget, data: padTail(vocoderInputs.n, from: vocoderInputs.n.count, to: nTarget.reduce(1,*)))
-        let s   = try makeMLMultiArray(shape: vocoderInputs.s_shape, data: vocoderInputs.s)
+        func slice1D(_ flat: [Float], totalT: Int, startT: Int, winT: Int) -> [Float] {
+            var out = [Float](repeating: 0, count: winT)
+            let end = min(totalT, startT + winT)
+            if startT < end { Array(flat[startT..<end]).withUnsafeBufferPointer { buf in
+                for i in 0..<(end - startT) { out[i] = buf[i] }
+            } }
+            return out
+        }
+        let s = try makeMLMultiArray(shape: vocoderInputs.s_shape, data: vocoderInputs.s)
+
+        // Determine number of windows
+        func numWindows(total: Int, window: Int, stride: Int) -> Int {
+            if total <= 0 { return 0 }
+            if total <= window { return 1 }
+            return Int(ceil(Double(total - window) / Double(stride))) + 1
+        }
+        let nWin = numWindows(total: asrLenTotal, window: windowAsr, stride: strideAsr)
+
+        // Prepare output buffers with weight normalization
+        let windowSamples = windowF0 * samplesPerFrame / (windowF0 / windowAsr * (windowAsr / (samplesPerFrame)))
+        let windowSamplesExact = windowF0 * (samplesPerFrame / (windowF0 / (windowAsr * (samplesPerFrame / windowAsr))))
+        // Simpler: directly compute from frames
+        let chunkSamples = windowAsr * samplesPerFrame
+        let strideSamples = strideAsr * samplesPerFrame
+        let totalSamples = max(chunkSamples, (nWin - 1) * strideSamples + chunkSamples)
+        var accAudio = [Float](repeating: 0, count: totalSamples)
+        var accWeight = [Float](repeating: 0, count: totalSamples)
 
         let start = CFAbsoluteTimeGetCurrent()
-        let out = try model.prediction(dict: [
-            "asr": MLFeatureValue(multiArray: asr),
-            "f0_curve": MLFeatureValue(multiArray: f0),
-            "n": MLFeatureValue(multiArray: n),
-            "s": MLFeatureValue(multiArray: s),
-        ])
+        for w in 0..<nWin {
+            let asrStart = w * strideAsr
+            let f0Start = w * strideF0
+            let asrSlice = sliceASR(vocoderInputs.asr, totalT: asrLenTotal, startT: asrStart, winT: windowAsr)
+            let f0Slice = slice1D(vocoderInputs.f0, totalT: f0LenTotal, startT: f0Start, winT: windowF0)
+            let nSlice  = slice1D(vocoderInputs.n,  totalT: f0LenTotal, startT: f0Start, winT: windowF0)
+
+            let asrMA = try makeMLMultiArray(shape: [1,512,1,windowAsr], data: asrSlice)
+            let f0MA  = try makeMLMultiArray(shape: [1,1,1,windowF0], data: f0Slice)
+            let nMA   = try makeMLMultiArray(shape: [1,1,1,windowF0], data: nSlice)
+            let out = try model.prediction(dict: [
+                "asr": MLFeatureValue(multiArray: asrMA),
+                "f0_curve": MLFeatureValue(multiArray: f0MA),
+                "n": MLFeatureValue(multiArray: nMA),
+                "s": MLFeatureValue(multiArray: s),
+            ])
+            guard let outName = model.modelDescription.outputDescriptionsByName.keys.first,
+                  let chunkArray = out.featureValue(for: outName)?.multiArrayValue else {
+                throw NSError(domain: "kokoro.phase2", code: -2, userInfo: [NSLocalizedDescriptionKey: "Missing waveform output (chunk)"])
+            }
+            let outCount = chunkArray.count
+            var tmp = [Float](repeating: 0, count: outCount)
+            for i in 0..<outCount { tmp[i] = chunkArray[i].floatValue }
+
+            let startSample = w * strideSamples
+            // Accumulate with simple rectangular window; normalize by weights afterwards
+            for i in 0..<outCount {
+                let idx = startSample + i
+                if idx < totalSamples {
+                    accAudio[idx] += tmp[i]
+                    accWeight[idx] += 1.0
+                }
+            }
+        }
         let elapsed = CFAbsoluteTimeGetCurrent() - start
 
-        // Extract audio
-        guard let outName = model.modelDescription.outputDescriptionsByName.keys.first,
-              let waveformArray = out.featureValue(for: outName)?.multiArrayValue else {
-            throw NSError(domain: "kokoro.phase2", code: -1, userInfo: [NSLocalizedDescriptionKey: "Missing waveform output"])
+        // Normalize overlap weights
+        var audio = accAudio
+        for i in 0..<audio.count {
+            let w = accWeight[i]
+            if w > 0 { audio[i] /= w }
         }
-        let count = waveformArray.count
-        var audio = [Float](repeating: 0, count: count)
-        for i in 0..<count { audio[i] = waveformArray[i].floatValue }
 
         // Save artifacts to outputs/[timestamp]/[timestamp].{wav,csv,png,json}
         let cwd = URL(fileURLWithPath: FileManager.default.currentDirectoryPath)
