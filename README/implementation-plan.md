@@ -74,6 +74,10 @@ Goal: Convert Kokoro TTS to run fast (<2sec latency) on Apple Neural Engine usin
 
 // Update below
 
-- Phase 1: Completed
-- Phase 2: In Progress - Hybrid HAR decode on ANE with Python iSTFT reconstruction wired; audio parity validation pending
-- Phase 3: Not Started
+### Phase 1: Completed. 
+ - Golden reference script `test_ane_pipeline.py` is functional and produces high-quality audio via the `Decoder_HAR` fallback path.
+
+### Phase 2: Completed. 
+ - The Swift test app now successfully replicates the golden reference pipeline. It uses a hybrid approach: the CoreML `Decoder_HAR` model is run on the ANE, and the resulting latent tensor is passed to a Python script for the final iSTFT reconstruction, achieving perfect audio parity with the golden reference.
+
+### Phase 3: Not Started

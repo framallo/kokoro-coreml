@@ -1042,6 +1042,17 @@ class HybridTTSPipeline:
         res = model.predict(inputs)
         key = list(res.keys())[0]
         x = res[key]
+        # --- BEGIN DIAGNOSTIC DUMP ---
+        # Save the golden latent tensor for comparison with the Swift-generated version
+        try:
+            # Reshape from (1, C, T) that CoreML gives to (C, T) for CSV
+            reshaped_x = x.reshape(x.shape[1], x.shape[2])
+            golden_latent_path = Path("outputs") / "latent_golden.csv"
+            np.savetxt(str(golden_latent_path), reshaped_x, delimiter=",")
+            print(f"  💾 Saved golden latent tensor for debugging: {golden_latent_path}")
+        except Exception as e:
+            print(f"  ⚠️ Could not save golden latent tensor: {e}")
+        # --- END DIAGNOSTIC DUMP ---
         # Inverse STFT via PyTorch
         with torch.no_grad():
             n_fft = dec.generator.post_n_fft

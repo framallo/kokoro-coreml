@@ -1,5 +1,27 @@
 # Kokoro TTS Core ML Conversion: A Playbook
 
+## 2025-08-26 (Evening) — The Final Bug: MLMultiArray Memory Layout
+
+After achieving a working Python "Golden Path," the Swift hybrid app still produced corrupted audio or crashed. The final root cause was a subtle but critical bug in how the Swift code read the output tensor from the CoreML model.
+
+### Symptom
+- Swift app would crash with an out-of-bounds error: `Could not fetch NSNumber at offset... because it is beyond the end of the multi array.`
+- When not crashing, the `latent.csv` file contained corrupted data, leading to "chipmunk" audio.
+
+### Root Cause: Incorrect `MLMultiArray` Data Access
+- **Faulty Assumption:** The Swift code assumed a simple, contiguous memory layout for the output `MLMultiArray`. It manually calculated the index into the flat data buffer using the tensor's `strides`.
+- **The Reality:** CoreML's internal memory layout for multi-dimensional arrays can be complex and is not guaranteed to be a simple row-major sequence. The manual index calculation was incorrect, causing the code to read from the wrong memory locations, leading to data corruption and out-of-bounds crashes.
+- **The Clue:** The Python reference script showed the model's output was a 3D tensor of shape `[1, C, T]`, while the Swift code was initially only checking for a 2D `[C, T]` shape. This discrepancy led us to investigate the data access logic.
+
+### The Fix: Trust the API
+- The solution was to stop trying to manage memory manually and instead use the `MLMultiArray`'s native, safe subscripting method.
+- **Before (Unsafe):** `idx = c * s0 + t * s1; x[c][t] = arr[idx].floatValue`
+- **After (Safe):** `x[c][t] = arr[[batch, c, t] as [NSNumber]].floatValue`
+- This lets the CoreML framework handle its own memory layout and stride calculations, guaranteeing correct data access regardless of the underlying format.
+
+### Final Lesson
+- **Don't outsmart the framework:** When a high-level, safe API for data access is provided (like `MLMultiArray`'s subscripting), use it. Manual pointer arithmetic and offset calculation is fragile and prone to breaking when underlying implementations change. Simpler is better.
+
 ## 2025‑08‑26 — Exact Audio Parity: Root Cause and Fix
 
 ### Symptoms observed
@@ -44,7 +66,7 @@ USE_DECODER_HAR=1 Swift/KokoroPhase2/.build/release/KokoroPhase2
 ### Lessons learned
 - Simpler is better (again): split responsibilities cleanly.
   - Let ANE execute the Core ML model.
-  - Let Python’s proven `CustomSTFT.inverse` do reconstruction until the Swift port is exact.
+  - Let Python's proven `CustomSTFT.inverse` do reconstruction until the Swift port is exact.
 - Always assert the executed model in metadata and gate high‑fidelity paths behind explicit flags. A single missing env var can send you down a noisy fallback.
 - Respect data contracts:
   - Use Float32 end‑to‑end; no `Double` arrays anywhere near `MLMultiArray(.float32)`.

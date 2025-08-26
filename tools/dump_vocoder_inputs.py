@@ -1,8 +1,15 @@
 #!/usr/bin/env python3
 import json
+import sys
 from pathlib import Path
 import numpy as np
 import torch
+
+# Ensure repository root is on sys.path so imports from sibling modules work when running from tools/
+REPO_ROOT = Path(__file__).resolve().parent.parent
+if str(REPO_ROOT) not in sys.path:
+    sys.path.insert(0, str(REPO_ROOT))
+
 from test_ane_pipeline import HybridTTSPipeline, Phase1Constants, HybridPipelineConstants
 from kokoro import KModel
 
@@ -27,15 +34,39 @@ def main():
     if vi is None:
         raise RuntimeError("Failed to extract vocoder inputs")
 
-    # Shapes expected by KokoroVocoder.mlpackage
+    # Shapes expected by Kokoro models
+    # For golden parity, normalize to 5s bucket: asr_len=200, f0/n_len=400
     # asr: (1,512,1,asr_len), f0/n: (1,1,1,f0_len), s: (1,128)
     asr = vi['asr']          # (1,512,T_asr)
     f0 = vi['f0_curve']      # (1,T_f0)
     n = vi['n']              # (1,T_f0)
     s = vi['s']              # (1,128)
 
-    asr_len = int(asr.shape[-1])
-    f0_len = int(f0.shape[-1])
+    # Bucket lengths
+    asr_len_target = 200
+    f0_len_target = 400
+
+    # Tail-pad/truncate to bucket shapes
+    def pad_tail_1d(x: np.ndarray, T: int) -> np.ndarray:
+        out = np.zeros((1, T), dtype=np.float32)
+        t = min(T, x.shape[-1])
+        if t > 0:
+            out[:, :t] = x[:, :t]
+        return out
+
+    def pad_tail_asr(x: np.ndarray, T: int) -> np.ndarray:
+        out = np.zeros((1, 512, T), dtype=np.float32)
+        t = min(T, x.shape[-1])
+        if t > 0:
+            out[:, :, :t] = x[:, :, :t]
+        return out
+
+    asr_pad = pad_tail_asr(asr.astype(np.float32), asr_len_target)
+    f0_pad = pad_tail_1d(f0.astype(np.float32), f0_len_target)
+    n_pad = pad_tail_1d(n.astype(np.float32), f0_len_target)
+
+    asr_len = asr_len_target
+    f0_len = f0_len_target
 
     payload = {
         "meta": {
@@ -49,9 +80,9 @@ def main():
         "f0_shape": [1, 1, 1, f0_len],
         "n_shape": [1, 1, 1, f0_len],
         "s_shape": [1, 128],
-        "asr": np_to_list(asr),
-        "f0": np_to_list(f0),
-        "n": np_to_list(n),
+        "asr": np_to_list(asr_pad),
+        "f0": np_to_list(f0_pad),
+        "n": np_to_list(n_pad),
         "s": np_to_list(s)
     }
 
@@ -60,8 +91,8 @@ def main():
         model = KModel(disable_complex=True).to('cpu').eval()
         dec = model.decoder
         with torch.no_grad():
-            # f0: (1, T) -> (1,1,T) then transpose to (1,T,1) to match generator expectations
-            f0_t = torch.from_numpy(f0).float()
+            # Use padded f0 to match 5s bucket exactly
+            f0_t = torch.from_numpy(f0_pad).float()
             f0_up = dec.generator.f0_upsamp(f0_t[:, None]).transpose(1, 2)
             har_source, _, _ = dec.generator.m_source(f0_up)
             har_source = har_source.transpose(1, 2).squeeze(1)

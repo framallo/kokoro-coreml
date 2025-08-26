@@ -203,7 +203,8 @@ func melSpectrogram(audio: [Float], sampleRate: Int, nFFT: Int = 1024, hop: Int 
             var sum: Float = 0
             let filt = melFB[m]
             vDSP_dotpr(mag, 1, filt, 1, &sum, vDSP_Length(frameLen/2 + 1))
-            mel[m][t] = sum
+            // Convert to log scale to match Python tooling expectations (prevents 'chipmunk' audio)
+            mel[m][t] = logf(max(sum, 1e-6))
         }
     }
     return mel
@@ -431,19 +432,39 @@ struct App {
             // Two possible outputs: some Decoder_HAR variants output latent x (C x T), others output waveform
             let outName = model.modelDescription.outputDescriptionsByName.keys.first!
             var audio: [Float]
-            if let arr = out.featureValue(for: outName)?.multiArrayValue, arr.shape.count == 2 {
-                // Shape assumed [C, T]
-                let C = arr.shape[0].intValue
-                let T = arr.shape[1].intValue
-                let s0 = arr.strides[0].intValue
-                let s1 = arr.strides[1].intValue
+            if let arr = out.featureValue(for: outName)?.multiArrayValue, (arr.shape.count == 2 || (arr.shape.count == 3 && arr.shape[0].intValue == 1)) {
+                // Shape can be [C, T] or [1, C, T]. Handle both.
+                let C: Int
+                let T: Int
+                let is3D: Bool
+
+                if arr.shape.count == 2 {
+                    C = arr.shape[0].intValue
+                    T = arr.shape[1].intValue
+                    is3D = false
+                } else { // 3D with batch=1
+                    C = arr.shape[1].intValue
+                    T = arr.shape[2].intValue
+                    is3D = true
+                }
+                
                 var x = Array(repeating: Array(repeating: Float(0), count: T), count: C)
-                for c in 0..<C {
-                    for t in 0..<T {
-                        let idx = c * s0 + t * s1
-                        x[c][t] = arr[idx].floatValue
+                // Use the built-in multi-dimensional subscripting to safely access elements,
+                // which correctly handles the internal strides of the MLMultiArray.
+                if is3D {
+                    for c in 0..<C {
+                        for t in 0..<T {
+                            x[c][t] = arr[[0, c, t] as [NSNumber]].floatValue
+                        }
+                    }
+                } else {
+                    for c in 0..<C {
+                        for t in 0..<T {
+                            x[c][t] = arr[[c, t] as [NSNumber]].floatValue
+                        }
                     }
                 }
+                
                 // Hybrid parity: save latent and call Python iSTFT to reconstruct
                 let cwd = URL(fileURLWithPath: FileManager.default.currentDirectoryPath)
                 let ts = ISO8601DateFormatter().string(from: Date()).replacingOccurrences(of: ":", with: "-")
@@ -451,10 +472,13 @@ struct App {
                 try FileManager.default.createDirectory(at: outDir, withIntermediateDirectories: true)
                 let latentCSV = outDir.appendingPathComponent("\(ts)_latent.csv")
                 var lines: [String] = []
-                lines.reserveCapacity(T)
-                for t in 0..<T {
-                    var row = [String](); row.reserveCapacity(C)
-                    for c in 0..<C { row.append(String(x[c][t])) }
+                // Write C x T: each line is a channel, comma-separated values are time steps
+                lines.reserveCapacity(C)
+                for c in 0..<C {
+                    var row = [String](); row.reserveCapacity(T)
+                    // Get the channel's data across time
+                    let channelData = x[c]
+                    for t in 0..<T { row.append(String(channelData[t])) }
                     lines.append(row.joined(separator: ","))
                 }
                 try lines.joined(separator: "\n").write(to: latentCSV, atomically: true, encoding: .utf8)
