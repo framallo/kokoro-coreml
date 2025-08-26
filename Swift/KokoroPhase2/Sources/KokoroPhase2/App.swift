@@ -287,14 +287,12 @@ struct App {
         let nWin = numWindows(total: asrLenTotal, window: windowAsr, stride: strideAsr)
 
         // Prepare output buffers with weight normalization
-        let windowSamples = windowF0 * samplesPerFrame / (windowF0 / windowAsr * (windowAsr / (samplesPerFrame)))
-        let windowSamplesExact = windowF0 * (samplesPerFrame / (windowF0 / (windowAsr * (samplesPerFrame / windowAsr))))
-        // Simpler: directly compute from frames
         let chunkSamples = windowAsr * samplesPerFrame
         let strideSamples = strideAsr * samplesPerFrame
         let totalSamples = max(chunkSamples, (nWin - 1) * strideSamples + chunkSamples)
         var accAudio = [Float](repeating: 0, count: totalSamples)
         var accWeight = [Float](repeating: 0, count: totalSamples)
+        let windowWeight = hannWindow(chunkSamples)
 
         let start = CFAbsoluteTimeGetCurrent()
         for w in 0..<nWin {
@@ -322,12 +320,13 @@ struct App {
             for i in 0..<outCount { tmp[i] = chunkArray[i].floatValue }
 
             let startSample = w * strideSamples
-            // Accumulate with simple rectangular window; normalize by weights afterwards
+            // Accumulate with Hann window; normalize by weights afterwards
             for i in 0..<outCount {
                 let idx = startSample + i
                 if idx < totalSamples {
-                    accAudio[idx] += tmp[i]
-                    accWeight[idx] += 1.0
+                    let wv = i < windowWeight.count ? windowWeight[i] : 1.0
+                    accAudio[idx] += tmp[i] * wv
+                    accWeight[idx] += wv
                 }
             }
         }
