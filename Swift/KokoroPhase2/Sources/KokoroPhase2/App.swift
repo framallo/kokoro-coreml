@@ -51,6 +51,32 @@ func makeMLMultiArray(shape: [Int], data: [Float]) throws -> MLMultiArray {
     return array
 }
 
+/// Pads or truncates a flattened 4D tensor (row-major) along the last dimension.
+/// srcShape and dstShape are [B, C, H, T] where T is time.
+func padOrTruncate4DLastDim(flat: [Float], srcShape: [Int], dstShape: [Int]) -> [Float] {
+    precondition(srcShape.count == 4 && dstShape.count == 4, "Shapes must be 4D")
+    let (srcB, srcC, srcH, srcT) = (srcShape[0], srcShape[1], srcShape[2], srcShape[3])
+    let (dstB, dstC, dstH, dstT) = (dstShape[0], dstShape[1], dstShape[2], dstShape[3])
+    precondition(srcB == dstB && srcC <= dstC && srcH <= dstH && srcB == 1, "Unsupported broadcast")
+    var out = [Float](repeating: 0, count: dstB * dstC * dstH * dstT)
+    let copyT = min(srcT, dstT)
+    // Only B=1 supported in this app
+    for c in 0..<min(srcC, dstC) {
+        for h in 0..<min(srcH, dstH) {
+            let srcOffset = ((0 * srcC + c) * srcH + h) * srcT
+            let dstOffset = ((0 * dstC + c) * dstH + h) * dstT
+            flat.withUnsafeBufferPointer { srcBuf in
+                out.withUnsafeMutableBufferPointer { dstBuf in
+                    for t in 0..<copyT {
+                        dstBuf[dstOffset + t] = srcBuf[srcOffset + t]
+                    }
+                }
+            }
+        }
+    }
+    return out
+}
+
 func saveWAV(_ samples: [Float], sampleRate: Double, url: URL) throws {
     let format = AVAudioFormat(standardFormatWithSampleRate: sampleRate, channels: 1)!
     let frameCount = AVAudioFrameCount(samples.count)
@@ -236,6 +262,78 @@ func saveMatrixCSV(rows: Int, cols: Int, value: (_ r: Int, _ c: Int) -> Float, u
     try lines.joined(separator: "\n").write(to: url, atomically: true, encoding: .utf8)
 }
 
+// MARK: - Decoder_HAR inverse iSTFT (parity with Python CustomSTFT)
+
+func hannPeriodic(_ n: Int) -> [Float] {
+    // Match PyTorch torch.hann_window(win_length, periodic=True)
+    var w = [Float](repeating: 0, count: n)
+    if n <= 1 { if n == 1 { w[0] = 1 } ; return w }
+    for i in 0..<n { w[i] = 0.5 - 0.5 * cos(2.0 * .pi * Float(i) / Float(n)) }
+    return w
+}
+
+func reconstructWaveformFromDecoderHAROutput(xChannelsByTime: [[Float]], nFFT: Int = 20, hop: Int = 5, center: Bool = true) -> [Float] {
+    // x has shape [C, T], where C = nFFT + 2 (per Kokoro iSTFTNet). Split into spec and phase.
+    let freqBins = nFFT / 2 + 1
+    let channels = xChannelsByTime.count
+    let frames = xChannelsByTime.first?.count ?? 0
+    guard channels >= freqBins * 2 else { return [] }
+    // Build spec and phase [freqBins][frames]
+    var mag = Array(repeating: [Float](repeating: 0, count: frames), count: freqBins)
+    var pha = Array(repeating: [Float](repeating: 0, count: frames), count: freqBins)
+    for k in 0..<freqBins {
+        let specChan = xChannelsByTime[k]
+        let phaseChan = xChannelsByTime[freqBins + k]
+        for t in 0..<frames {
+            mag[k][t] = expf(specChan[t])
+            pha[k][t] = sinf(phaseChan[t])
+        }
+    }
+    let window = hannPeriodic(nFFT)
+    let padLen = nFFT / 2
+    // Precompute cos/sin(k,n)
+    var cosTable = Array(repeating: [Float](repeating: 0, count: nFFT), count: freqBins)
+    var sinTable = Array(repeating: [Float](repeating: 0, count: nFFT), count: freqBins)
+    for k in 0..<freqBins {
+        for n in 0..<nFFT {
+            let angle = 2.0 * .pi * Float(k * n) / Float(nFFT)
+            cosTable[k][n] = cos(angle)
+            sinTable[k][n] = sin(angle)
+        }
+    }
+    // Overlap-add buffer (include center pad on both ends)
+    let totalLen = frames * hop + (center ? 2 * padLen : 0) + nFFT
+    var y = [Float](repeating: 0, count: totalLen)
+    let scale: Float = 1.0 / Float(nFFT)
+    for t in 0..<frames {
+        var frame = [Float](repeating: 0, count: nFFT)
+        for k in 0..<freqBins {
+            // real = mag * cos(phase); imag = mag * sin(phase)
+            let realk = mag[k][t] * cos(pha[k][t])
+            let imagk = mag[k][t] * sin(pha[k][t])
+            // Accumulate IDFT contribution for each time sample n
+            for n in 0..<nFFT {
+                // inverse: real*cos - imag*sin
+                frame[n] += (realk * cosTable[k][n] - imagk * sinTable[k][n])
+            }
+        }
+        // Apply window and scale
+        for n in 0..<nFFT { frame[n] *= window[n] * scale }
+        // Write to output with stride hop and optional center pad
+        let base = (center ? padLen : 0) + t * hop
+        for n in 0..<nFFT {
+            let idx = base + n
+            if idx < y.count { y[idx] += frame[n] }
+        }
+    }
+    // Remove center padding
+    if center && y.count > 2 * padLen {
+        return Array(y[padLen..<(y.count - padLen)])
+    } else {
+        return y
+    }
+}
+
 @main
 struct App {
     static func main() throws {
@@ -244,11 +342,12 @@ struct App {
         let data = try Data(contentsOf: inputsURL)
         let vocoderInputs = try JSONDecoder().decode(VocoderInputs.self, from: data)
 
-        // Prefer exact parity path if HAR features present
+        // Prefer exact parity path if HAR features present and explicitly enabled
         let harSpecPresent = (vocoderInputs.har_spec != nil && vocoderInputs.har_phase != nil && vocoderInputs.har_spec_shape != nil && vocoderInputs.har_phase_shape != nil)
+        let preferHAR = ProcessInfo.processInfo.environment["USE_DECODER_HAR"] == "1"
         var model: MLModel
         var modelNameUsed = ""
-        if harSpecPresent {
+        if harSpecPresent && preferHAR {
             let harURL = locateResource(named: "KokoroDecoder_HAR_5s.mlpackage")
             if FileManager.default.fileExists(atPath: harURL.path) {
                 let compiled = try MLModel.compileModel(at: harURL)
@@ -271,27 +370,98 @@ struct App {
             modelNameUsed = "KokoroVocoder.mlpackage"
         }
 
-        if harSpecPresent && modelNameUsed.contains("Decoder_HAR") {
+        if preferHAR && harSpecPresent && modelNameUsed.contains("Decoder_HAR") {
             // Direct HAR decoding path (exact parity with golden)
             guard let hsShape = vocoderInputs.har_spec_shape, let hpShape = vocoderInputs.har_phase_shape,
                   let hs = vocoderInputs.har_spec, let hp = vocoderInputs.har_phase else {
                 throw NSError(domain: "kokoro.phase2", code: -3, userInfo: [NSLocalizedDescriptionKey: "HAR features missing despite presence flag"])
             }
-            let hsMA = try makeMLMultiArray(shape: hsShape, data: hs)
-            let hpMA = try makeMLMultiArray(shape: hpShape, data: hp)
+            var hsData = hs
+            var hpData = hp
+            // Models expect fixed shapes like (1, 11, 1, 24001). Pad/truncate last dim if needed.
+            let hsFixed = [hsShape[0], hsShape[1], hsShape[2], max(hsShape[3], 24001)]
+            let hpFixed = [hpShape[0], hpShape[1], hpShape[2], max(hpShape[3], 24001)]
+            if hsShape != hsFixed { hsData = padOrTruncate4DLastDim(flat: hs, srcShape: hsShape, dstShape: hsFixed) }
+            if hpShape != hpFixed { hpData = padOrTruncate4DLastDim(flat: hp, srcShape: hpShape, dstShape: hpFixed) }
+            let hsMA = try makeMLMultiArray(shape: hsFixed, data: hsData)
+            let hpMA = try makeMLMultiArray(shape: hpFixed, data: hpData)
+
+            // Also supply required conditioning inputs
+            let asrMA = try makeMLMultiArray(shape: vocoderInputs.asr_shape, data: vocoderInputs.asr)
+            let f0MA  = try makeMLMultiArray(shape: vocoderInputs.f0_shape, data: vocoderInputs.f0)
+            let nMA   = try makeMLMultiArray(shape: vocoderInputs.n_shape, data: vocoderInputs.n)
+            let sMA   = try makeMLMultiArray(shape: vocoderInputs.s_shape, data: vocoderInputs.s)
             let start = CFAbsoluteTimeGetCurrent()
             let out = try model.prediction(dict: [
                 "har_spec": MLFeatureValue(multiArray: hsMA),
                 "har_phase": MLFeatureValue(multiArray: hpMA),
+                "asr": MLFeatureValue(multiArray: asrMA),
+                "f0_curve": MLFeatureValue(multiArray: f0MA),
+                "n": MLFeatureValue(multiArray: nMA),
+                "s": MLFeatureValue(multiArray: sMA),
             ])
             let elapsed = CFAbsoluteTimeGetCurrent() - start
-            guard let outName = model.modelDescription.outputDescriptionsByName.keys.first,
-                  let waveformArray = out.featureValue(for: outName)?.multiArrayValue else {
+            // Two possible outputs: some Decoder_HAR variants output latent x (C x T), others output waveform
+            let outName = model.modelDescription.outputDescriptionsByName.keys.first!
+            var audio: [Float]
+            if let arr = out.featureValue(for: outName)?.multiArrayValue, arr.shape.count == 2 {
+                // Shape assumed [C, T]
+                let C = arr.shape[0].intValue
+                let T = arr.shape[1].intValue
+                let s0 = arr.strides[0].intValue
+                let s1 = arr.strides[1].intValue
+                var x = Array(repeating: Array(repeating: Float(0), count: T), count: C)
+                for c in 0..<C {
+                    for t in 0..<T {
+                        let idx = c * s0 + t * s1
+                        x[c][t] = arr[idx].floatValue
+                    }
+                }
+                // Hybrid parity: save latent and call Python iSTFT to reconstruct
+                let cwd = URL(fileURLWithPath: FileManager.default.currentDirectoryPath)
+                let ts = ISO8601DateFormatter().string(from: Date()).replacingOccurrences(of: ":", with: "-")
+                let outDir = cwd.appendingPathComponent("outputs/\(ts)", isDirectory: true)
+                try FileManager.default.createDirectory(at: outDir, withIntermediateDirectories: true)
+                let latentCSV = outDir.appendingPathComponent("\(ts)_latent.csv")
+                var lines: [String] = []
+                lines.reserveCapacity(T)
+                for t in 0..<T {
+                    var row = [String](); row.reserveCapacity(C)
+                    for c in 0..<C { row.append(String(x[c][t])) }
+                    lines.append(row.joined(separator: ","))
+                }
+                try lines.joined(separator: "\n").write(to: latentCSV, atomically: true, encoding: .utf8)
+                let outWavHybrid = outDir.appendingPathComponent("\(ts).wav")
+                let py = "/usr/bin/env"
+                let script = cwd.appendingPathComponent("tools/reconstruct_from_latent.py").path
+                let proc = Process()
+                proc.launchPath = py
+                proc.arguments = ["python3", script, "--latent", latentCSV.path, "--out_wav", outWavHybrid.path, "--n_fft", "20", "--hop", "5", "--sr", "24000"]
+                let pipe = Pipe(); proc.standardOutput = pipe; proc.standardError = pipe
+                proc.launch(); proc.waitUntilExit()
+                if proc.terminationStatus != 0 {
+                    let data = pipe.fileHandleForReading.readDataToEndOfFile()
+                    let log = String(data: data, encoding: .utf8) ?? ""
+                    throw NSError(domain: "kokoro.phase2", code: -4, userInfo: [NSLocalizedDescriptionKey: "Python iSTFT failed", "log": log])
+                }
+                // Load WAV back for playback and mel export
+                // Simple WAV reader (16-bit PCM mono)
+                let wavData = try Data(contentsOf: outWavHybrid)
+                // Skip 44-byte header
+                let pcm = wavData.dropFirst(44)
+                let samples = pcm.withUnsafeBytes { raw -> [Int16] in
+                    let ptr = raw.bindMemory(to: Int16.self)
+                    return Array(ptr)
+                }
+                audio = samples.map { Float($0) / 32767.0 }
+            } else if let waveformArray = out.featureValue(for: outName)?.multiArrayValue {
+                let count = waveformArray.count
+                var tmp = [Float](repeating: 0, count: count)
+                for i in 0..<count { tmp[i] = waveformArray[i].floatValue }
+                audio = tmp
+            } else {
                 throw NSError(domain: "kokoro.phase2", code: -1, userInfo: [NSLocalizedDescriptionKey: "Missing waveform output"])
             }
-            let count = waveformArray.count
-            var audio = [Float](repeating: 0, count: count)
-            for i in 0..<count { audio[i] = waveformArray[i].floatValue }
 
             // Save artifacts to outputs/[timestamp]/[timestamp].{wav,csv,png,json}
             let cwd = URL(fileURLWithPath: FileManager.default.currentDirectoryPath)
