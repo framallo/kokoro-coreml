@@ -270,3 +270,15 @@ Implications:
 - Takeaway: Adding a tiny, deterministic DSP stage in Swift is tractable and unlocks a fully on-device Golden Reference path.
 
 
+
+
+## 13. Correlation as the Primary Fidelity Metric — 2025-08-27
+
+- Correlation between candidate and golden waveforms is the most sensitive indicator of structural fidelity (1.0 = perfect match). MSE/MAE can be dominated by gain; correlation tracks waveform shape.
+- Decoder-only CoreML runs showed very low correlation (≈0.02–0.14) despite perfect input parity (MAE=0.0 for asr/f0/n/s), implicating the decoder-only export’s source approximation rather than feature prep.
+- Switching to the Decoder_HAR path with a corrected Swift inverse STFT (including 1/N IFFT scaling and proper onesided-to-twosided reconstruction) increased correlation to ≈0.66 vs golden. Amplitude differences (dbFS mismatch) did not materially affect correlation.
+- Added diagnostic toggles in Swift HAR post-processing:
+  - `KOKORO_USE_RAW_PHASE=1` to bypass sin() on phase (corr ≈0.62–0.66 in tests)
+  - `KOKORO_PACKING=interleaved` to support alt channel layouts
+  - `KOKORO_DISABLE_HALF_SCALE=1` to test mirror-scaling hypothesis
+- Conclusion: For V1, prioritize the HAR path. Decoder-only requires exact source parity (custom op or CPU-side source) to reach high correlation.

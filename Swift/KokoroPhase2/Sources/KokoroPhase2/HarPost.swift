@@ -33,6 +33,13 @@ public struct HarPostProcessor {
         self.sinTable = s
     }
 
+    /// Reconstructs waveform from HAR CoreML network output.
+    ///
+    /// Environment controls:
+    /// - `KOKORO_USE_RAW_PHASE=1`     → treat phase channel as raw angle (no sin)
+    /// - `KOKORO_PACKING=interleaved` → channels ordered [mag0, phase0, mag1, phase1, ...]
+    ///                                 default is blocked packing [mag bins..., phase bins...]
+    /// - `KOKORO_DISABLE_HALF_SCALE=1`→ do not half interior bins before mirroring
     public func inverseFromNetworkOutput(_ output: MLMultiArray, channels: Int, frames: Int) throws -> [Float] {
         let data = try DecoderOnly5sRunner.flattenFloatArrayStatic(output)
         let strideT = frames
@@ -51,12 +58,23 @@ public struct HarPostProcessor {
         var real = [Float](repeating: 0, count: nFFT)
         var imag = [Float](repeating: 0, count: nFFT)
 
-        let useRawPhase = (ProcessInfo.processInfo.environment["KOKORO_USE_RAW_PHASE"] == "1")
+        let env = ProcessInfo.processInfo.environment
+        let useRawPhase = (env["KOKORO_USE_RAW_PHASE"] == "1")
+        let packingInterleaved = (env["KOKORO_PACKING"]?.lowercased() == "interleaved")
+        let halfScale = (env["KOKORO_DISABLE_HALF_SCALE"] == "1") ? false : true
         for t in 0..<frames {
             // Build complex spectrum from magnitude/phase
             for k in 0..<bins {
-                let logMag = data[k*strideT + t]
-                let phaseRaw = data[(bins + k)*strideT + t]
+                let (logMag, phaseRaw): (Float, Float)
+                if packingInterleaved {
+                    // [mag0, phase0, mag1, phase1, ...]
+                    logMag = data[(2*k)*strideT + t]
+                    phaseRaw = data[(2*k + 1)*strideT + t]
+                } else {
+                    // [mag all bins..., phase all bins...]
+                    logMag = data[k*strideT + t]
+                    phaseRaw = data[(bins + k)*strideT + t]
+                }
                 let mag = expf(logMag)
                 if k == 0 || k == bins - 1 {
                     // DC and Nyquist are purely real in onesided representation
@@ -69,7 +87,7 @@ public struct HarPostProcessor {
                 }
             }
             // Scale interior bins by 1/2 when constructing two-sided spectrum
-            if bins > 2 {
+            if halfScale && bins > 2 {
                 for k in 1..<(bins - 1) {
                     real[k] *= 0.5
                     imag[k] *= 0.5
