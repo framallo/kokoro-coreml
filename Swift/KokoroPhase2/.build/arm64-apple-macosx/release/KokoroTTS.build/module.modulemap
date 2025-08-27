@@ -1,0 +1,4 @@
+module KokoroTTS {
+    header "/Users/mattmireles/Documents/GitHub/talktome/kokoro-coreml/Swift/KokoroPhase2/.build/arm64-apple-macosx/release/KokoroTTS.build/KokoroTTS-Swift.h"
+    requires objc
+}

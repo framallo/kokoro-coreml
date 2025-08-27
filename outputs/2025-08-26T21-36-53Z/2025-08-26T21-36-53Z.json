@@ -1,0 +1,20 @@
+{
+  "sample_rate" : 24000,
+  "input_text" : "Hello Matt, this is Kokoro running on Apple Neural Engine.",
+  "latency_seconds" : {
+    "coreml_inference" : 19.117061972618103
+  },
+  "artifacts" : {
+    "csv" : "2025-08-26T21-36-53Z.csv",
+    "png" : "2025-08-26T21-36-53Z.png",
+    "wav" : "2025-08-26T21-36-53Z.wav"
+  },
+  "model" : "KokoroDecoder_HAR_5s.mlpackage",
+  "mel_params" : {
+    "n_mels" : 80,
+    "hop_length" : 300,
+    "fmin" : 0,
+    "n_fft" : 1024,
+    "fmax" : 12000
+  }
+}

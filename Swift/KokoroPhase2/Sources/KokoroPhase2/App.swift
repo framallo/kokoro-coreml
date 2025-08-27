@@ -210,6 +210,59 @@ func melSpectrogram(audio: [Float], sampleRate: Int, nFFT: Int = 1024, hop: Int 
     }
     return mel
 }
+/// Estimates effective non-zero frame length of ASR features by scanning from the end.
+/// ASR is expected to be flattened [channels * totalT] in channel-major order.
+func effectiveNonzeroFrames(asrFlat: [Float], channels: Int, totalT: Int, threshold: Float = 1e-7) -> Int {
+    guard channels > 0, totalT > 0 else { return 0 }
+    // Scan backwards for any sample exceeding threshold
+    var t = totalT - 1
+    while t >= 0 {
+        var found = false
+        let baseT = t
+        // Iterate channels; break early when found
+        for c in 0..<channels {
+            let v = asrFlat[c * totalT + baseT]
+            if v > threshold || v < -threshold { found = true; break }
+        }
+        if found { return t + 1 }
+        t -= 1
+    }
+    return 0
+}
+
+// Trim trailing silence/noise by RMS threshold with fadeout
+func trimTailByRMS(_ audio: [Float], sampleRate: Int, windowMs: Float = 10.0, threshold: Float = 0.003, fadeMs: Float = 20.0) -> [Float] {
+    guard !audio.isEmpty else { return audio }
+    let win = max(1, Int((windowMs / 1000.0) * Float(sampleRate)))
+    let fade = max(1, Int((fadeMs / 1000.0) * Float(sampleRate)))
+    let count = audio.count
+    var lastIdx: Int = count - 1
+    // Scan windows from the end towards start
+    var start = count - win
+    while start >= 0 {
+        var se: Double = 0
+        for i in 0..<win {
+            let v = Double(audio[start + i])
+            se += v * v
+        }
+        let rms = sqrt(se / Double(win))
+        if Float(rms) > threshold { lastIdx = min(count - 1, start + win - 1); break }
+        start -= win
+    }
+    // Keep up to lastIdx + fade
+    let cut = min(count, lastIdx + fade)
+    var out = Array(audio[0..<cut])
+    // Apply fade on the tail
+    let fadeLen = min(fade, out.count)
+    if fadeLen > 0 {
+        for i in 0..<fadeLen {
+            let scale = Float(fadeLen - i) / Float(fadeLen)
+            out[out.count - 1 - i] *= scale
+        }
+    }
+    return out
+}
+
 
 func saveMelCSV(mel: [[Float]], url: URL) throws {
     // mel: [nMels][T] -> write rows as frames (T rows, 80 columns)
@@ -369,6 +422,31 @@ func loadWAVMono16(url: URL) throws -> ([Float], Int) {
     }
     let audio = samplesI16.map { Float($0) / 32767.0 }
     return (audio, sr)
+}
+
+// MARK: - Audio-level comparison
+
+func computeAudioMSE(_ a: [Float], _ b: [Float], maxShiftSamples: Int = 2400) -> (mse: Float, shift: Int, used: Int) {
+    if a.isEmpty || b.isEmpty { return (Float.greatestFiniteMagnitude, 0, 0) }
+    func mseAtShift(_ s: Int) -> (Float, Int) {
+        let startA = max(0, -s)
+        let startB = max(0, s)
+        let count = min(a.count - startA, b.count - startB)
+        if count <= 0 { return (Float.greatestFiniteMagnitude, 0) }
+        var se: Double = 0
+        for i in 0..<count { let d = Double(a[startA + i] - b[startB + i]); se += d*d }
+        return (Float(se / Double(count)), count)
+    }
+    var best = mseAtShift(0)
+    var bestShift = 0
+    let step = max(1, maxShiftSamples / 30)
+    var s = -maxShiftSamples
+    while s <= maxShiftSamples {
+        let (m, used) = mseAtShift(s)
+        if m < best.0 { best = (m, used); bestShift = s }
+        s += step
+    }
+    return (best.0, bestShift, best.1)
 }
 
 private func reportBandMSE(_ a: [[Float]], _ b: [[Float]], label: String) {
@@ -576,6 +654,12 @@ struct App {
             try saveMelPNG(mel: mel, url: pngURL)
             if ProcessInfo.processInfo.environment["COMPARE_GOLDEN"] == "1" {
                 compareAgainstGolden(currentMel: mel, cwd: cwd)
+                let goldenWAV = cwd.appendingPathComponent("outputs/golden/golden.wav")
+                if FileManager.default.fileExists(atPath: goldenWAV.path) {
+                    let (gold, sr) = try loadWAVMono16(url: goldenWAV)
+                    let (m, shift, used) = computeAudioMSE(audio, gold, maxShiftSamples: Int(0.2 * Double(sr)))
+                    print(String(format: "Audio MSE=%.6f @shift=%d (samples used=%d)", m, shift, used))
+                }
             }
 
             let meta: [String: Any] = [
@@ -645,7 +729,9 @@ struct App {
             if total <= window { return 1 }
             return Int(ceil(Double(total - window) / Double(stride))) + 1
         }
-        let nWin = numWindows(total: asrLenTotal, window: windowAsr, stride: strideAsr)
+        // Use full declared ASR length for synthesis windows
+        let synthesisT = asrLenTotal
+        let nWin = numWindows(total: synthesisT, window: windowAsr, stride: strideAsr)
 
         // Prepare output buffers with weight normalization
         let chunkSamples = windowAsr * samplesPerFrame
@@ -654,7 +740,7 @@ struct App {
         var accAudio = [Float](repeating: 0, count: totalSamples)
         var accWeight = [Float](repeating: 0, count: totalSamples)
         var windowWeight = hannWindow(chunkSamples)
-        if ProcessInfo.processInfo.environment["RECT_WINDOW"] == "1" {
+        if ProcessInfo.processInfo.environment["RECT_WINDOW"] == "1" || nWin == 1 {
             windowWeight = [Float](repeating: 1.0, count: chunkSamples)
         }
 
@@ -707,14 +793,8 @@ struct App {
         if expectedSamples > 0 && expectedSamples < audio.count {
             audio = Array(audio[0..<expectedSamples])
         }
-        // Optional short fade-out to suppress tail artifacts
-        let fadeSamples = min(2048, audio.count)
-        if fadeSamples > 0 {
-            for i in 0..<fadeSamples {
-                let scale = Float(fadeSamples - i) / Float(fadeSamples)
-                audio[audio.count - 1 - i] *= scale
-            }
-        }
+        // Trim by RMS tail and fade-out
+        audio = trimTailByRMS(audio, sampleRate: vocoderInputs.meta.sample_rate)
 
         // Save artifacts to outputs/[timestamp]/[timestamp].{wav,csv,png,json}
         let cwd = URL(fileURLWithPath: FileManager.default.currentDirectoryPath)
@@ -736,6 +816,12 @@ struct App {
         try saveMelPNG(mel: mel, url: pngURL)
         if ProcessInfo.processInfo.environment["COMPARE_GOLDEN"] == "1" {
             compareAgainstGolden(currentMel: mel, cwd: cwd)
+            let goldenWAV = cwd.appendingPathComponent("outputs/golden/golden.wav")
+            if FileManager.default.fileExists(atPath: goldenWAV.path) {
+                let (gold, sr) = try loadWAVMono16(url: goldenWAV)
+                let (m, shift, used) = computeAudioMSE(audio, gold, maxShiftSamples: Int(0.2 * Double(sr)))
+                print(String(format: "Audio MSE=%.6f @shift=%d (samples used=%d)", m, shift, used))
+            }
         }
 
         // Save metadata.json

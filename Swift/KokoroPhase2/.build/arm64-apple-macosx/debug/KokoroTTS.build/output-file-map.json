@@ -1,0 +1,11 @@
+{
+  "": {
+    "swift-dependencies": "/Users/mattmireles/Documents/GitHub/talktome/kokoro-coreml/Swift/KokoroPhase2/.build/arm64-apple-macosx/debug/KokoroTTS.build/master.swiftdeps"
+  },
+  "/Users/mattmireles/Documents/GitHub/talktome/kokoro-coreml/Swift/KokoroPhase2/Sources/KokoroTTS/KokoroTTS.swift": {
+    "dependencies": "/Users/mattmireles/Documents/GitHub/talktome/kokoro-coreml/Swift/KokoroPhase2/.build/arm64-apple-macosx/debug/KokoroTTS.build/KokoroTTS.d",
+    "object": "/Users/mattmireles/Documents/GitHub/talktome/kokoro-coreml/Swift/KokoroPhase2/.build/arm64-apple-macosx/debug/KokoroTTS.build/KokoroTTS.swift.o",
+    "swiftmodule": "/Users/mattmireles/Documents/GitHub/talktome/kokoro-coreml/Swift/KokoroPhase2/.build/arm64-apple-macosx/debug/KokoroTTS.build/KokoroTTS~partial.swiftmodule",
+    "swift-dependencies": "/Users/mattmireles/Documents/GitHub/talktome/kokoro-coreml/Swift/KokoroPhase2/.build/arm64-apple-macosx/debug/KokoroTTS.build/KokoroTTS.swiftdeps"
+  }
+}

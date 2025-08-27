@@ -118,6 +118,50 @@ def main():
     except Exception as e:
         print(f"⚠️ Failed to compute HAR features for dump: {e}")
 
+    # Attach feature statistics for parity checks (global + per-channel for ASR)
+    try:
+        # Shapes: asr_pad (1,512,T), f0_pad (1,T), n_pad (1,T), s (1,128)
+        T = int(asr_pad.shape[-1])
+        asr_ch_mean = asr_pad.mean(axis=2).reshape(-1).astype(np.float32)  # (512,)
+        asr_ch_std = asr_pad.std(axis=2).reshape(-1).astype(np.float32)
+        stats = {
+            "asr": {
+                "shape": [1, 512, T],
+                "mean": float(asr_pad.mean()),
+                "std": float(asr_pad.std()),
+                "min": float(asr_pad.min()),
+                "max": float(asr_pad.max()),
+                "per_channel": {
+                    "mean": asr_ch_mean.tolist(),
+                    "std": asr_ch_std.tolist()
+                }
+            },
+            "f0": {
+                "shape": [1, int(f0_pad.shape[-1])],
+                "mean": float(f0_pad.mean()),
+                "std": float(f0_pad.std()),
+                "min": float(f0_pad.min()),
+                "max": float(f0_pad.max())
+            },
+            "n": {
+                "shape": [1, int(n_pad.shape[-1])],
+                "mean": float(n_pad.mean()),
+                "std": float(n_pad.std()),
+                "min": float(n_pad.min()),
+                "max": float(n_pad.max())
+            },
+            "s": {
+                "shape": [1, int(s.shape[-1])],
+                "mean": float(s.mean()),
+                "std": float(s.std()),
+                "min": float(s.min()),
+                "max": float(s.max())
+            }
+        }
+        payload["stats"] = stats
+    except Exception as e:
+        print(f"⚠️ Failed to attach feature stats: {e}")
+
     out_json.write_text(json.dumps(payload))
     print(f"Wrote {out_json}")
 

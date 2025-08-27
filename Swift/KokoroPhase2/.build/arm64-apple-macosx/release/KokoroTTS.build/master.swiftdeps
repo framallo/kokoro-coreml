@@ -1,0 +1,6 @@
+version: "Apple Swift version 6.1.2 (swiftlang-6.1.2.1.2 clang-1700.0.13.5)"
+options: "8012fa53694c397a9c19e3b764126f990387b5bc080e43aef4f1d43f3c136e3e"
+build_start_time: [1756244155, 172271000]
+build_end_time: [1756244155, 958761000]
+inputs:
+  "/Users/mattmireles/Documents/GitHub/talktome/kokoro-coreml/Swift/KokoroPhase2/Sources/KokoroTTS/KokoroTTS.swift": [1756242283, 695741800]

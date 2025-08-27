@@ -73,6 +73,33 @@ USE_DECODER_HAR=1 Swift/KokoroPhase2/.build/release/KokoroPhase2
   - Honor `MLMultiArray.strides` when reading 2D tensors.
   - When bucketing or windowing, be explicit about `[Channels, Time]` vs `[Time, Channels]` layout to avoid feature scrambling.
 
+## 2025‑08‑27 — “Slightly off” audio: metrics and next moves
+
+### What the metrics show (5s bucket @ 24 kHz)
+- WAV Mel MSE (Swift mel vs golden.wav mel): ~1.9275, best shift 0.
+  - Band MSE: low≈2.21, mid≈1.96, high≈1.70.
+- Audio‑level MSE (waveform vs golden.wav): 0.00546 @ shift ≈160 samples (~6.7 ms), ~95.8k samples used.
+- CSV Mel MSE vs golden.csv is very large; our Swift mel (HTK + log power) differs from the legacy CSV pipeline. Use WAV mel/audio metrics instead of golden.csv.
+
+Interpretation: spectral content is close and timing drift is negligible. Remaining audible “off” quality likely comes from pre‑decoder feature conditioning (asr/f0/n/s) not matching Python exactly.
+
+### Action Items
+1. Dump feature stats in Python during `tools/dump_vocoder_inputs.py`:
+   - Per‑tensor mean/std/min/max for asr/f0/n/s.
+   - Optional per‑channel mean/std for asr (512D).
+2. Log same stats in Swift just before CoreML inference and diff.
+3. Add env‑gated normalization in Swift to match Python:
+   - asr: per‑channel z‑score with provided μ/σ.
+   - f0: ensure units and scaling (Hz/logHz/z‑score) match.
+   - n: scale/offset parity.
+   - s: L2 norm or affine if used upstream.
+4. Re‑measure WAV Mel MSE and Audio MSE; target Mel < 1.0 and Audio < 0.003 without tail artifacts.
+
+### Already ruled out
+- Device precision/fallback (CPU/GPU/ANE) — identical.
+- Major OLA defects — band MSE and audio MSE stable; tails trimmed.
+- Latent→iSTFT drift — using model waveform when available; reconstruction parity previously validated.
+
 ### Next steps (tracked)
 - Port `CustomSTFT.inverse` to Swift (vDSP/Metal) with exact parity tests against Python for nFFT/hop/center/window and DC/Nyquist handling.
 - Harden windowed vocoder slicing by asserting ASR flattening layout and adding unit tests.

@@ -1,0 +1,17 @@
+{
+  "": {
+    "swift-dependencies": "/Users/mattmireles/Documents/GitHub/talktome/kokoro-coreml/Swift/KokoroPhase2/.build/arm64-apple-macosx/debug/KokoroPhase2.build/master.swiftdeps"
+  },
+  "/Users/mattmireles/Documents/GitHub/talktome/kokoro-coreml/Swift/KokoroPhase2/Sources/KokoroPhase2/App.swift": {
+    "dependencies": "/Users/mattmireles/Documents/GitHub/talktome/kokoro-coreml/Swift/KokoroPhase2/.build/arm64-apple-macosx/debug/KokoroPhase2.build/App.d",
+    "object": "/Users/mattmireles/Documents/GitHub/talktome/kokoro-coreml/Swift/KokoroPhase2/.build/arm64-apple-macosx/debug/KokoroPhase2.build/App.swift.o",
+    "swiftmodule": "/Users/mattmireles/Documents/GitHub/talktome/kokoro-coreml/Swift/KokoroPhase2/.build/arm64-apple-macosx/debug/KokoroPhase2.build/App~partial.swiftmodule",
+    "swift-dependencies": "/Users/mattmireles/Documents/GitHub/talktome/kokoro-coreml/Swift/KokoroPhase2/.build/arm64-apple-macosx/debug/KokoroPhase2.build/App.swiftdeps"
+  },
+  "/Users/mattmireles/Documents/GitHub/talktome/kokoro-coreml/Swift/KokoroPhase2/Sources/KokoroPhase2/MLHelpers.swift": {
+    "dependencies": "/Users/mattmireles/Documents/GitHub/talktome/kokoro-coreml/Swift/KokoroPhase2/.build/arm64-apple-macosx/debug/KokoroPhase2.build/MLHelpers.d",
+    "object": "/Users/mattmireles/Documents/GitHub/talktome/kokoro-coreml/Swift/KokoroPhase2/.build/arm64-apple-macosx/debug/KokoroPhase2.build/MLHelpers.swift.o",
+    "swiftmodule": "/Users/mattmireles/Documents/GitHub/talktome/kokoro-coreml/Swift/KokoroPhase2/.build/arm64-apple-macosx/debug/KokoroPhase2.build/MLHelpers~partial.swiftmodule",
+    "swift-dependencies": "/Users/mattmireles/Documents/GitHub/talktome/kokoro-coreml/Swift/KokoroPhase2/.build/arm64-apple-macosx/debug/KokoroPhase2.build/MLHelpers.swiftdeps"
+  }
+}
