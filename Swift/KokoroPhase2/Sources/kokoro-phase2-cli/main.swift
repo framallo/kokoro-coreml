@@ -68,6 +68,41 @@ func main() throws {
     let t2 = now()
     try FileManager.default.createDirectory(at: outWav.deletingLastPathComponent(), withIntermediateDirectories: true)
     try WAV.writePCM16(fileURL: outWav, samples: audio, sampleRate: sr)
+    // Optional: dump inputs for parity checks
+    if ProcessInfo.processInfo.environment["KOKORO_DUMP_INPUTS"] == "1" {
+        func writeCSV(_ path: URL, _ rows: [[Float]]) throws {
+            let text = rows.map { row in row.map { String($0) }.joined(separator: ",") }.joined(separator: "\n")
+            try text.data(using: .utf8)!.write(to: path)
+        }
+        // asr: [1,512,1,200] → 512x200
+        do {
+            var rows: [[Float]] = []
+            let flat = fixture.asr
+            let cols = (fixture.shapes["asr"] ?? [1,512,1,200]).last ?? 200
+            let chans = (fixture.shapes["asr"] ?? [1,512,1,200])[1]
+            for c in 0..<(chans) {
+                let start = c * cols
+                let end = start + cols
+                rows.append(Array(flat[start..<end]))
+            }
+            try writeCSV(runDir.appendingPathComponent("asr.csv"), rows)
+        }
+        // f0_curve: [1,1,1,400]
+        do {
+            let row = fixture.f0_curve
+            try writeCSV(runDir.appendingPathComponent("f0_curve.csv"), [row])
+        }
+        // n: [1,1,1,400]
+        do {
+            let row = fixture.n
+            try writeCSV(runDir.appendingPathComponent("n.csv"), [row])
+        }
+        // s: [1,128]
+        do {
+            let row = fixture.s
+            try writeCSV(runDir.appendingPathComponent("s.csv"), [row])
+        }
+    }
     // Write metadata
     let metadata: [String: Any] = [
         "input_text": fixture.text,
