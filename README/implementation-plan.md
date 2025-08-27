@@ -90,8 +90,9 @@ Goal: Create a high-performance Swift TTS package. This will be achieved by vali
 - Observation: audio quality is slightly off (mild reverb/artifact) for the decoder-only export; likely due to the CoreML-friendly `m_source` used during export vs. the exact HN-NSF used by HAR (see `kokoro-generator-rebuild.md`).
 
 Next up (Phase 2):
-- Implement the formal numerical parity check (Step 9): dump Swift-side `asr/f0/n/s` tensors to disk and compare to the Python reference (target MAE ≤ 1e-5).
+- Implement the formal numerical parity check (Step 9): dump Swift-side `asr/f0/n/s` tensors to disk and compare to the Python reference (target MAE ≤ 1e-5). ✅ Completed via `KOKORO_DUMP_INPUTS=1` + `tools/compare_inputs_parity.py` (all MAE=0.0)
 - HAR path: Added optional HAR inputs (`har_spec`, `har_phase`) to the fixture and CLI. Implemented Accelerate-based inverse STFT in Swift to reconstruct audio from HAR outputs. Wire-up completed; parameter tuning in progress.
+- Added env-controlled compute units override to the Swift runner (`KOKORO_COMPUTE_UNITS` or `KOKORO_CPU_ONLY`) to enable CPU-only diagnostics and isolate ANE/GPU differences.
 - If input parity holds but quality gap remains, try diagnostic exports (FP32 CPU-only variant, or mlprogram re-export without CoreML-friendly source) to isolate the source module as the cause. Decoder-only artifact confirmed not to be from feature prep.
 
 ### Phase 3: Not Started
