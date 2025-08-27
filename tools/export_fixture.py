@@ -22,6 +22,7 @@ def main():
     p.add_argument('--voice', default='af_heart')
     p.add_argument('--speed', type=float, default=1.0)
     p.add_argument('--out', default=str(BASE / 'Swift/KokoroPhase2/Fixtures/fixture_decoder_only_5s.json'))
+    p.add_argument('--dump', action='store_true', help='Also write CSVs for asr/f0/n/s alongside JSON')
     args = p.parse_args()
 
     pipeline = HybridTTSPipeline(force_engine='coreml')
@@ -71,6 +72,20 @@ def main():
     with open(out_path, 'w') as f:
         json.dump(out, f)
     print(f"wrote fixture: {out_path}")
+
+    if args.dump:
+        dump_dir = out_path.parent
+        # Write CSVs to aid parity checks
+        def write_csv(path: Path, rows):
+            with open(path, 'w') as f:
+                for r in rows:
+                    f.write(','.join(str(float(x)) for x in r) + '\n')
+        # asr 512x200
+        rows = [asr_pad[0, c, :].tolist() for c in range(512)]
+        write_csv(dump_dir / 'asr.csv', rows)
+        write_csv(dump_dir / 'f0_curve.csv', [f0_pad[0].tolist()])
+        write_csv(dump_dir / 'n.csv', [n_pad[0].tolist()])
+        write_csv(dump_dir / 's.csv', [s.reshape(-1).tolist()])
 
 
 if __name__ == '__main__':
