@@ -26,6 +26,18 @@ struct VocoderInputs: Decodable {
     let har_phase_shape: [Int]?
     let har_spec: [Float]?
     let har_phase: [Float]?
+    // Optional stats for parity
+    struct StatsTensor: Decodable {
+        let shape: [Int]
+        let mean: Float
+        let std: Float
+        let min: Float
+        let max: Float
+        struct PerChannel: Decodable { let mean: [Float]?; let std: [Float]? }
+        let per_channel: PerChannel?
+    }
+    struct Stats: Decodable { let asr: StatsTensor?; let f0: StatsTensor?; let n: StatsTensor?; let s: StatsTensor? }
+    let stats: Stats?
 }
 
 func locateResource(named name: String) -> URL {
@@ -449,6 +461,24 @@ func computeAudioMSE(_ a: [Float], _ b: [Float], maxShiftSamples: Int = 2400) ->
     return (best.0, bestShift, best.1)
 }
 
+/// Shifts audio in time by `shift` samples while preserving length.
+/// Positive shift pads zeros at start and trims the tail; negative drops from start and pads zeros at end.
+func shiftAudio(_ audio: [Float], shift: Int) -> [Float] {
+    guard !audio.isEmpty, shift != 0 else { return audio }
+    let count = audio.count
+    if shift > 0 {
+        let pad = min(shift, count)
+        var out = [Float](repeating: 0, count: pad)
+        if count > pad { out += audio[0..<(count - pad)] }
+        return out
+    } else {
+        let drop = min(-shift, count)
+        var out = Array(audio[drop..<count])
+        out += [Float](repeating: 0, count: drop)
+        return out
+    }
+}
+
 private func reportBandMSE(_ a: [[Float]], _ b: [[Float]], label: String) {
     let nMels = min(a.count, b.count)
     guard nMels >= 80 else { return }
@@ -474,6 +504,11 @@ func saveMatrixCSV(rows: Int, cols: Int, value: (_ r: Int, _ c: Int) -> Float, u
         lines.append(rowVals.joined(separator: ","))
     }
     try lines.joined(separator: "\n").write(to: url, atomically: true, encoding: .utf8)
+}
+
+func saveVectorCSV(_ v: [Float], url: URL) throws {
+    let s = v.map { String($0) }.joined(separator: ",")
+    try s.write(to: url, atomically: true, encoding: .utf8)
 }
 
 // MARK: - Decoder_HAR inverse iSTFT (parity with Python CustomSTFT)
@@ -721,7 +756,26 @@ struct App {
             } }
             return out
         }
+        func zscoreASR(_ slice: inout [Float], winT: Int, stats: VocoderInputs.StatsTensor) {
+            guard let mu = stats.per_channel?.mean, let sigma = stats.per_channel?.std, mu.count >= 512, sigma.count >= 512 else { return }
+            for c in 0..<512 {
+                let m = mu[c]
+                let s = max(sigma[c], 1e-6)
+                let off = c * winT
+                for t in 0..<winT { slice[off + t] = (slice[off + t] - m) / s }
+            }
+        }
+        func zscore1D(_ slice: inout [Float], mean: Float, std: Float) {
+            let s = max(std, 1e-6)
+            for i in 0..<slice.count { slice[i] = (slice[i] - mean) / s }
+        }
         let s = try makeMLMultiArray(shape: vocoderInputs.s_shape, data: vocoderInputs.s)
+
+        // Optional: print stats for parity check
+        if let st = vocoderInputs.stats {
+            func p(_ name: String, _ t: VocoderInputs.StatsTensor?) { if let t = t { print(String(format: "%@ stats: mean=%.6f std=%.6f min=%.6f max=%.6f", name, t.mean, t.std, t.min, t.max)) } }
+            p("asr", st.asr); p("f0", st.f0); p("n", st.n); p("s", st.s)
+        }
 
         // Determine number of windows
         func numWindows(total: Int, window: Int, stride: Int) -> Int {
@@ -748,9 +802,15 @@ struct App {
         for w in 0..<nWin {
             let asrStart = w * strideAsr
             let f0Start = w * strideF0
-            let asrSlice = sliceASR(vocoderInputs.asr, totalT: asrLenTotal, startT: asrStart, winT: windowAsr)
-            let f0Slice = slice1D(vocoderInputs.f0, totalT: f0LenTotal, startT: f0Start, winT: windowF0)
-            let nSlice  = slice1D(vocoderInputs.n,  totalT: f0LenTotal, startT: f0Start, winT: windowF0)
+            var asrSlice = sliceASR(vocoderInputs.asr, totalT: asrLenTotal, startT: asrStart, winT: windowAsr)
+            var f0Slice = slice1D(vocoderInputs.f0, totalT: f0LenTotal, startT: f0Start, winT: windowF0)
+            var nSlice  = slice1D(vocoderInputs.n,  totalT: f0LenTotal, startT: f0Start, winT: windowF0)
+
+            // Optional normalization toggles (env-gated)
+            let env = ProcessInfo.processInfo.environment
+            if env["ASR_ZSCORE_CH"] == "1", let st = vocoderInputs.stats?.asr { zscoreASR(&asrSlice, winT: windowAsr, stats: st) }
+            if env["F0_ZSCORE"] == "1", let st = vocoderInputs.stats?.f0 { zscore1D(&f0Slice, mean: st.mean, std: st.std) }
+            if env["N_ZSCORE"] == "1", let st = vocoderInputs.stats?.n  { zscore1D(&nSlice,  mean: st.mean, std: st.std) }
 
             let asrMA = try makeMLMultiArray(shape: [1,512,1,windowAsr], data: asrSlice)
             let f0MA  = try makeMLMultiArray(shape: [1,1,1,windowF0], data: f0Slice)
@@ -806,6 +866,22 @@ struct App {
 
         print("Saved: \(wavURL.path)")
         print(String(format: "CoreML elapsed: %.3f s", elapsed))
+        // Optional time alignment to golden for A/B (does not affect saved WAV unless SAVE_ALIGNED=1)
+        if ProcessInfo.processInfo.environment["COMPARE_GOLDEN"] == "1" {
+            let goldenWAV = cwd.appendingPathComponent("outputs/golden/golden.wav")
+            if FileManager.default.fileExists(atPath: goldenWAV.path) {
+                let (gold, sr) = try loadWAVMono16(url: goldenWAV)
+                let (_, shift, _) = computeAudioMSE(audio, gold, maxShiftSamples: Int(0.02 * Double(sr)))
+                if shift != 0 {
+                    let aligned = shiftAudio(audio, shift: shift)
+                    if ProcessInfo.processInfo.environment["SAVE_ALIGNED"] == "1" {
+                        let alignedURL = outDir.appendingPathComponent("\(ts)_aligned.wav")
+                        try saveWAV(aligned, sampleRate: Double(vocoderInputs.meta.sample_rate), url: alignedURL)
+                        print("Saved aligned: \(alignedURL.path) @shift=\(shift)")
+                    }
+                }
+            }
+        }
         try playWAV(from: wavURL)
 
         // Save mel spectrogram (CSV + PNG)

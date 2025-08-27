@@ -66,7 +66,10 @@ public enum KokoroTTS {
               let arr = out.featureValue(for: outName)?.multiArrayValue else {
             throw Error.predictionFailed("Missing output tensor")
         }
-
+        if ProcessInfo.processInfo.environment["LOG_DEBUG"] == "1" {
+            let shapeStr = arr.shape.map { $0.stringValue }.joined(separator: "x")
+            print("HAR output shape=\(shapeStr)")
+        }
         // Detect output kind. Some Decoder_HAR variants emit waveform [1,1,T];
         // others emit latent features [C,T] or [1,C,T]. Handle both.
         let shape = arr.shape.map { $0.intValue }
@@ -78,6 +81,41 @@ public enum KokoroTTS {
             // Latent path: [1, C, T]
             let channels = shape[1]
             let framesT = shape[2]
+            // If requested, delegate reconstruction to Python parity script for exactness/speed
+            if ProcessInfo.processInfo.environment["PY_RECON"] == "1" {
+                // Write latent as CSV (each line = channel, columns = time)
+                var lines: [String] = []; lines.reserveCapacity(channels)
+                for c in 0..<channels {
+                    var row = [String](); row.reserveCapacity(framesT)
+                    for t in 0..<framesT { row.append(String(arr[[0, NSNumber(value: c), NSNumber(value: t)]].floatValue)) }
+                    lines.append(row.joined(separator: ","))
+                }
+                let tmpDir = FileManager.default.temporaryDirectory
+                let latentURL = tmpDir.appendingPathComponent("kokoro_latent_\(UUID().uuidString).csv")
+                try lines.joined(separator: "\n").write(to: latentURL, atomically: true, encoding: .utf8)
+                let outWav = tmpDir.appendingPathComponent("kokoro_out_\(UUID().uuidString).wav")
+                // Call tools/reconstruct_from_latent.py
+                let cwd = URL(fileURLWithPath: FileManager.default.currentDirectoryPath)
+                let script = cwd.appendingPathComponent("tools/reconstruct_from_latent.py").path
+                let proc = Process(); proc.launchPath = "/usr/bin/env"
+                proc.arguments = ["python3", script, "--latent", latentURL.path, "--out_wav", outWav.path, "--n_fft", "20", "--hop", "5", "--sr", "24000"]
+                let pipe = Pipe(); proc.standardOutput = pipe; proc.standardError = pipe
+                proc.launch(); proc.waitUntilExit()
+                guard proc.terminationStatus == 0 else {
+                    let data = pipe.fileHandleForReading.readDataToEndOfFile()
+                    let log = String(data: data, encoding: .utf8) ?? ""
+                    throw Error.predictionFailed("Python iSTFT failed: \(log)")
+                }
+                // Read WAV back into samples
+                let data = try Data(contentsOf: outWav)
+                guard data.count > 44 else { return [] }
+                let pcm = data.dropFirst(44)
+                let samplesI16: [Int16] = pcm.withUnsafeBytes { raw in
+                    let buf = raw.bindMemory(to: Int16.self); return Array(buf)
+                }
+                return samplesI16.map { Float($0) / 32767.0 }
+            }
+            // Otherwise do Swift reconstruction
             var x: [[Float]] = Array(repeating: Array(repeating: 0, count: framesT), count: channels)
             for c in 0..<channels {
                 for t in 0..<framesT { x[c][t] = arr[[0, NSNumber(value: c), NSNumber(value: t)]].floatValue }
