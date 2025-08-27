@@ -30,9 +30,26 @@ public final class DecoderOnly5sRunner {
         }
     }
 
+    /// Initializes the runner with a compiled Core ML model.
+    ///
+    /// Environment overrides:
+    /// - `KOKORO_COMPUTE_UNITS` ∈ {"all","cpuAndGPU","cpuOnly"}
+    /// - `KOKORO_CPU_ONLY` ∈ {"1","true"} (legacy shortcut; forces CPU only)
     public init(mlpackageURL: URL) throws {
         let config = MLModelConfiguration()
+        // Default to ALL (ANE+GPU+CPU), allow override via env for diagnostics
         config.computeUnits = .all
+        let env = ProcessInfo.processInfo.environment
+        if let cpuOnly = env["KOKORO_CPU_ONLY"], ["1","true","yes"].contains(cpuOnly.lowercased()) {
+            config.computeUnits = .cpuOnly
+        } else if let units = env["KOKORO_COMPUTE_UNITS"]?.lowercased() {
+            switch units {
+            case "all": config.computeUnits = .all
+            case "cpuandgpu", "cpu_gpu", "cpu+gpu": config.computeUnits = .cpuAndGPU
+            case "cpuonly", "cpu": config.computeUnits = .cpuOnly
+            default: break
+            }
+        }
         // Ensure model is compiled (supports .mlmodel and .mlpackage)
         let compiled = try MLModel.compileModel(at: mlpackageURL)
         self.model = try MLModel(contentsOf: compiled, configuration: config)
