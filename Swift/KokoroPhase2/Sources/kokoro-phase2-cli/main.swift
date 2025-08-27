@@ -236,6 +236,10 @@ func main() throws {
     }
     }
     let t2 = now()
+    // If a post-filter is loaded, apply it to audio
+    if runner.hasPostFilter {
+        audio = runner.applyPostFilterIfAvailable(samples: audio)
+    }
     try FileManager.default.createDirectory(at: outWav.deletingLastPathComponent(), withIntermediateDirectories: true)
     // Optional gain calibration to target dBFS
     var audioOut = audio
