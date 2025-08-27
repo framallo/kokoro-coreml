@@ -296,3 +296,7 @@ Implications:
 - Dumping the model’s HAR tensor and reconstructing with numpy (mirror of Swift) yields high corr vs Swift HAR (~0.81) and good corr vs golden (~0.62). Swift HAR corr vs golden remains slightly higher (~0.66). Conclusion: Swift packing/OLA matches the model’s internal format; the remaining delta to golden likely stems from downstream non-linearities beyond pure ISTFT (e.g., post-filtering) present in the golden path.
 
 - Phase non-linearity/scale matters: reconstructing with sin(phase) or 0.5×phase increases correlation vs golden (e.g., ~0.66→~0.67 in Swift). Added `KOKORO_PHASE_SCALE` to sweep this parameter. This suggests the model’s phase channel isn’t a direct angle; a learned nonlinearity or scaling is applied before inverse STFT in the golden path.
+
+- Phase scale sweep across [0.3..0.7] shows a shallow optimum near 0.3–0.4 (corr ≈ 0.6747 at 0.3). Gains are modest but consistent; we will set default `KOKORO_PHASE_SCALE=0.3` while keeping it tunable.
+
+- Current best (5s fixture): corr ≈ 0.6747 (HAR Swift with phase_scale=0.3). Next: validate on additional sentences and 15s/30s buckets to ensure robustness; if stable, encode this into model export or Swift defaults.

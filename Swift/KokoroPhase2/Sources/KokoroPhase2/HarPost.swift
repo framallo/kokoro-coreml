@@ -68,8 +68,8 @@ public struct HarPostProcessor {
         let useRawPhase = (env["KOKORO_USE_RAW_PHASE"] == "1")
         let phaseScale: Float = {
             if let s = env["KOKORO_PHASE_SCALE"], let v = Float(s) { return v }
-            // Empirically, sin(phase) or 0.5x*phase improves corr vs golden
-            return useRawPhase ? 0.5 : 1.0
+            // Empirically, ~0.3 maximizes corr on 5s fixture; keep tunable.
+            return 0.3
         }()
         let packingInterleaved = (env["KOKORO_PACKING"]?.lowercased() == "interleaved")
         let halfScale = (env["KOKORO_DISABLE_HALF_SCALE"] == "1") ? false : true
