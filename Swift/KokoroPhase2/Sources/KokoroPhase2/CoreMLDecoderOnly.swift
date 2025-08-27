@@ -18,6 +18,7 @@ public enum KokoroPhase2Error: Error {
 /// Output: audio samples as MLMultiArray, commonly (1,1,120000) float16/float32
 public final class DecoderOnly5sRunner {
     private let model: MLModel
+    public var rawModel: MLModel { model }
 
     public struct InputShapes {
         public let asr: [Int]
@@ -44,7 +45,7 @@ public final class DecoderOnly5sRunner {
             throw KokoroPhase2Error.predictionFailed("No output multiArray")
         }
         // Flatten to Float
-        let floats = try Self.flattenFloatArray(arr)
+        let floats = try Self.flattenFloatArrayStatic(arr)
         return (floats, 24000)
     }
 
@@ -57,7 +58,7 @@ public final class DecoderOnly5sRunner {
         ])
     }
 
-    private static func flattenFloatArray(_ arr: MLMultiArray) throws -> [Float] {
+    public static func flattenFloatArrayStatic(_ arr: MLMultiArray) throws -> [Float] {
         switch arr.dataType {
         case .float32:
             return Array(UnsafeBufferPointer(start: arr.dataPointer.assumingMemoryBound(to: Float.self), count: arr.count))
@@ -74,6 +75,10 @@ public final class DecoderOnly5sRunner {
             // Fallback: cast via NSNumber
             return (0..<arr.count).map { i in arr[i].floatValue }
         }
+    }
+
+    private func flattenFloatArray(_ arr: MLMultiArray) throws -> [Float] {
+        return try Self.flattenFloatArrayStatic(arr)
     }
 }
 

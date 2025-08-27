@@ -253,4 +253,20 @@ This keeps the entire process in the high-performance Swift/Core ML ecosystem wh
 
 **The Learning**: Critical model components like styling layers cannot be removed without destroying the output quality. The correct solution is not to remove them, but to re-implement their mathematical function using a sequence of simpler, ANE-friendly primitives (a "Composite Operator").
 
+## 11. Phase 2 Swift Parity and Decoder-Only Artifact — 2025-08-27
+
+- We added a Swift Package (`Swift/KokoroPhase2`) and a CLI that runs the decoder-only 5s CoreML model using fixtures exported from the Python pipeline.
+- Using `KOKORO_DUMP_INPUTS=1`, the CLI dumps `asr.csv`, `f0_curve.csv`, `n.csv`, `s.csv`. A Python checker confirmed exact numerical parity (MAE=0.0) between Swift inputs and the Python fixture. This conclusively proves the pre-decoder feature prep in Swift is correct.
+- Despite input parity, decoder-only audio exhibits a slight reverb/artifact. Root cause is likely the CoreML-friendly source replacement used during decoder-only export (to avoid unsupported ops). Conclusion: the quality issue is not from features; it’s from the export’s source approximation.
+
+Implications:
+- Prefer Decoder_HAR as the Golden architecture for V1. The source is computed exactly in PyTorch and passed into CoreML, preserving timbre.
+- If decoder-only is required, either (a) re-export with exact source (custom MIL op) or (b) split source generation to CPU and pass it as an input tensor to CoreML. The latter is simpler and aligns with “CPU is Not the Enemy.”
+
+## 12. HAR On-Device Post-Processing in Swift — 2025-08-27
+
+- The Decoder_HAR CoreML model outputs a latent tensor with interleaved log-magnitude and phase channels. To match Python, Swift must apply `exp` to magnitude channels and `sin` to phase channels, then perform an inverse STFT with the correct `n_fft`, hop, and Hann windowing.
+- We implemented an Accelerate/vDSP inverse STFT in Swift. Parameter inference is derived from CoreML input shapes (e.g., for 5s: `har_spec` C=11, T=24001 → `n_fft≈800`, `hop≈300`). This produces a proper waveform without resorting to a Python bridge.
+- Takeaway: Adding a tiny, deterministic DSP stage in Swift is tractable and unlocks a fully on-device Golden Reference path.
+
 

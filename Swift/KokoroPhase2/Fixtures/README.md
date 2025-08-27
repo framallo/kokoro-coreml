@@ -1,3 +1,4 @@
-Fixtures for Phase 2 Swift app.
-
-Use the Python helper to export a single test fixture (JSON) containing flattened tensors and shapes for the 5s decoder-only model inputs (asr, f0_curve, n, s). The Swift CLI will read this file and run the Core ML model, writing a WAV to outputs/local/phase2/.
+Fixture JSON may include optional HAR tensors for Decoder_HAR models:
+- har_spec: shape [1, C, 1, T]
+- har_phase: shape [1, C, 1, T]
+If present, pass them when invoking a Decoder_HAR Core ML model; otherwise only decoder-only inputs are used.

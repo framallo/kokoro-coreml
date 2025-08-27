@@ -91,8 +91,8 @@ Goal: Create a high-performance Swift TTS package. This will be achieved by vali
 
 Next up (Phase 2):
 - Implement the formal numerical parity check (Step 9): dump Swift-side `asr/f0/n/s` tensors to disk and compare to the Python reference (target MAE ≤ 1e-5).
-- Add a HAR decoder mode in the Swift runner to validate on-device quality against the official Golden Reference (ANE path), in parallel with the decoder-only experiment.
-- If input parity holds but quality gap remains, try diagnostic exports (FP32 CPU-only variant, or mlprogram re-export without CoreML-friendly source) to isolate the source module as the cause.
+- HAR path: Added optional HAR inputs (`har_spec`, `har_phase`) to the fixture and CLI. Implemented Accelerate-based inverse STFT in Swift to reconstruct audio from HAR outputs. Wire-up completed; parameter tuning in progress.
+- If input parity holds but quality gap remains, try diagnostic exports (FP32 CPU-only variant, or mlprogram re-export without CoreML-friendly source) to isolate the source module as the cause. Decoder-only artifact confirmed not to be from feature prep.
 
 ### Phase 3: Not Started
 
