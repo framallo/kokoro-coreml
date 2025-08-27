@@ -200,3 +200,57 @@ Key learnings:
 - Larger buckets reduce CoreML call overhead and overlap tax; 15–30 s perform similarly for ~24 s clips. 5 s is slower due to more windows and crossfades.
 - Warmup matters: once models are hot, user‑visible wait per long clip drops to ~1.3–1.4 s.
 - Keeping hn‑nsf exact in PyTorch preserves quality while we iterate on Core ML fidelity; a composite operator rebuild of `generator.m_source` remains a post‑V1 option.
+
+
+## 10. Key Architectural and Debugging Lessons — 2025-08-19
+
+### Lesson 1: The Peril of Architectural Ambiguity (Decoder_Only vs. Decoder_HAR)
+Our biggest challenge was the confusion between two competing architectures: the experimental Decoder-Only path and the proven Decoder_HAR path. The project stalled until we formally recognized from the documentation that Decoder_HAR was the V1 success story.
+
+**Actionable Insight**: A project must have a single, explicitly defined target architecture. Without this clarity, debugging becomes nearly impossible as the team may be trying to fix a component that isn't even part of the correct, final design.
+
+### Lesson 2: The Power of a "Golden Reference" Pipeline
+We established that the most effective way to validate the on-device pipeline is to first build a "Golden Reference" script in Python.
+
+**Actionable Insight**: This script should not use the original PyTorch models. It must load the converted `.mlpackage` files and execute them. This provides an unimpeachable, end-to-end benchmark for correctness, audio quality, and performance that the Swift implementation must match. It validates the model conversion process itself before any Swift code is written.
+
+### Lesson 3: The "Feature Mismatch" Root Cause (Linguistic vs. Acoustic)
+The final "whispering" bug was not a simple error; it was a fundamental data-type mismatch. We discovered that the `asr` tensor (derived from `t_en`) is a 512-channel linguistic embedding. A vocoder, however, expects an ~80-channel acoustic representation (a mel-spectrogram in a logarithmic scale). Our final, conclusive diagnosis was that the F0/N predictor must be fed features derived from asr (t_en), not en (d).
+
+**Actionable Insight**: Simply aligning linguistic features does not make them a valid input for a vocoder. There is a critical, intermediate "decoder" step that converts linguistic features to an acoustic spectrogram. Bypassing this step will always result in unintelligible audio. This was the key technical insight that explained why the Decoder-Only path was failing.
+
+### Lesson 4: The Value of Quantitative Feature Analysis
+We only confirmed the "Feature Mismatch" when you ran the Python script to compare the numerical stats of your generated `asr.csv` and the `golden_mels.csv`. The massive discrepancies in shape, min/max values, and energy correlation were the undeniable proof.
+
+**Actionable Insight**: Do not rely on subjective listening alone. When debugging quality issues in an ML pipeline, write scripts to compare the statistical properties of the intermediate tensors against a known-good reference. Quantitative analysis is faster and more reliable than subjective feedback.
+
+### Lesson 5: The Final Bottleneck (The iSTFT)
+Our final analysis revealed that even with the correct Decoder_HAR model, the final Inverse STFT step is a critical trade-off. A manual Swift iSTFT is fast but risks numerical errors (causing whispers), while a Python-bridge iSTFT is accurate but too slow.
+
+**Actionable Insight**: The optimal production architecture is a three-stage Core ML pipeline:
+
+1.  Duration Model
+2.  Decoder_HAR Model (on ANE) to produce a latent tensor.
+3.  A final, tiny iSTFT Model (on GPU) to convert the latent tensor to a waveform.
+
+This keeps the entire process in the high-performance Swift/Core ML ecosystem while ensuring bit-for-bit accuracy.
+
+### Lesson 6: The ref_s Zero-Vector Bug
+
+**The Bug**: Feeding a zero-vector for the `ref_s` (style reference) input does not produce a "neutral" voice; it produces noise. The model interprets this as an out-of-distribution input and fails to generate a coherent signal.
+
+**The Learning**: The `ref_s` input is mandatory for generating a stable, listenable voice, even in a decoder-only pipeline. Always provide a valid, pre-trained voice embedding.
+
+### Lesson 7: The ANE's Silent Performance Fallback
+
+**The Bug**: Some synthesis runs were inexplicably slow (~37 seconds), despite using the Decoder_HAR model that was previously benchmarked as extremely fast (~1-2 seconds).
+
+**The Learning**: The Apple Neural Engine has a hard limit of 16,384 for any single tensor dimension. If any internal layer in a model exceeds this limit, Core ML will silently fall back to the much slower GPU or CPU for that operation, causing a catastrophic performance drop without any crash or obvious error. This must be fixed in the model exporter.
+
+### Lesson 8: The AdaIN Identity Substitution Trap
+
+**The Bug**: To solve an export issue, the AdaIN (Adaptive Instance Normalization) layers, which are critical for applying voice style, were replaced with an identity function. This allowed the model to convert but resulted in a robotic, "alien" sounding voice.
+
+**The Learning**: Critical model components like styling layers cannot be removed without destroying the output quality. The correct solution is not to remove them, but to re-implement their mathematical function using a sequence of simpler, ANE-friendly primitives (a "Composite Operator").
+
+
