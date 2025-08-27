@@ -93,6 +93,40 @@ func main() throws {
     let t1 = now()
     var audio: [Float]
     var sr: Int = 24000
+    // Optional: bypass model and reconstruct from fixture HAR spec/phase to validate Swift iSTFT parity
+    if ProcessInfo.processInfo.environment["KOKORO_USE_FIXTURE_HAR"] == "1", let harSpec = fixture.har_spec, let harPhase = fixture.har_phase, let shpSpec = fixture.shapes["har_spec"], let shpPhase = fixture.shapes["har_phase"] {
+        // Shapes are [1, C, 1, T]
+        let bins = shpSpec[1]
+        let frames = shpSpec.last ?? 0
+        let cOut = bins * 2
+        // Pack [mag bins..., phase bins...] over channels, time-major layout per HarPost
+        let arr = try MLMultiArray(shape: [1, NSNumber(value: cOut), NSNumber(value: frames)], dataType: .float32)
+        let ptr = UnsafeMutableBufferPointer(start: arr.dataPointer.assumingMemoryBound(to: Float.self), count: arr.count)
+        // Input flattening in fixture is [1, C, 1, T] → list over dim-major order.
+        // Reconstruct by iterating T fastest.
+        func idx(_ c: Int, _ t: Int) -> Int { return c * frames + t }
+        // Magnitudes are already linear magnitude; convert to log before feeding
+        for c in 0..<bins {
+            for t in 0..<frames {
+                let v = harSpec[(c * frames) + t]
+                ptr[idx(c, t)] = logf(max(v, 1e-8))
+            }
+        }
+        for c in 0..<bins {
+            for t in 0..<frames {
+                let v = harPhase[(c * frames) + t]
+                ptr[idx(bins + c, t)] = v
+            }
+        }
+        let nFFT = max(4, cOut - 2)
+        // Derive hop from f0 length (assume 80 fps → seconds)
+        let f0Len = (fixture.shapes["f0_curve"] ?? [1,1,1,400]).last ?? 400
+        let seconds = Double(f0Len) / 80.0
+        let targetSamples = Int(seconds * 24000.0)
+        let hop = max(1, Int(round(Double(targetSamples) / Double(max(1, frames - 1)))))
+        let har = HarPostProcessor(nFFT: nFFT, hop: hop, winLength: nFFT)
+        audio = try har.inverseFromNetworkOutput(arr, channels: cOut, frames: frames)
+    } else {
     do {
         (audio, sr) = try runner.predict(asr: asr, f0: f0, n: n, s: s)
     } catch {
@@ -122,6 +156,25 @@ func main() throws {
                     let targetSamples = Int(seconds * 24000.0)
                     // With center padding, frames ≈ targetSamples / hop + 1 ⇒ hop ≈ targetSamples / (frames-1)
                     let hop = max(1, Int(round(Double(targetSamples) / Double(max(1, frames - 1)))))
+                    // Optional dump of HAR network output for Python parity checks
+                    if ProcessInfo.processInfo.environment["KOKORO_DUMP_HAR"] == "1" {
+                        let flat = try DecoderOnly5sRunner.flattenFloatArrayStatic(arr)
+                        // Write CSV: each channel as one row with T columns
+                        let rows = (0..<cOut).map { c -> [Float] in
+                            let start = c * frames
+                            return Array(flat[start..<(start+frames)])
+                        }
+                        let csv = rows.map { r in r.map { String($0) }.joined(separator: ",") }.joined(separator: "\n")
+                        try csv.data(using: .utf8)!.write(to: runDir.appendingPathComponent("har_out.csv"))
+                        let harMeta: [String: Any] = [
+                            "c_out": cOut,
+                            "frames": frames,
+                            "n_fft": nFFT,
+                            "hop": hop
+                        ]
+                        let metaData = try JSONSerialization.data(withJSONObject: harMeta, options: [.prettyPrinted, .sortedKeys])
+                        try metaData.write(to: runDir.appendingPathComponent("har_meta.json"))
+                    }
                     let har = HarPostProcessor(nFFT: nFFT, hop: hop, winLength: nFFT)
                     audio = try har.inverseFromNetworkOutput(arr, channels: cOut, frames: frames)
                 } else {
@@ -134,6 +187,7 @@ func main() throws {
         } else {
             throw error
         }
+    }
     }
     let t2 = now()
     try FileManager.default.createDirectory(at: outWav.deletingLastPathComponent(), withIntermediateDirectories: true)
