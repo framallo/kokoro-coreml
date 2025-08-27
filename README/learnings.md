@@ -282,3 +282,5 @@ Implications:
   - `KOKORO_PACKING=interleaved` to support alt channel layouts
   - `KOKORO_DISABLE_HALF_SCALE=1` to test mirror-scaling hypothesis
 - Conclusion: For V1, prioritize the HAR path. Decoder-only requires exact source parity (custom op or CPU-side source) to reach high correlation.
+
+- HAR correlation stabilized around ~0.66 after fixing 1/N IFFT scaling. Least-squares gain alignment confirmed correlation invariance to amplitude (gain ~0.92). Further improvements likely require exact PyTorch windowing conventions and bin handling parity.
