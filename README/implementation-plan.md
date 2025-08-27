@@ -81,7 +81,18 @@ Goal: Create a high-performance Swift TTS package. This will be achieved by vali
 - Established “Golden Reference” generation using Decoder_HAR buckets only; artifacts saved to `outputs/golden/golden_*` (audio + mel PNG/CSV + metadata).
 - Standardized automatic comparison: Phase 1 runs auto-compare against latest golden and save `comparison.json` and `mel_diff.png` in the run folder.
 
-### Phase 2: Not Started
+### Phase 2: In Progress
+
+- Created Swift package at `Swift/KokoroPhase2` with a CoreML runner (`DecoderOnly5sRunner`) and CLI (`kokoro-phase2-cli`). The runner compiles `.mlpackage` via `MLModel.compileModel(at:)` and uses `computeUnits = .all`.
+- Added Python helper `tools/export_fixture.py` to export a fixed-shape 5s JSON fixture (`asr`, `f0_curve`, `n`, `s`) from the Phase 1 pipeline.
+- Built and executed the Swift CLI end-to-end. Outputs written to `outputs/local/phase2_*` with `output.wav` and `metadata.json` (latency breakdowns).
+- Added `tools/compare_phase2_to_golden.py` and compared Phase 2 output to latest HAR golden. Current waveform metrics (example run): `mse≈0.00588`, `mae≈0.04344`, `corr≈0.0189`, `dBFS≈-25.1` vs golden `-25.4`.
+- Observation: audio quality is slightly off (mild reverb/artifact) for the decoder-only export; likely due to the CoreML-friendly `m_source` used during export vs. the exact HN-NSF used by HAR (see `kokoro-generator-rebuild.md`).
+
+Next up (Phase 2):
+- Implement the formal numerical parity check (Step 9): dump Swift-side `asr/f0/n/s` tensors to disk and compare to the Python reference (target MAE ≤ 1e-5).
+- Add a HAR decoder mode in the Swift runner to validate on-device quality against the official Golden Reference (ANE path), in parallel with the decoder-only experiment.
+- If input parity holds but quality gap remains, try diagnostic exports (FP32 CPU-only variant, or mlprogram re-export without CoreML-friendly source) to isolate the source module as the cause.
 
 ### Phase 3: Not Started
 
