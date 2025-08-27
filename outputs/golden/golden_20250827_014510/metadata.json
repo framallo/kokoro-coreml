@@ -1,0 +1,12 @@
+{
+  "input_text": "Hello Matt, this is Kokoro running on Apple Neural Engine.",
+  "model": "Decoder_HAR bucket (auto-selected)",
+  "sample_rate": 24000,
+  "mel_params": {
+    "n_mels": 80,
+    "hop_length": 300,
+    "n_fft": 1024,
+    "fmin": 0,
+    "fmax": 12000
+  }
+}

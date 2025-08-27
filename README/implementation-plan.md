@@ -72,15 +72,16 @@ Goal: Convert Kokoro TTS to run fast (<2sec latency) on Apple Neural Engine usin
 
 ## Implementation Progress
 
-// Update below
+### Phase 1: Completed (Golden + Phase 1 pipeline)
+- Implemented Python pre-decoder pipeline (phonemizer, durations, alignment, F0/N from aligned features) feeding CoreML.
+- Exported decoder-only 5s CoreML model (`coreml/kokoro_decoder_only_5s.mlpackage`) with ANE-friendly layout.
+- Added one-shot Phase 1 script mode in `test_ane_pipeline.py` that generates artifacts to `outputs/local/phase1_*` and logs latency.
+- Established “Golden Reference” generation using Decoder_HAR buckets only; artifacts saved to `outputs/golden/golden_*` (audio + mel PNG/CSV + metadata).
+- Standardized automatic comparison: Phase 1 runs auto-compare against latest golden and save `comparison.json` and `mel_diff.png` in the run folder.
 
-### Phase 1: Not Started. 
- 
+### Phase 2: Not Started
 
-### Phase 2: Not Started.  
-
-
-### Phase 3: Not Started. 
+### Phase 3: Not Started
 
 
 

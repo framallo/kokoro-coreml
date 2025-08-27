@@ -271,6 +271,13 @@ class HybridTTSPipeline:
             pass
 
         print(f"✅ Phase 1 artifacts saved in: {out_dir}")
+        # Standard: compare to latest golden if available
+        try:
+            latest_golden = self._find_latest_golden_dir()
+            if latest_golden is not None:
+                self._compare_dirs(candidate_dir=str(out_dir), golden_dir=latest_golden)
+        except Exception as e:
+            print(f"⚠️ Comparison to golden failed: {e}")
         return {
             'output_dir': str(out_dir),
             'wav': str(wav_path),
@@ -281,20 +288,17 @@ class HybridTTSPipeline:
         }
 
     def run_golden_reference(self, text: str, voice: str = 'af_heart', speed: float = 1.0, mode: str = 'har') -> dict | None:
-        """Generate golden reference artifacts into outputs/golden.
+        """Generate golden reference artifacts into outputs/golden via Decoder_HAR bucket path only.
 
-        mode:
-          - 'har': use Decoder_HAR bucket path (highest fidelity)
-          - 'decoder-only-5s': use decoder-only 5s model
+        mode is accepted for CLI compatibility but ignored (HAR only).
         """
+        if mode != 'har':
+            print(f"⚠️ Golden reference uses HAR only; ignoring mode='{mode}' and using HAR.")
         base = 'outputs/golden'
-        if mode == 'decoder-only-5s':
-            return self.run_phase1_decoder_only_5s(text, voice, speed, out_base=base)
-        # default: HAR bucket
         audio = self.run_coreml_decoder_har_bucket(text, voice, speed)
         if audio is None:
-            print('❌ HAR bucket path failed; falling back to decoder-only-5s')
-            return self.run_phase1_decoder_only_5s(text, voice, speed, out_base=base)
+            print('❌ HAR bucket path failed; could not generate golden reference')
+            return None
         # Save artifacts similar to Phase 1
         from datetime import datetime
         out_dir = Path(base) / f"golden_{datetime.now().strftime('%Y%m%d_%H%M%S')}"
@@ -346,6 +350,104 @@ class HybridTTSPipeline:
             'mel_csv': str(mel_csv),
             'metadata': str(out_dir / 'metadata.json'),
         }
+
+    def _find_latest_golden_dir(self) -> str | None:
+        try:
+            base = Path('outputs/golden')
+            if not base.exists():
+                return None
+            dirs = sorted([p for p in base.iterdir() if p.is_dir() and p.name.startswith('golden_')], key=lambda p: p.name)
+            return str(dirs[-1]) if dirs else None
+        except Exception:
+            return None
+
+    def _compare_dirs(self, candidate_dir: str, golden_dir: str) -> None:
+        """Compare candidate vs golden and write comparison.json and mel_diff.png into candidate_dir."""
+        try:
+            import json
+            import soundfile as sf
+            import librosa
+            import numpy as np
+            import matplotlib.pyplot as plt
+            import librosa.display
+        except Exception as e:
+            print(f"⚠️ Missing deps for comparison: {e}")
+            return
+
+        def load_wav(path: str):
+            try:
+                y, sr = sf.read(path)
+            except Exception:
+                y, sr = librosa.load(path, sr=24000)
+            if sr != 24000:
+                y = librosa.resample(y, orig_sr=sr, target_sr=24000)
+            return y.astype(np.float32)
+
+        cand_wav_path = str(Path(candidate_dir) / 'output.wav')
+        gold_wav_path = str(Path(golden_dir) / 'output.wav')
+        if not (Path(cand_wav_path).exists() and Path(gold_wav_path).exists()):
+            print('⚠️ Comparison skipped: missing output.wav in candidate or golden')
+            return
+
+        y_c = load_wav(cand_wav_path)
+        y_g = load_wav(gold_wav_path)
+        L = min(len(y_c), len(y_g))
+        if L == 0:
+            print('⚠️ Comparison skipped: empty audio')
+            return
+        y_c = y_c[:L]
+        y_g = y_g[:L]
+
+        # Waveform metrics
+        mse = float(np.mean((y_c - y_g) ** 2))
+        mae = float(np.mean(np.abs(y_c - y_g)))
+        denom = (np.std(y_c) * np.std(y_g))
+        corr = float(np.corrcoef(y_c, y_g)[0,1]) if denom != 0 else 0.0
+        rms_c = float(np.sqrt(np.mean(y_c ** 2)))
+        rms_g = float(np.sqrt(np.mean(y_g ** 2)))
+        dbfs_c = 20.0 * np.log10(max(1e-9, rms_c))
+        dbfs_g = 20.0 * np.log10(max(1e-9, rms_g))
+
+        # Mel metrics
+        S_c = librosa.feature.melspectrogram(y=y_c, sr=24000, n_fft=1024, hop_length=300, n_mels=80, fmin=0.0, fmax=12000.0, power=2.0)
+        S_g = librosa.feature.melspectrogram(y=y_g, sr=24000, n_fft=1024, hop_length=300, n_mels=80, fmin=0.0, fmax=12000.0, power=2.0)
+        T = min(S_c.shape[1], S_g.shape[1])
+        S_c = S_c[:, :T]
+        S_g = S_g[:, :T]
+        mel_mse = float(np.mean((S_c - S_g) ** 2))
+        mel_mae = float(np.mean(np.abs(S_c - S_g)))
+        S_db_c = librosa.power_to_db(S_c, ref=np.max)
+        S_db_g = librosa.power_to_db(S_g, ref=np.max)
+        mel_db_mae = float(np.mean(np.abs(S_db_c - S_db_g)))
+
+        comp = {
+            'candidate_dir': candidate_dir,
+            'golden_dir': golden_dir,
+            'waveform': {
+                'mse': mse, 'mae': mae, 'corr': corr, 'dbfs_candidate': dbfs_c, 'dbfs_golden': dbfs_g,
+            },
+            'mel': {
+                'mse': mel_mse, 'mae': mel_mae, 'db_mae': mel_db_mae,
+                'params': {'n_mels': 80, 'hop_length': 300, 'n_fft': 1024, 'fmin': 0, 'fmax': 12000}
+            }
+        }
+        with open(Path(candidate_dir) / 'comparison.json', 'w', encoding='utf-8') as f:
+            json.dump(comp, f, indent=2)
+
+        # Save difference heatmap
+        try:
+            diff = S_db_c - S_db_g
+            plt.figure(figsize=(8, 3))
+            librosa.display.specshow(diff, sr=24000, hop_length=300, x_axis='time', y_axis='mel', cmap='coolwarm', vmin=-10, vmax=10)
+            plt.colorbar(format='%+2.0f dB')
+            plt.title('Mel dB difference (candidate - golden)')
+            plt.tight_layout(); plt.savefig(Path(candidate_dir) / 'mel_diff.png'); plt.close()
+        except Exception as e:
+            print(f"⚠️ Could not save mel_diff.png: {e}")
+
+        print("📊 Comparison vs golden:")
+        print(f"  Waveform: MSE={mse:.6f} MAE={mae:.6f} Corr={corr:.4f} dBFS(cand)={dbfs_c:.2f} dBFS(gold)={dbfs_g:.2f}")
+        print(f"  Mel: MSE={mel_mse:.6f} MAE={mel_mae:.6f} dB|MAE|={mel_db_mae:.3f}")
     
     def extract_vocoder_inputs(self, text, voice='af_heart', speed=1.0):
         """
