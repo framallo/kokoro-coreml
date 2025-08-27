@@ -292,3 +292,5 @@ Implications:
 - Added HAR network output dump (CSV + meta) toggle (`KOKORO_DUMP_HAR=1`) in the Swift CLI to aid Python-side parity checks between Swift iSTFT and PyTorch `istft`. Use this to compare per-channel [log-mag|phase] frames and verify packing/normalization.
 
 - Implemented fixture-HAR bypass in Swift and a forced HAR path; initial corr is low because packing/normalization requires exact replication from the model’s internal output. Added `KOKORO_DUMP_HAR` to dump the model’s HAR tensor for frame-wise parity with Swift’s inverse.
+
+- Dumping the model’s HAR tensor and reconstructing with numpy (mirror of Swift) yields high corr vs Swift HAR (~0.81) and good corr vs golden (~0.62). Swift HAR corr vs golden remains slightly higher (~0.66). Conclusion: Swift packing/OLA matches the model’s internal format; the remaining delta to golden likely stems from downstream non-linearities beyond pure ISTFT (e.g., post-filtering) present in the golden path.
