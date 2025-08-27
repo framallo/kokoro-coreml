@@ -302,3 +302,5 @@ Implications:
 - Current best (5s fixture): corr ≈ 0.6747 (HAR Swift with phase_scale=0.3). Next: validate on additional sentences and 15s/30s buckets to ensure robustness; if stable, encode this into model export or Swift defaults.
 
 - On-device post-filter (Core ML) now runs in Swift path; 5s fixture correlation improved from ~0.675 to ~0.778. Next: expand training data (multi-sentence, 15s/30s buckets) and increase model capacity/epochs to target >0.9.
+
+- After expanding training pairs and epochs, the on-device post-filter lifted correlation to ~0.816 on the 5s fixture. Action items: add multi-sentence/bucket data, modestly increase capacity (e.g., 64 channels, 12 blocks), and add a multi-band STFT loss to target >0.9. Verify performance on-device (ANE/GPU vs CPU) and latency impact.
