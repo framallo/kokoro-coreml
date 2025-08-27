@@ -290,3 +290,5 @@ Implications:
 - Matching torch.hann_window(periodic=True) and negative-angle IFFT twiddles in Swift nudged waveform correlation from ~0.661 to ~0.663. Incremental but consistent; remaining gap likely in exact DC/Nyquist treatment or COLA normalization nuances.
 
 - Added HAR network output dump (CSV + meta) toggle (`KOKORO_DUMP_HAR=1`) in the Swift CLI to aid Python-side parity checks between Swift iSTFT and PyTorch `istft`. Use this to compare per-channel [log-mag|phase] frames and verify packing/normalization.
+
+- Implemented fixture-HAR bypass in Swift and a forced HAR path; initial corr is low because packing/normalization requires exact replication from the model’s internal output. Added `KOKORO_DUMP_HAR` to dump the model’s HAR tensor for frame-wise parity with Swift’s inverse.

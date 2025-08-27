@@ -93,8 +93,9 @@ func main() throws {
     let t1 = now()
     var audio: [Float]
     var sr: Int = 24000
+    let env = ProcessInfo.processInfo.environment
     // Optional: bypass model and reconstruct from fixture HAR spec/phase to validate Swift iSTFT parity
-    if ProcessInfo.processInfo.environment["KOKORO_USE_FIXTURE_HAR"] == "1", let harSpec = fixture.har_spec, let harPhase = fixture.har_phase, let shpSpec = fixture.shapes["har_spec"], let shpPhase = fixture.shapes["har_phase"] {
+    if env["KOKORO_USE_FIXTURE_HAR"] == "1", let harSpec = fixture.har_spec, let harPhase = fixture.har_phase, let shpSpec = fixture.shapes["har_spec"], let shpPhase = fixture.shapes["har_phase"] {
         // Shapes are [1, C, 1, T]
         let bins = shpSpec[1]
         let frames = shpSpec.last ?? 0
@@ -126,6 +127,51 @@ func main() throws {
         let hop = max(1, Int(round(Double(targetSamples) / Double(max(1, frames - 1)))))
         let har = HarPostProcessor(nFFT: nFFT, hop: hop, winLength: nFFT)
         audio = try har.inverseFromNetworkOutput(arr, channels: cOut, frames: frames)
+    } else if env["KOKORO_FORCE_HAR"] == "1" {
+        // Force HAR path: run raw model once, then inverse via Swift
+        let provider = try MLDictionaryFeatureProvider(dictionary: [
+            "asr": MLFeatureValue(multiArray: asr),
+            "f0_curve": MLFeatureValue(multiArray: f0),
+            "n": MLFeatureValue(multiArray: n),
+            "s": MLFeatureValue(multiArray: s),
+            "har_spec": maybeHarSpec.map(MLFeatureValue.init(multiArray:)),
+            "har_phase": maybeHarPhase.map(MLFeatureValue.init(multiArray:)),
+        ].compactMapValues { $0 })
+        let out = try runner.rawModel.prediction(from: provider)
+        guard let firstOut = out.featureNames.first, let arr = out.featureValue(for: firstOut)?.multiArrayValue else {
+            throw KokoroPhase2Error.predictionFailed("No output from HAR model")
+        }
+        if let harSpecShape = fixture.shapes["har_spec"], let f0Shape = fixture.shapes["f0_curve"], let arrShape = arr.shape as? [NSNumber], arrShape.count == 3 {
+            let cOut = arrShape[1].intValue
+            let frames = arrShape[2].intValue
+            let nFFT = max(4, cOut - 2)
+            let f0Len = f0Shape.last ?? 400
+            let seconds = Double(f0Len) / 80.0
+            let targetSamples = Int(seconds * 24000.0)
+            let hop = max(1, Int(round(Double(targetSamples) / Double(max(1, frames - 1)))))
+            if env["KOKORO_DUMP_HAR"] == "1" {
+                let flat = try DecoderOnly5sRunner.flattenFloatArrayStatic(arr)
+                let rows = (0..<cOut).map { c -> [Float] in
+                    let start = c * frames
+                    return Array(flat[start..<(start+frames)])
+                }
+                let csv = rows.map { r in r.map { String($0) }.joined(separator: ",") }.joined(separator: "\n")
+                try csv.data(using: .utf8)!.write(to: runDir.appendingPathComponent("har_out.csv"))
+                let harMeta: [String: Any] = [
+                    "c_out": cOut,
+                    "frames": frames,
+                    "n_fft": nFFT,
+                    "hop": hop
+                ]
+                let metaData = try JSONSerialization.data(withJSONObject: harMeta, options: [.prettyPrinted, .sortedKeys])
+                try metaData.write(to: runDir.appendingPathComponent("har_meta.json"))
+            }
+            let har = HarPostProcessor(nFFT: nFFT, hop: hop, winLength: nFFT)
+            audio = try har.inverseFromNetworkOutput(arr, channels: cOut, frames: frames)
+        } else {
+            let floats = try DecoderOnly5sRunner.flattenFloatArrayStatic(arr)
+            audio = floats
+        }
     } else {
     do {
         (audio, sr) = try runner.predict(asr: asr, f0: f0, n: n, s: s)
