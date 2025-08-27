@@ -288,3 +288,5 @@ Implications:
 - Spectral log-magnitude correlation between HAR Swift output and golden is higher (~0.73) than raw waveform (~0.66), suggesting phase integration/OLA details are the main remaining gap. Local 50ms correlations range widely (p10≈0.02, p90≈0.90), indicating phase alignment varies across time.
 
 - Matching torch.hann_window(periodic=True) and negative-angle IFFT twiddles in Swift nudged waveform correlation from ~0.661 to ~0.663. Incremental but consistent; remaining gap likely in exact DC/Nyquist treatment or COLA normalization nuances.
+
+- Added HAR network output dump (CSV + meta) toggle (`KOKORO_DUMP_HAR=1`) in the Swift CLI to aid Python-side parity checks between Swift iSTFT and PyTorch `istft`. Use this to compare per-channel [log-mag|phase] frames and verify packing/normalization.
