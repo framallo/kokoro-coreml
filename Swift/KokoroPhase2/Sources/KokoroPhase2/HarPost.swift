@@ -14,17 +14,23 @@ public struct HarPostProcessor {
         self.nFFT = nFFT
         self.hop = hop
         self.winLength = winLength
-        // Periodic Hann window
+        // Periodic Hann window matching torch.hann_window(periodic=True):
+        // w[n] = 0.5 * (1 - cos(2*pi*n/N)), n in [0, N-1]
         var w = [Float](repeating: 0, count: winLength)
-        vDSP_hann_window(&w, vDSP_Length(winLength), Int32(vDSP_HANN_DENORM))
+        let N = Float(winLength)
+        let twoPiOverN = 2.0 * Float.pi / N
+        for n in 0..<winLength {
+            w[n] = 0.5 * (1.0 - cosf(twoPiOverN * Float(n)))
+        }
         self.window = w
         // Precompute IFFT twiddle factors for N and all n
         var c = [Float](repeating: 0, count: nFFT * nFFT)
         var s = [Float](repeating: 0, count: nFFT * nFFT)
-        let twoPiOverN = 2.0 * Float.pi / Float(nFFT)
+        let twoPiOverN_ifft = 2.0 * Float.pi / Float(nFFT)
         for k in 0..<nFFT {
             for n in 0..<nFFT {
-                let angle = twoPiOverN * Float(k * n)
+                // Use negative sign in exponent for inverse transform: e^{-i 2πkn/N}
+                let angle = -twoPiOverN_ifft * Float(k * n)
                 c[k * nFFT + n] = cosf(angle)
                 s[k * nFFT + n] = sinf(angle)
             }
