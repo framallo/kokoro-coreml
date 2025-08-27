@@ -66,6 +66,11 @@ public struct HarPostProcessor {
 
         let env = ProcessInfo.processInfo.environment
         let useRawPhase = (env["KOKORO_USE_RAW_PHASE"] == "1")
+        let phaseScale: Float = {
+            if let s = env["KOKORO_PHASE_SCALE"], let v = Float(s) { return v }
+            // Empirically, sin(phase) or 0.5x*phase improves corr vs golden
+            return useRawPhase ? 0.5 : 1.0
+        }()
         let packingInterleaved = (env["KOKORO_PACKING"]?.lowercased() == "interleaved")
         let halfScale = (env["KOKORO_DISABLE_HALF_SCALE"] == "1") ? false : true
         for t in 0..<frames {
@@ -87,7 +92,7 @@ public struct HarPostProcessor {
                     real[k] = mag
                     imag[k] = 0
                 } else {
-                    let angle = useRawPhase ? phaseRaw : sinf(phaseRaw)
+                    let angle = useRawPhase ? (phaseScale * phaseRaw) : sinf(phaseScale * phaseRaw)
                     real[k] = mag * cosf(angle)
                     imag[k] = mag * sinf(angle)
                 }
