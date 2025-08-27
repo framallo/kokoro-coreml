@@ -676,6 +676,9 @@ struct App {
 
             let start = CFAbsoluteTimeGetCurrent()
             let audio = try KokoroTTS.synthesizeWithHAR(asr: asrMA, f0: f0MA, n: nMA, s: sMA, harSpec: hsMA, harPhase: hpMA)
+            if let minVal = audio.min(), let maxVal = audio.max() {
+                print(String(format: "Audio stats: min=%.6f max=%.6f count=%d", minVal, maxVal, audio.count))
+            }
             let elapsed = CFAbsoluteTimeGetCurrent() - start
 
             // Save artifacts to outputs/[timestamp]/[timestamp].{wav,csv,png,json}

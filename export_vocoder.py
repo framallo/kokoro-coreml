@@ -64,6 +64,7 @@ Technical Validation and Quality Assurance:
 """
 
 import torch
+from kokoro.custom_stft import CustomSTFT
 import coremltools as ct
 import numpy as np
 from kokoro import KModel
@@ -510,6 +511,34 @@ class DecoderNoSourceWrapper(torch.nn.Module):
         x = self.gen_no_source(x, s, har)
         # Now apply the same final mapping as original: exp on spec channels, sin on phase channels is done outside CoreML
         return x
+
+class DecoderNoSourceWaveformWrapper(torch.nn.Module):
+    """
+    Wraps DecoderNoSourceWrapper and performs inverse STFT to emit waveform directly.
+    Inputs: asr_4d, f0_curve_4d, n_4d, s, har_spec_4d, har_phase_4d
+    Output: waveform tensor shaped (B, 1, T_samples)
+    """
+    def __init__(self, decoder):
+        super().__init__()
+        self.inner = DecoderNoSourceWrapper(decoder)
+        # Use the decoder's STFT configuration
+        gen = decoder.generator
+        self.n_fft = int(gen.stft.filter_length)
+        self.hop = int(gen.stft.hop_length)
+        self.stft = CustomSTFT(filter_length=self.n_fft, hop_length=self.hop, win_length=self.n_fft)
+
+    def forward(self, asr_4d, f0_curve_4d, n_4d, s, har_spec_4d, har_phase_4d):
+        # Get latent spec/phase from inner wrapper: (B, C, T)
+        x = self.inner(asr_4d, f0_curve_4d, n_4d, s, har_spec_4d, har_phase_4d)
+        B, C, T = x.shape
+        freq_bins = self.n_fft // 2 + 1
+        spec_log = x[:, :freq_bins, :]
+        phase_raw = x[:, freq_bins:freq_bins + freq_bins, :]
+        mag = torch.exp(spec_log)
+        phase = torch.sin(phase_raw)
+        target_len = T * self.hop
+        y = self.stft.inverse(mag, phase, length=target_len)  # (B, T)
+        return y.unsqueeze(1)  # (B, 1, T)
 
 class CoreMLFriendlySource(torch.nn.Module):
     """
@@ -1311,6 +1340,51 @@ def export_decoder_har_bucket(decoder, seconds: int, output_dir: str = "coreml")
     out_path = os.path.join(output_dir, f"KokoroDecoder_HAR_{seconds}s.mlpackage")
     ml.save(out_path)
     print(f"✅ Saved Decoder_HAR bucket to: {out_path}")
+    return out_path
+
+def export_decoder_har_waveform_bucket(decoder, seconds: int, output_dir: str = "coreml"):
+    """
+    Export decoder variant that emits waveform directly for fixed duration.
+    Inputs include precomputed HAR spec/phase. Output is (1,1,T_samples).
+    """
+    print(f"\n🚀 Exporting Decoder_HAR waveform bucket: {seconds}s")
+    wrapper = DecoderNoSourceWaveformWrapper(decoder).eval()
+    f0_per_sec = 80
+    f0_len = int(seconds * f0_per_sec)
+    asr_len = f0_len // 2
+    har_c, har_t = _compute_har_shapes_for_f0_len(decoder, f0_len)
+
+    trace_inputs = (
+        torch.zeros(1, 512, 1, asr_len, dtype=torch.float32),
+        torch.zeros(1, 1, 1, f0_len, dtype=torch.float32),
+        torch.zeros(1, 1, 1, f0_len, dtype=torch.float32),
+        torch.zeros(1, 128, dtype=torch.float32),
+        torch.zeros(1, har_c, 1, har_t, dtype=torch.float32),
+        torch.zeros(1, har_c, 1, har_t, dtype=torch.float32),
+    )
+    with torch.no_grad():
+        traced = torch.jit.trace(wrapper, trace_inputs, strict=False)
+    print("🍎 Converting to CoreML (waveform mlprogram, FP16)...")
+    ml = ct.convert(
+        traced,
+        inputs=[
+            ct.TensorType(name="asr", shape=(1, 512, 1, asr_len), dtype=np.float32),
+            ct.TensorType(name="f0_curve", shape=(1, 1, 1, f0_len), dtype=np.float32),
+            ct.TensorType(name="n", shape=(1, 1, 1, f0_len), dtype=np.float32),
+            ct.TensorType(name="s", shape=(1, 128), dtype=np.float32),
+            ct.TensorType(name="har_spec", shape=(1, har_c, 1, har_t), dtype=np.float32),
+            ct.TensorType(name="har_phase", shape=(1, har_c, 1, har_t), dtype=np.float32),
+        ],
+        convert_to="mlprogram",
+        minimum_deployment_target=ct.target.macOS13,
+        compute_precision=ct.precision.FLOAT16,
+        compute_units=ct.ComputeUnit.ALL,
+    )
+    import os
+    os.makedirs(output_dir, exist_ok=True)
+    out_path = os.path.join(output_dir, f"KokoroDecoder_HAR_WAV_{seconds}s.mlpackage")
+    ml.save(out_path)
+    print(f"✅ Saved Decoder_HAR waveform bucket to: {out_path}")
     return out_path
 
 

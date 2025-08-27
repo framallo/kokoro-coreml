@@ -1,6 +1,7 @@
 import Foundation
 import CoreML
 import AVFoundation
+import Accelerate
 
 /// Public API surface for Kokoro TTS synthesis.
 ///
@@ -184,9 +185,17 @@ public enum KokoroTTS {
         f0Fps: Int = 80,
         harHopSamples: Int = 5
     ) throws -> [Float] {
-        // Load streaming bucket (e.g., 3s)
-        let shortModelName = "KokoroDecoder_HAR_\(windowSeconds)s.mlpackage"
-        let model = try loadModel(resourceName: shortModelName)
+        let env = ProcessInfo.processInfo.environment
+        // Load streaming bucket (prefer waveform-emitting variant if present)
+        let waveformModelName = "KokoroDecoder_HAR_WAV_\(windowSeconds)s.mlpackage"
+        let latentModelName = "KokoroDecoder_HAR_\(windowSeconds)s.mlpackage"
+        let model: MLModel
+        let isWaveformPreferred: Bool
+        if let m = try? loadModel(resourceName: waveformModelName) {
+            model = m; isWaveformPreferred = true
+        } else {
+            model = try loadModel(resourceName: latentModelName); isWaveformPreferred = false
+        }
 
         // Flatten inputs for fast slicing
         func flatten(_ a: MLMultiArray) -> [Float] {
@@ -211,15 +220,25 @@ public enum KokoroTTS {
         let hsFlat  = flatten(harSpec)        // [C*T_har]
         let hpFlat  = flatten(harPhase)       // [C*T_har]
 
-        // Derive per-window sizes from seconds/FPS and HAR mapping
-        let asrWin = max(1, windowSeconds * asrFps)          // e.g., 3s*40 = 120
-        let f0Win  = max(1, windowSeconds * f0Fps)           // e.g., 3s*80 = 240
+        // Derive per-window sizes from model input constraints if available
+        var asrWin = max(1, windowSeconds * asrFps)          // e.g., 3s*40 = 120
+        var f0Win  = max(1, windowSeconds * f0Fps)           // e.g., 3s*80 = 240
         // Map F0 frames to HAR frames: ratio ≈ (sr/harHop)/f0Fps, plus constant offset from STFT (+1)
         let harFramesPerSec = sampleRate / harHopSamples      // 24000/5 = 4800
         let ratioHarToF0 = max(1, harFramesPerSec / f0Fps)    // 4800/80 = 60
-        // Empirically, HAR time has a +1 offset vs ratio*F0 (e.g., 400*60 + 1 = 24001)
-        let harOffset = max(0, totalHarT - ratioHarToF0 * max(1, totalF0T))
-        let harWinT = ratioHarToF0 * f0Win + harOffset        // e.g., 60*240 + 1 = 14401
+        // Default guess; will be overridden by model constraints if present
+        var harWinT = ratioHarToF0 * f0Win + max(0, totalHarT - ratioHarToF0 * max(1, totalF0T))
+        // Override from model input constraint shapes (fixed buckets)
+        if let harSpecDesc = model.modelDescription.inputDescriptionsByName["har_spec"],
+           let mc = harSpecDesc.multiArrayConstraint,
+           let shape = mc.shape, shape.count >= 4 {
+            let tReq = shape.last?.intValue ?? harWinT
+            let f0Desc = model.modelDescription.inputDescriptionsByName["f0_curve"]?.multiArrayConstraint?.shape
+            let asrDesc = model.modelDescription.inputDescriptionsByName["asr"]?.multiArrayConstraint?.shape
+            if let f0Shape = f0Desc, f0Shape.count >= 4 { f0Win = f0Shape.last?.intValue ?? f0Win }
+            if let asrShapeReq = asrDesc, asrShapeReq.count >= 4 { asrWin = asrShapeReq.last?.intValue ?? asrWin }
+            harWinT = tReq
+        }
 
         // Strides (50% overlap)
         let asrStride = max(1, Int(Float(asrWin) * (1 - overlapFraction))) // 60
@@ -297,104 +316,159 @@ public enum KokoroTTS {
         // Pre-create style vector MLMultiArray (shared across windows)
         let sMA = s
 
-        // Process windows
-        for w in 0..<nWin {
-            let asrStart = w * asrStride
-            let f0Start  = w * f0Stride
-            let harStart = w * harStride
-
-            // Slice inputs
-            let asrSlice = sliceASR(asrFlat, totalT: totalAsrT, startT: asrStart, winT: asrWin)
-            let f0Slice  = slice1D(f0Flat,  totalT: totalF0T,  startT: f0Start,  winT: f0Win)
-            let nSlice   = slice1D(nFlat,   totalT: totalF0T,  startT: f0Start,  winT: f0Win)
-            let hsSlice  = sliceHAR(hsFlat, channels: harC, totalT: totalHarT, startT: harStart, winT: harWinT)
-            let hpSlice  = sliceHAR(hpFlat, channels: harC, totalT: totalHarT, startT: harStart, winT: harWinT)
-
-            // Build ML inputs for the short bucket
-            let asrMA = try makeMLMultiArray(shape: [1, 512, 1, asrWin], data: asrSlice)
-            let f0MA  = try makeMLMultiArray(shape: [1, 1,   1, f0Win], data: f0Slice)
-            let nMA   = try makeMLMultiArray(shape: [1, 1,   1, f0Win], data: nSlice)
-            let hsMA  = try makeMLMultiArray(shape: [1, harC, 1, harWinT], data: hsSlice)
-            let hpMA  = try makeMLMultiArray(shape: [1, harC, 1, harWinT], data: hpSlice)
-
-            let out = try model.prediction(from: try MLDictionaryFeatureProvider(dictionary: [
-                "har_spec": MLFeatureValue(multiArray: hsMA),
-                "har_phase": MLFeatureValue(multiArray: hpMA),
-                "asr": MLFeatureValue(multiArray: asrMA),
-                "f0_curve": MLFeatureValue(multiArray: f0MA),
-                "n": MLFeatureValue(multiArray: nMA),
+        // Prepare batch providers if requested, else iterative. Default ON for speed.
+        let useBatch = (env["BATCH_STREAM"] ?? "1") != "0"
+        let logTiming = env["TIMING"] == "1"
+        // Warm-up: run one tiny window to trigger GPU pipeline compilation once
+        let tWarmStart = CFAbsoluteTimeGetCurrent()
+        do {
+            let warmAsr = try makeMLMultiArray(shape: [1, 512, 1, min(8, asrWin)], data: [Float](repeating: 0, count: 512 * min(8, asrWin)))
+            let warmF0  = try makeMLMultiArray(shape: [1, 1, 1, min(16, f0Win)], data: [Float](repeating: 0, count: min(16, f0Win)))
+            let warmN   = try makeMLMultiArray(shape: [1, 1, 1, min(16, f0Win)], data: [Float](repeating: 0, count: min(16, f0Win)))
+            let warmHS  = try makeMLMultiArray(shape: [1, harC, 1, min(64, harWinT)], data: [Float](repeating: 0, count: harC * min(64, harWinT)))
+            let warmHP  = try makeMLMultiArray(shape: [1, harC, 1, min(64, harWinT)], data: [Float](repeating: 0, count: harC * min(64, harWinT)))
+            _ = try model.prediction(from: try MLDictionaryFeatureProvider(dictionary: [
+                "har_spec": MLFeatureValue(multiArray: warmHS),
+                "har_phase": MLFeatureValue(multiArray: warmHP),
+                "asr": MLFeatureValue(multiArray: warmAsr),
+                "f0_curve": MLFeatureValue(multiArray: warmF0),
+                "n": MLFeatureValue(multiArray: warmN),
                 "s": MLFeatureValue(multiArray: sMA),
             ]))
-            guard let outName = model.modelDescription.outputDescriptionsByName.keys.first,
-                  let outArr = out.featureValue(for: outName)?.multiArrayValue else {
-                throw Error.predictionFailed("Missing output tensor (stream chunk)")
+        } catch { /* ignore warm-up errors */ }
+        let tWarm = CFAbsoluteTimeGetCurrent() - tWarmStart
+        if logTiming { print(String(format: "HAR stream: warmup=%.3fs", tWarm)) }
+        if useBatch {
+            let tBuildStart = CFAbsoluteTimeGetCurrent()
+            var batchInputs: [MLFeatureProvider] = []
+            batchInputs.reserveCapacity(nWin)
+            for w in 0..<nWin {
+                let asrStart = w * asrStride
+                let f0Start  = w * f0Stride
+                let harStart = w * harStride
+                let asrSlice = sliceASR(asrFlat, totalT: totalAsrT, startT: asrStart, winT: asrWin)
+                let f0Slice  = slice1D(f0Flat,  totalT: totalF0T,  startT: f0Start,  winT: f0Win)
+                let nSlice   = slice1D(nFlat,   totalT: totalF0T,  startT: f0Start,  winT: f0Win)
+            let hsSlice  = sliceHAR(hsFlat, channels: harC, totalT: totalHarT, startT: harStart, winT: harWinT)
+            let hpSlice  = sliceHAR(hpFlat, channels: harC, totalT: totalHarT, startT: harStart, winT: harWinT)
+                let asrMA = try makeMLMultiArray(shape: [1, 512, 1, asrWin], data: asrSlice)
+                let f0MA  = try makeMLMultiArray(shape: [1, 1,   1, f0Win], data: f0Slice)
+                let nMA   = try makeMLMultiArray(shape: [1, 1,   1, f0Win], data: nSlice)
+                let hsMA  = try makeMLMultiArray(shape: [1, harC, 1, harWinT], data: hsSlice)
+                let hpMA  = try makeMLMultiArray(shape: [1, harC, 1, harWinT], data: hpSlice)
+                let fp = try MLDictionaryFeatureProvider(dictionary: [
+                    "har_spec": MLFeatureValue(multiArray: hsMA),
+                    "har_phase": MLFeatureValue(multiArray: hpMA),
+                    "asr": MLFeatureValue(multiArray: asrMA),
+                    "f0_curve": MLFeatureValue(multiArray: f0MA),
+                    "n": MLFeatureValue(multiArray: nMA),
+                    "s": MLFeatureValue(multiArray: sMA),
+                ])
+                batchInputs.append(fp)
             }
-
-            // Convert to waveform (supports latent or direct waveform)
-            let outShape = outArr.shape.map { $0.intValue }
-            var chunkWave: [Float] = []
-            if outShape.count == 3 && outShape.first == 1 && outShape[1] > 1 {
-                // Latent [1, C, T]
-                let channels = outShape[1]
-                let framesT = outShape[2]
-                var x: [[Float]] = Array(repeating: [Float](repeating: 0, count: framesT), count: channels)
-                for c in 0..<channels {
-                    for t in 0..<framesT { x[c][t] = outArr[[0, NSNumber(value: c), NSNumber(value: t)]].floatValue }
+            let tBuild = CFAbsoluteTimeGetCurrent() - tBuildStart
+            let options = MLPredictionOptions()
+            let inputBatch = MLArrayBatchProvider(array: batchInputs)
+            let tInferStart = CFAbsoluteTimeGetCurrent()
+            let outBatch = try model.predictions(from: inputBatch, options: options)
+            let tInfer = CFAbsoluteTimeGetCurrent() - tInferStart
+            let tMergeStart = CFAbsoluteTimeGetCurrent()
+            for w in 0..<outBatch.count {
+                guard let outName = model.modelDescription.outputDescriptionsByName.keys.first,
+                      let outArr = outBatch.features(at: w).featureValue(for: outName)?.multiArrayValue else {
+                    throw Error.predictionFailed("Missing output tensor (batch stream chunk)")
                 }
-                if ProcessInfo.processInfo.environment["PY_RECON"] == "1" {
-                    // Serialize latent to CSV and call Python parity for exactness
-                    let tmpDir = FileManager.default.temporaryDirectory
-                    let latentURL = tmpDir.appendingPathComponent("kokoro_latent_\(UUID().uuidString).csv")
-                    var lines: [String] = []; lines.reserveCapacity(channels)
-                    for c in 0..<channels {
-                        var row = [String](); row.reserveCapacity(framesT)
-                        for t in 0..<framesT { row.append(String(x[c][t])) }
-                        lines.append(row.joined(separator: ","))
-                    }
-                    try lines.joined(separator: "\n").write(to: latentURL, atomically: true, encoding: .utf8)
-                    let outWav = tmpDir.appendingPathComponent("kokoro_out_\(UUID().uuidString).wav")
-                    let cwd = URL(fileURLWithPath: FileManager.default.currentDirectoryPath)
-                    let scriptCandidates = [
-                        cwd.appendingPathComponent("tools/reconstruct_from_latent.py").path,
-                        cwd.appendingPathComponent("../tools/reconstruct_from_latent.py").standardized.path,
-                        cwd.appendingPathComponent("../../tools/reconstruct_from_latent.py").standardized.path
-                    ]
-                    guard let script = scriptCandidates.first(where: { FileManager.default.fileExists(atPath: $0) }) else {
-                        throw Error.predictionFailed("reconstruct_from_latent.py not found (stream)")
-                    }
-                    let proc = Process(); proc.launchPath = "/usr/bin/env"
-                    proc.arguments = ["python3", script, "--latent", latentURL.path, "--out_wav", outWav.path, "--n_fft", "20", "--hop", "5", "--sr", String(sampleRate)]
-                    let pipe = Pipe(); proc.standardOutput = pipe; proc.standardError = pipe
-                    proc.launch(); proc.waitUntilExit()
-                    guard proc.terminationStatus == 0 else {
-                        let data = pipe.fileHandleForReading.readDataToEndOfFile()
-                        let log = String(data: data, encoding: .utf8) ?? ""
-                        throw Error.predictionFailed("Python iSTFT failed (stream): \(log)")
-                    }
-                    let data = try Data(contentsOf: outWav)
-                    if data.count > 44 {
-                        let pcm = data.dropFirst(44)
-                        let samplesI16: [Int16] = pcm.withUnsafeBytes { raw in
-                            let buf = raw.bindMemory(to: Int16.self); return Array(buf)
-                        }
-                        chunkWave = samplesI16.map { Float($0) / 32767.0 }
-                    }
+                let outShape = outArr.shape.map { $0.intValue }
+                var chunkWave: [Float] = []
+                if outShape.count == 3 && outShape.first == 1 && outShape[1] > 1 {
+                    let channels = outShape[1]
+                    let framesT = outShape[2]
+                    var x: [[Float]] = Array(repeating: [Float](repeating: 0, count: framesT), count: channels)
+                    for c in 0..<channels { for t in 0..<framesT { x[c][t] = outArr[[0, NSNumber(value: c), NSNumber(value: t)]].floatValue } }
+                    let useFast = (env["FAST_ISTFT"] ?? "1") != "0"
+                    chunkWave = useFast ? reconstructWaveformFromDecoderHAROutputFast(xChannelsByTime: x)
+                                         : reconstructWaveformFromDecoderHAROutput(xChannelsByTime: x)
                 } else {
-                    chunkWave = reconstructWaveformFromDecoderHAROutput(xChannelsByTime: x)
+                    chunkWave = mlMultiArrayToVector(outArr)
                 }
-            } else {
-                // Waveform path [1,1,T] or [T]
-                chunkWave = mlMultiArrayToVector(outArr)
+                if let gStr = env["ISTFT_GAIN"], let g = Float(gStr), g != 1.0 {
+                    vDSP_vsmul(chunkWave, 1, [g], &chunkWave, 1, vDSP_Length(chunkWave.count))
+                }
+                let startSample = w * strideSamples
+                for i in 0..<chunkWave.count {
+                    let idx = startSample + i
+                    if idx < accAudio.count {
+                        let wv = i < winWeight.count ? winWeight[i] : 1.0
+                        accAudio[idx] += chunkWave[i] * wv
+                        accWeight[idx] += wv
+                    }
+                }
             }
-
-            // Accumulate with window
-            let startSample = w * strideSamples
-            for i in 0..<chunkWave.count {
-                let idx = startSample + i
-                if idx < accAudio.count {
-                    let wv = i < winWeight.count ? winWeight[i] : 1.0
-                    accAudio[idx] += chunkWave[i] * wv
-                    accWeight[idx] += wv
+            let tMerge = CFAbsoluteTimeGetCurrent() - tMergeStart
+            if logTiming {
+                let avg = outBatch.count > 0 ? tInfer / Double(outBatch.count) : 0
+                print(String(format: "HAR stream: nWin=%d build=%.3fs infer=%.3fs (avg/win=%.3fs) merge=%.3fs total=%.3fs",
+                             outBatch.count, tBuild, tInfer, avg, tMerge, tWarm + tBuild + tInfer + tMerge))
+            }
+        } else {
+            // Iterative single predictions (fallback)
+            for w in 0..<nWin {
+                let tWinStart = CFAbsoluteTimeGetCurrent()
+                let asrStart = w * asrStride
+                let f0Start  = w * f0Stride
+                let harStart = w * harStride
+                let asrSlice = sliceASR(asrFlat, totalT: totalAsrT, startT: asrStart, winT: asrWin)
+                let f0Slice  = slice1D(f0Flat,  totalT: totalF0T,  startT: f0Start,  winT: f0Win)
+                let nSlice   = slice1D(nFlat,   totalT: totalF0T,  startT: f0Start,  winT: f0Win)
+                let hsSlice  = sliceHAR(hsFlat, channels: harC, totalT: totalHarT, startT: harStart, winT: harWinT)
+                let hpSlice  = sliceHAR(hpFlat, channels: harC, totalT: totalHarT, startT: harStart, winT: harWinT)
+                let asrMA = try makeMLMultiArray(shape: [1, 512, 1, asrWin], data: asrSlice)
+                let f0MA  = try makeMLMultiArray(shape: [1, 1,   1, f0Win], data: f0Slice)
+                let nMA   = try makeMLMultiArray(shape: [1, 1,   1, f0Win], data: nSlice)
+                let hsMA  = try makeMLMultiArray(shape: [1, harC, 1, harWinT], data: hsSlice)
+                let hpMA  = try makeMLMultiArray(shape: [1, harC, 1, harWinT], data: hpSlice)
+                let tInferStart = CFAbsoluteTimeGetCurrent()
+                let out = try model.prediction(from: try MLDictionaryFeatureProvider(dictionary: [
+                    "har_spec": MLFeatureValue(multiArray: hsMA),
+                    "har_phase": MLFeatureValue(multiArray: hpMA),
+                    "asr": MLFeatureValue(multiArray: asrMA),
+                    "f0_curve": MLFeatureValue(multiArray: f0MA),
+                    "n": MLFeatureValue(multiArray: nMA),
+                    "s": MLFeatureValue(multiArray: sMA),
+                ]))
+                let tInfer = CFAbsoluteTimeGetCurrent() - tInferStart
+                guard let outName = model.modelDescription.outputDescriptionsByName.keys.first,
+                      let outArr = out.featureValue(for: outName)?.multiArrayValue else {
+                    throw Error.predictionFailed("Missing output tensor (stream chunk)")
+                }
+                let outShape = outArr.shape.map { $0.intValue }
+                var chunkWave: [Float] = []
+                if outShape.count == 3 && outShape.first == 1 && outShape[1] > 1 {
+                    let channels = outShape[1]
+                    let framesT = outShape[2]
+                    var x: [[Float]] = Array(repeating: [Float](repeating: 0, count: framesT), count: channels)
+                    for c in 0..<channels { for t in 0..<framesT { x[c][t] = outArr[[0, NSNumber(value: c), NSNumber(value: t)]].floatValue } }
+                    let useFast = (env["FAST_ISTFT"] ?? "1") != "0"
+                    chunkWave = useFast ? reconstructWaveformFromDecoderHAROutputFast(xChannelsByTime: x)
+                                         : reconstructWaveformFromDecoderHAROutput(xChannelsByTime: x)
+                } else {
+                    chunkWave = mlMultiArrayToVector(outArr)
+                }
+                if let gStr = env["ISTFT_GAIN"], let g = Float(gStr), g != 1.0 {
+                    vDSP_vsmul(chunkWave, 1, [g], &chunkWave, 1, vDSP_Length(chunkWave.count))
+                }
+                let startSample = w * strideSamples
+                for i in 0..<chunkWave.count {
+                    let idx = startSample + i
+                    if idx < accAudio.count {
+                        let wv = i < winWeight.count ? winWeight[i] : 1.0
+                        accAudio[idx] += chunkWave[i] * wv
+                        accWeight[idx] += wv
+                    }
+                }
+                if logTiming {
+                    let tWin = CFAbsoluteTimeGetCurrent() - tWinStart
+                    print(String(format: "HAR stream win %d: infer=%.3fs total=%.3fs", w, tInfer, tWin))
                 }
             }
         }
@@ -444,12 +518,14 @@ public enum KokoroTTS {
         }
         let compiled = try MLModel.compileModel(at: found)
         let config = MLModelConfiguration()
-        if ProcessInfo.processInfo.environment["CPU_ONLY"] == "1" {
+        let env = ProcessInfo.processInfo.environment
+        if env["CPU_ONLY"] == "1" {
             config.computeUnits = .cpuOnly
-        } else if ProcessInfo.processInfo.environment["GPU_ONLY"] == "1" {
+        } else if env["GPU_ONLY"] == "1" {
             config.computeUnits = .cpuAndGPU
         } else {
-            config.computeUnits = .all
+            // Default to GPU for HAR paths to avoid slow .all heuristics
+            config.computeUnits = .cpuAndGPU
         }
         return try MLModel(contentsOf: compiled, configuration: config)
     }
@@ -549,6 +625,80 @@ public enum KokoroTTS {
             for n in 0..<nFFT {
                 let idx = base + n
                 if idx < y.count { y[idx] += frame[n] }
+            }
+        }
+        if center && y.count > 2 * padLen {
+            return Array(y[padLen..<(y.count - padLen)])
+        } else {
+            return y
+        }
+    }
+
+    /// Accelerated iSTFT reconstruction using vDSP for inner loops.
+    /// Functionally equivalent to reconstructWaveformFromDecoderHAROutput but significantly faster.
+    private static func reconstructWaveformFromDecoderHAROutputFast(
+        xChannelsByTime: [[Float]],
+        nFFT: Int = 20,
+        hop: Int = 5,
+        center: Bool = true
+    ) -> [Float] {
+        let freqBins = nFFT / 2 + 1
+        let channels = xChannelsByTime.count
+        let frames = xChannelsByTime.first?.count ?? 0
+        if channels < freqBins * 2 || frames == 0 { return [] }
+
+        // Prepare magnitude and phase
+        var mag = Array(repeating: [Float](repeating: 0, count: frames), count: freqBins)
+        var pha = Array(repeating: [Float](repeating: 0, count: frames), count: freqBins)
+        for k in 0..<freqBins {
+            let specChan = xChannelsByTime[k]
+            let phaseChan = xChannelsByTime[freqBins + k]
+            for t in 0..<frames {
+                mag[k][t] = expf(specChan[t])
+                // Match prior path and Python parity (phase is provided via sin(raw))
+                pha[k][t] = sinf(phaseChan[t])
+            }
+        }
+
+        // Create inverse DFT setup for real output
+        guard let idft = vDSP_DFT_zrop_CreateSetup(nil, vDSP_Length(nFFT), vDSP_DFT_Direction.INVERSE) else { return [] }
+        defer { vDSP_DFT_DestroySetup(idft) }
+
+        // Hann window and scaling
+        var window = [Float](repeating: 0, count: nFFT)
+        vDSP_hann_window(&window, vDSP_Length(nFFT), Int32(vDSP_HANN_NORM))
+        let scale: Float = 1.0 / Float(nFFT)
+        let padLen = nFFT / 2
+
+        // Overlap-add buffer
+        let totalLen = frames * hop + (center ? 2 * padLen : 0) + nFFT
+        var y = [Float](repeating: 0, count: totalLen)
+
+        // Temporary buffers for frequency and time domain
+        var real = [Float](repeating: 0, count: nFFT/2)
+        var imag = [Float](repeating: 0, count: nFFT/2)
+        var timeReal = [Float](repeating: 0, count: nFFT)
+        var timeImag = [Float](repeating: 0, count: nFFT)  // remains zero
+
+        for t in 0..<frames {
+            // Build complex spectrum 0..N/2-1 and set Nyquist=0
+            for k in 0..<(nFFT/2) {
+                let m = mag[k][t]
+                let ph = pha[k][t]
+                real[k] = m * cosf(ph)
+                imag[k] = m * sinf(ph)
+            }
+            // Execute inverse DFT
+            vDSP_DFT_Execute(idft, &real, &imag, &timeReal, &timeImag)
+            // Window and scale
+            vDSP_vmul(timeReal, 1, window, 1, &timeReal, 1, vDSP_Length(nFFT))
+            var sc = scale
+            vDSP_vsmul(timeReal, 1, &sc, &timeReal, 1, vDSP_Length(nFFT))
+            // Overlap-add
+            let base = (center ? padLen : 0) + t * hop
+            for n in 0..<nFFT {
+                let idx = base + n
+                if idx < y.count { y[idx] += timeReal[n] }
             }
         }
         if center && y.count > 2 * padLen {

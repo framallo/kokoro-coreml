@@ -95,6 +95,24 @@ Interpretation: spectral content is close and timing drift is negligible. Remain
    - s: L2 norm or affine if used upstream.
 4. Re‑measure WAV Mel MSE and Audio MSE; target Mel < 1.0 and Audio < 0.003 without tail artifacts.
 
+### HAR Quality mode performance breakthrough (streaming + GPU pin)
+- Observation: Even 5s HAR output `[1,22,24001]` exceeds ANE per‑dim cap (~16,384), so Core ML `.all` frequently falls back away from ANE and thrashes between CPU/GPU; streaming 3s windows still used GPU/CPU for each window, multiplying launch overhead → ~180s.
+- Fixes implemented:
+  - Added windowed HAR streaming in `KokoroTTS.synthesizeWithHAR` with overlap‑add.
+  - Batched all windows into a single Core ML batch prediction to amortize launch/compile overhead.
+  - Warm‑up micro‑inference to pre‑compile GPU kernels once.
+  - Default computeUnits for HAR path set to `.cpuAndGPU` (GPU‑pinned) instead of `.all` to avoid slow heuristics.
+- Results (M2 Ultra dev box):
+  - HAR streaming (3s windows), default `.all`: ~182s (slow)
+  - HAR streaming + GPU_ONLY=1: ~4.4s
+  - After batching + warm‑up + default GPU: ~3.9s (no env flags)
+- Takeaway: For this model version, ANE rejects key ops (AdaIN/InstanceNorm path). Pin GPU for Quality mode and batch work to recover speed, while we explore ANE‑friendly exports.
+
+### Next for ANE enablement (Quality mode)
+- Export waveform‑emitting HAR variant to remove latent→iSTFT from the runtime.
+- Audit/replace ANE‑hostile ops during export (normalize as affine comps) to encourage mlprogram→ANE placement.
+- Validate with Instruments Neural Engine track; iterate on window size/op substitutions until NE is hot.
+
 ### Already ruled out
 - Device precision/fallback (CPU/GPU/ANE) — identical.
 - Major OLA defects — band MSE and audio MSE stable; tails trimmed.
