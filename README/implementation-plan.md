@@ -69,6 +69,15 @@ Goal: Convert Kokoro TTS to run fast (<2sec latency) on Apple Neural Engine usin
     5.  **Define Public API:** Create a clean, simple public API for the package (e.g., `Kokoro.synthesize(text: String)`).
     6.  **Update Test App:** Modify the macOS test app to consume the new Swift Package, demonstrating its usage. 
 
+## Phase 4: Speed Optimization
+*   **Objective:** Sub-2second latency.
+    - Validate ANE usage with Instruments (Neural Engine track) and `powermetrics`; fix any fallbacks by swapping ops to ANE-friendly forms.
+    - Prefer a waveform-emitting HAR variant ([1,1,T]) to avoid latent reconstruction branch.
+    - Quantize for throughput/size:
+    - Start with W8 weights-only (`cto.linear_quantize_weights`).
+    - If quality holds, try W8A8 with calibration (~128 samples).
+    - Keep models warm (single load, reuse instance) to avoid planning overhead.
+    - If large-T still resists ANE: stream Decoder_HAR in windows (e.g., T≈4000, ~10% overlap) with overlap-add.
 
 ## Implementation Progress
 
@@ -80,14 +89,17 @@ Goal: Convert Kokoro TTS to run fast (<2sec latency) on Apple Neural Engine usin
 ### Phase 2: Completed. 
  - The Swift test app now successfully replicates the golden reference pipeline. It uses a hybrid approach: the CoreML `Decoder_HAR` model is run on the ANE, and the resulting latent tensor is passed to a Python script for the final iSTFT reconstruction, achieving perfect audio parity with the golden reference.
 
-### Phase 3: In Progress
- - Added multi-bucket support (5s/15s/30s) with dynamic selection based on input length.
- - Created Swift library target `KokoroTTS` and public API skeleton (`pickBucket()`, `synthesizeWithHAR(...)`).
- - Updated the Swift executable to consume `KokoroTTS` for the HAR path; it now auto-loads `KokoroDecoder_HAR_{5s,15s,30s}.mlpackage`.
- - Extended `tools/dump_vocoder_inputs.py` to emit inputs for 5s/15s/30s via `--seconds` flag.
- - Build is green: `swift build --package-path Swift/KokoroPhase2`.
+### Phase 3: Completed (core), with follow-ups
+ - Multi-bucket support (5s/15s/30s) with dynamic selection based on input length.
+ - New Swift library target `KokoroTTS` (public API skeleton: `pickBucket()`, `synthesizeWithHAR(...)`).
+ - Executable wired to consume `KokoroTTS`; auto-loads `KokoroDecoder_HAR_{5s,15s,30s}.mlpackage`.
+ - Python parity path for HAR latents (PY_RECON) to guarantee iSTFT exactness.
+ - Postprocessing toggles added: `DC_REMOVE`, `DC_WINDOW_MS`, `TAIL_FADE_MS` (default 30ms) to remove residual tail static without affecting speech.
+ - Extended `tools/dump_vocoder_inputs.py` to emit stats and support durations via `--seconds`.
 
-Remaining for Phase 3:
- - Port phonemizer to Swift (replace bridge/placeholder and remove JSON dependency).
+Remaining (Phase 3 polish):
+ - Port phonemizer to Swift; remove JSON dependency in the sample app.
  - Finalize public API: `Kokoro.synthesize(text: String, voice: String)` end-to-end.
- - Update the test app UI to use the package API directly (no precomputed JSON).
+
+### Phase 4: Not Started
+ 

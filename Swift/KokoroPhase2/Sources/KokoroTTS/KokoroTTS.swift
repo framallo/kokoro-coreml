@@ -75,7 +75,9 @@ public enum KokoroTTS {
         let shape = arr.shape.map { $0.intValue }
         if shape == [1, 1, shape.last ?? 0] || (shape.count == 1) {
             // Waveform path
-            return mlMultiArrayToVector(arr)
+            var samples = mlMultiArrayToVector(arr)
+            applyPostprocessing(&samples, sampleRate: 24000)
+            return samples
         }
         if shape.count == 3, shape.first == 1, shape[1] > 1 {
             // Latent path: [1, C, T]
@@ -113,14 +115,18 @@ public enum KokoroTTS {
                 let samplesI16: [Int16] = pcm.withUnsafeBytes { raw in
                     let buf = raw.bindMemory(to: Int16.self); return Array(buf)
                 }
-                return samplesI16.map { Float($0) / 32767.0 }
+                var sOut = samplesI16.map { Float($0) / 32767.0 }
+                applyPostprocessing(&sOut, sampleRate: 24000)
+                return sOut
             }
             // Otherwise do Swift reconstruction
             var x: [[Float]] = Array(repeating: Array(repeating: 0, count: framesT), count: channels)
             for c in 0..<channels {
                 for t in 0..<framesT { x[c][t] = arr[[0, NSNumber(value: c), NSNumber(value: t)]].floatValue }
             }
-            return reconstructWaveformFromDecoderHAROutput(xChannelsByTime: x)
+            var sOut = reconstructWaveformFromDecoderHAROutput(xChannelsByTime: x)
+            applyPostprocessing(&sOut, sampleRate: 24000)
+            return sOut
         }
         if shape.count == 2 {
             // Latent path: [C, T]
@@ -130,11 +136,15 @@ public enum KokoroTTS {
             for c in 0..<channels {
                 for t in 0..<framesT { x[c][t] = arr[[NSNumber(value: c), NSNumber(value: t)]].floatValue }
             }
-            return reconstructWaveformFromDecoderHAROutput(xChannelsByTime: x)
+            var sOut = reconstructWaveformFromDecoderHAROutput(xChannelsByTime: x)
+            applyPostprocessing(&sOut, sampleRate: 24000)
+            return sOut
         }
 
         // Fallback: interpret as flat waveform
-        return mlMultiArrayToVector(arr)
+        var samples = mlMultiArrayToVector(arr)
+        applyPostprocessing(&samples, sampleRate: 24000)
+        return samples
     }
 
     /// Selects bucket based on input length (frames at ~40 fps).
@@ -178,6 +188,37 @@ public enum KokoroTTS {
         var out = [Float](repeating: 0, count: arr.count)
         for i in 0..<arr.count { out[i] = arr[i].floatValue }
         return out
+    }
+
+    /// Optional postprocessing to reduce residual static and DC.
+    /// Controlled by env vars:
+    /// - DC_REMOVE=1: subtract mean of last window (default 100 ms)
+    /// - DC_WINDOW_MS: override window length (default 100)
+    /// - TAIL_FADE_MS: apply linear fade over last N ms (default 30)
+    private static func applyPostprocessing(_ samples: inout [Float], sampleRate: Int) {
+        guard !samples.isEmpty else { return }
+        let env = ProcessInfo.processInfo.environment
+        // DC removal on tail window
+        if env["DC_REMOVE"] == "1" {
+            let winMs = Int(env["DC_WINDOW_MS"] ?? "100") ?? 100
+            let win = max(1, min(samples.count, Int((Float(winMs)/1000.0) * Float(sampleRate))))
+            if win > 0 {
+                var mean: Double = 0
+                for i in 0..<win { mean += Double(samples[samples.count - 1 - i]) }
+                mean /= Double(win)
+                let m = Float(mean)
+                for i in 0..<samples.count { samples[i] -= m }
+            }
+        }
+        // Tail fade
+        let fadeMs = Int(env["TAIL_FADE_MS"] ?? "30") ?? 30
+        let fade = max(0, min(samples.count, Int((Float(fadeMs)/1000.0) * Float(sampleRate))))
+        if fade > 0 {
+            for i in 0..<fade {
+                let scale = Float(fade - i) / Float(fade)
+                samples[samples.count - 1 - i] *= scale
+            }
+        }
     }
 
     /// Reconstructs waveform from Decoder_HAR latent output.
