@@ -1,0 +1,88 @@
+client:
+  name: basic
+  file-system: device-agnostic
+tools: {}
+targets:
+  "KokoroPhase2-arm64-apple-macosx15.0-release.module": ["<KokoroPhase2-arm64-apple-macosx15.0-release.module>"]
+  "PackageStructure": ["<PackageStructure>"]
+  "kokoro-phase2-cli-arm64-apple-macosx15.0-release.exe": ["<kokoro-phase2-cli-arm64-apple-macosx15.0-release.exe>"]
+  "kokoro-phase2-cli-arm64-apple-macosx15.0-release.module": ["<kokoro-phase2-cli-arm64-apple-macosx15.0-release.module>"]
+  "main": ["<KokoroPhase2-arm64-apple-macosx15.0-release.module>","<kokoro-phase2-cli-arm64-apple-macosx15.0-release.exe>","<kokoro-phase2-cli-arm64-apple-macosx15.0-release.module>"]
+  "test": ["<KokoroPhase2-arm64-apple-macosx15.0-release.module>","<kokoro-phase2-cli-arm64-apple-macosx15.0-release.exe>","<kokoro-phase2-cli-arm64-apple-macosx15.0-release.module>"]
+default: "main"
+nodes:
+  "/Users/mattmireles/Documents/GitHub/talktome/kokoro-coreml/Swift/KokoroPhase2/Sources/KokoroPhase2/":
+    is-directory-structure: true
+    content-exclusion-patterns: [".git",".build"]
+  "/Users/mattmireles/Documents/GitHub/talktome/kokoro-coreml/Swift/KokoroPhase2/Sources/kokoro-phase2-cli/":
+    is-directory-structure: true
+    content-exclusion-patterns: [".git",".build"]
+commands:
+  "/Users/mattmireles/Documents/GitHub/talktome/kokoro-coreml/Swift/KokoroPhase2/.build/arm64-apple-macosx/release/KokoroPhase2.build/sources":
+    tool: write-auxiliary-file
+    inputs: ["<sources-file-list>","/Users/mattmireles/Documents/GitHub/talktome/kokoro-coreml/Swift/KokoroPhase2/Sources/KokoroPhase2/CoreMLDecoderOnly.swift"]
+    outputs: ["/Users/mattmireles/Documents/GitHub/talktome/kokoro-coreml/Swift/KokoroPhase2/.build/arm64-apple-macosx/release/KokoroPhase2.build/sources"]
+    description: "Write auxiliary file /Users/mattmireles/Documents/GitHub/talktome/kokoro-coreml/Swift/KokoroPhase2/.build/arm64-apple-macosx/release/KokoroPhase2.build/sources"
+
+  "/Users/mattmireles/Documents/GitHub/talktome/kokoro-coreml/Swift/KokoroPhase2/.build/arm64-apple-macosx/release/kokoro-phase2-cli.product/Objects.LinkFileList":
+    tool: write-auxiliary-file
+    inputs: ["<link-file-list>","/Users/mattmireles/Documents/GitHub/talktome/kokoro-coreml/Swift/KokoroPhase2/.build/arm64-apple-macosx/release/KokoroPhase2.build/CoreMLDecoderOnly.swift.o","/Users/mattmireles/Documents/GitHub/talktome/kokoro-coreml/Swift/KokoroPhase2/.build/arm64-apple-macosx/release/kokoro_phase2_cli.build/main.swift.o"]
+    outputs: ["/Users/mattmireles/Documents/GitHub/talktome/kokoro-coreml/Swift/KokoroPhase2/.build/arm64-apple-macosx/release/kokoro-phase2-cli.product/Objects.LinkFileList"]
+    description: "Write auxiliary file /Users/mattmireles/Documents/GitHub/talktome/kokoro-coreml/Swift/KokoroPhase2/.build/arm64-apple-macosx/release/kokoro-phase2-cli.product/Objects.LinkFileList"
+
+  "/Users/mattmireles/Documents/GitHub/talktome/kokoro-coreml/Swift/KokoroPhase2/.build/arm64-apple-macosx/release/kokoro_phase2_cli.build/sources":
+    tool: write-auxiliary-file
+    inputs: ["<sources-file-list>","/Users/mattmireles/Documents/GitHub/talktome/kokoro-coreml/Swift/KokoroPhase2/Sources/kokoro-phase2-cli/main.swift"]
+    outputs: ["/Users/mattmireles/Documents/GitHub/talktome/kokoro-coreml/Swift/KokoroPhase2/.build/arm64-apple-macosx/release/kokoro_phase2_cli.build/sources"]
+    description: "Write auxiliary file /Users/mattmireles/Documents/GitHub/talktome/kokoro-coreml/Swift/KokoroPhase2/.build/arm64-apple-macosx/release/kokoro_phase2_cli.build/sources"
+
+  "/Users/mattmireles/Documents/GitHub/talktome/kokoro-coreml/Swift/KokoroPhase2/.build/arm64-apple-macosx/release/swift-version--58304C5D6DBC2206.txt":
+    tool: write-auxiliary-file
+    inputs: ["<swift-get-version>","/Applications/Xcode.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/bin/swiftc"]
+    outputs: ["/Users/mattmireles/Documents/GitHub/talktome/kokoro-coreml/Swift/KokoroPhase2/.build/arm64-apple-macosx/release/swift-version--58304C5D6DBC2206.txt"]
+    always-out-of-date: "true"
+    description: "Write auxiliary file /Users/mattmireles/Documents/GitHub/talktome/kokoro-coreml/Swift/KokoroPhase2/.build/arm64-apple-macosx/release/swift-version--58304C5D6DBC2206.txt"
+
+  "<KokoroPhase2-arm64-apple-macosx15.0-release.module>":
+    tool: phony
+    inputs: ["/Users/mattmireles/Documents/GitHub/talktome/kokoro-coreml/Swift/KokoroPhase2/.build/arm64-apple-macosx/release/KokoroPhase2.build/CoreMLDecoderOnly.swift.o","/Users/mattmireles/Documents/GitHub/talktome/kokoro-coreml/Swift/KokoroPhase2/.build/arm64-apple-macosx/release/Modules/KokoroPhase2.swiftmodule"]
+    outputs: ["<KokoroPhase2-arm64-apple-macosx15.0-release.module>"]
+
+  "<kokoro-phase2-cli-arm64-apple-macosx15.0-release.exe>":
+    tool: phony
+    inputs: ["/Users/mattmireles/Documents/GitHub/talktome/kokoro-coreml/Swift/KokoroPhase2/.build/arm64-apple-macosx/release/kokoro-phase2-cli"]
+    outputs: ["<kokoro-phase2-cli-arm64-apple-macosx15.0-release.exe>"]
+
+  "<kokoro-phase2-cli-arm64-apple-macosx15.0-release.module>":
+    tool: phony
+    inputs: ["/Users/mattmireles/Documents/GitHub/talktome/kokoro-coreml/Swift/KokoroPhase2/.build/arm64-apple-macosx/release/kokoro_phase2_cli.build/main.swift.o","/Users/mattmireles/Documents/GitHub/talktome/kokoro-coreml/Swift/KokoroPhase2/.build/arm64-apple-macosx/release/Modules/kokoro_phase2_cli.swiftmodule"]
+    outputs: ["<kokoro-phase2-cli-arm64-apple-macosx15.0-release.module>"]
+
+  "C.KokoroPhase2-arm64-apple-macosx15.0-release.module":
+    tool: shell
+    inputs: ["/Users/mattmireles/Documents/GitHub/talktome/kokoro-coreml/Swift/KokoroPhase2/Sources/KokoroPhase2/CoreMLDecoderOnly.swift","/Users/mattmireles/Documents/GitHub/talktome/kokoro-coreml/Swift/KokoroPhase2/.build/arm64-apple-macosx/release/swift-version--58304C5D6DBC2206.txt","/Users/mattmireles/Documents/GitHub/talktome/kokoro-coreml/Swift/KokoroPhase2/.build/arm64-apple-macosx/release/KokoroPhase2.build/sources"]
+    outputs: ["/Users/mattmireles/Documents/GitHub/talktome/kokoro-coreml/Swift/KokoroPhase2/.build/arm64-apple-macosx/release/KokoroPhase2.build/CoreMLDecoderOnly.swift.o","/Users/mattmireles/Documents/GitHub/talktome/kokoro-coreml/Swift/KokoroPhase2/.build/arm64-apple-macosx/release/Modules/KokoroPhase2.swiftmodule"]
+    description: "Compiling Swift Module 'KokoroPhase2' (1 sources)"
+    args: ["/Applications/Xcode.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/bin/swiftc","-module-name","KokoroPhase2","-emit-dependencies","-emit-module","-emit-module-path","/Users/mattmireles/Documents/GitHub/talktome/kokoro-coreml/Swift/KokoroPhase2/.build/arm64-apple-macosx/release/Modules/KokoroPhase2.swiftmodule","-output-file-map","/Users/mattmireles/Documents/GitHub/talktome/kokoro-coreml/Swift/KokoroPhase2/.build/arm64-apple-macosx/release/KokoroPhase2.build/output-file-map.json","-parse-as-library","-whole-module-optimization","-num-threads","24","-c","@/Users/mattmireles/Documents/GitHub/talktome/kokoro-coreml/Swift/KokoroPhase2/.build/arm64-apple-macosx/release/KokoroPhase2.build/sources","-I","/Users/mattmireles/Documents/GitHub/talktome/kokoro-coreml/Swift/KokoroPhase2/.build/arm64-apple-macosx/release/Modules","-target","arm64-apple-macosx13.0","-O","-j24","-DSWIFT_PACKAGE","-module-cache-path","/Users/mattmireles/Documents/GitHub/talktome/kokoro-coreml/Swift/KokoroPhase2/.build/arm64-apple-macosx/release/ModuleCache","-parseable-output","-parse-as-library","-emit-objc-header","-emit-objc-header-path","/Users/mattmireles/Documents/GitHub/talktome/kokoro-coreml/Swift/KokoroPhase2/.build/arm64-apple-macosx/release/KokoroPhase2.build/KokoroPhase2-Swift.h","-swift-version","5","-sdk","/Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/SDKs/MacOSX15.5.sdk","-F","/Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/Library/Frameworks","-F","/Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/Library/PrivateFrameworks","-I","/Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/usr/lib","-L","/Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/usr/lib","-g","-Xcc","-isysroot","-Xcc","/Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/SDKs/MacOSX15.5.sdk","-Xcc","-F","-Xcc","/Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/Library/Frameworks","-Xcc","-F","-Xcc","/Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/Library/PrivateFrameworks","-Xcc","-fPIC","-Xcc","-g","-package-name","kokorophase2"]
+
+  "C.kokoro-phase2-cli-arm64-apple-macosx15.0-release.exe":
+    tool: shell
+    inputs: ["/Users/mattmireles/Documents/GitHub/talktome/kokoro-coreml/Swift/KokoroPhase2/.build/arm64-apple-macosx/release/KokoroPhase2.build/CoreMLDecoderOnly.swift.o","/Users/mattmireles/Documents/GitHub/talktome/kokoro-coreml/Swift/KokoroPhase2/.build/arm64-apple-macosx/release/kokoro_phase2_cli.build/main.swift.o","/Users/mattmireles/Documents/GitHub/talktome/kokoro-coreml/Swift/KokoroPhase2/.build/arm64-apple-macosx/release/kokoro-phase2-cli.product/Objects.LinkFileList"]
+    outputs: ["/Users/mattmireles/Documents/GitHub/talktome/kokoro-coreml/Swift/KokoroPhase2/.build/arm64-apple-macosx/release/kokoro-phase2-cli"]
+    description: "Linking ./.build/arm64-apple-macosx/release/kokoro-phase2-cli"
+    args: ["/Applications/Xcode.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/bin/swiftc","-L","/Users/mattmireles/Documents/GitHub/talktome/kokoro-coreml/Swift/KokoroPhase2/.build/arm64-apple-macosx/release","-o","/Users/mattmireles/Documents/GitHub/talktome/kokoro-coreml/Swift/KokoroPhase2/.build/arm64-apple-macosx/release/kokoro-phase2-cli","-module-name","kokoro_phase2_cli","-Xlinker","-no_warn_duplicate_libraries","-emit-executable","-Xlinker","-dead_strip","-Xlinker","-alias","-Xlinker","_kokoro_phase2_cli_main","-Xlinker","_main","-Xlinker","-rpath","-Xlinker","@loader_path","@/Users/mattmireles/Documents/GitHub/talktome/kokoro-coreml/Swift/KokoroPhase2/.build/arm64-apple-macosx/release/kokoro-phase2-cli.product/Objects.LinkFileList","-target","arm64-apple-macosx13.0","-sdk","/Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/SDKs/MacOSX15.5.sdk","-F","/Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/Library/Frameworks","-F","/Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/Library/PrivateFrameworks","-I","/Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/usr/lib","-L","/Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/usr/lib","-g"]
+
+  "C.kokoro-phase2-cli-arm64-apple-macosx15.0-release.module":
+    tool: shell
+    inputs: ["/Users/mattmireles/Documents/GitHub/talktome/kokoro-coreml/Swift/KokoroPhase2/Sources/kokoro-phase2-cli/main.swift","/Users/mattmireles/Documents/GitHub/talktome/kokoro-coreml/Swift/KokoroPhase2/.build/arm64-apple-macosx/release/swift-version--58304C5D6DBC2206.txt","/Users/mattmireles/Documents/GitHub/talktome/kokoro-coreml/Swift/KokoroPhase2/.build/arm64-apple-macosx/release/Modules/KokoroPhase2.swiftmodule","/Users/mattmireles/Documents/GitHub/talktome/kokoro-coreml/Swift/KokoroPhase2/.build/arm64-apple-macosx/release/kokoro_phase2_cli.build/sources"]
+    outputs: ["/Users/mattmireles/Documents/GitHub/talktome/kokoro-coreml/Swift/KokoroPhase2/.build/arm64-apple-macosx/release/kokoro_phase2_cli.build/main.swift.o","/Users/mattmireles/Documents/GitHub/talktome/kokoro-coreml/Swift/KokoroPhase2/.build/arm64-apple-macosx/release/Modules/kokoro_phase2_cli.swiftmodule"]
+    description: "Compiling Swift Module 'kokoro_phase2_cli' (1 sources)"
+    args: ["/Applications/Xcode.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/bin/swiftc","-module-name","kokoro_phase2_cli","-emit-dependencies","-emit-module","-emit-module-path","/Users/mattmireles/Documents/GitHub/talktome/kokoro-coreml/Swift/KokoroPhase2/.build/arm64-apple-macosx/release/Modules/kokoro_phase2_cli.swiftmodule","-output-file-map","/Users/mattmireles/Documents/GitHub/talktome/kokoro-coreml/Swift/KokoroPhase2/.build/arm64-apple-macosx/release/kokoro_phase2_cli.build/output-file-map.json","-whole-module-optimization","-num-threads","24","-c","@/Users/mattmireles/Documents/GitHub/talktome/kokoro-coreml/Swift/KokoroPhase2/.build/arm64-apple-macosx/release/kokoro_phase2_cli.build/sources","-I","/Users/mattmireles/Documents/GitHub/talktome/kokoro-coreml/Swift/KokoroPhase2/.build/arm64-apple-macosx/release/Modules","-target","arm64-apple-macosx13.0","-O","-j24","-DSWIFT_PACKAGE","-module-cache-path","/Users/mattmireles/Documents/GitHub/talktome/kokoro-coreml/Swift/KokoroPhase2/.build/arm64-apple-macosx/release/ModuleCache","-parseable-output","-Xfrontend","-entry-point-function-name","-Xfrontend","kokoro_phase2_cli_main","-swift-version","5","-sdk","/Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/SDKs/MacOSX15.5.sdk","-F","/Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/Library/Frameworks","-F","/Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/Library/PrivateFrameworks","-I","/Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/usr/lib","-L","/Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/usr/lib","-g","-Xcc","-isysroot","-Xcc","/Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/SDKs/MacOSX15.5.sdk","-Xcc","-F","-Xcc","/Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/Library/Frameworks","-Xcc","-F","-Xcc","/Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/Library/PrivateFrameworks","-Xcc","-fPIC","-Xcc","-g","-package-name","kokorophase2"]
+
+  "PackageStructure":
+    tool: package-structure-tool
+    inputs: ["/Users/mattmireles/Documents/GitHub/talktome/kokoro-coreml/Swift/KokoroPhase2/Sources/KokoroPhase2/","/Users/mattmireles/Documents/GitHub/talktome/kokoro-coreml/Swift/KokoroPhase2/Sources/kokoro-phase2-cli/","/Users/mattmireles/Documents/GitHub/talktome/kokoro-coreml/Swift/KokoroPhase2/Package.swift","/Users/mattmireles/Documents/GitHub/talktome/kokoro-coreml/Swift/KokoroPhase2/Package.resolved"]
+    outputs: ["<PackageStructure>"]
+    description: "Planning build"
+    allow-missing-inputs: true
+

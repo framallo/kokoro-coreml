@@ -16,8 +16,8 @@ func makeArray(_ values: [Float], shape: [Int]) throws -> MLMultiArray {
     let arr = try MLMultiArray(shape: shape as [NSNumber], dataType: .float32)
     let ptr = UnsafeMutableBufferPointer(start: arr.dataPointer.assumingMemoryBound(to: Float.self), count: arr.count)
     guard ptr.count == values.count else { throw KokoroPhase2Error.shapeMismatch("values.count != MLMultiArray.count") }
-    _ = values.withUnsafeBufferPointer { src -> Void in
-        ptr.assign(from: src.baseAddress!, count: src.count)
+    values.withUnsafeBufferPointer { src in
+        ptr.baseAddress!.update(from: src.baseAddress!, count: src.count)
     }
     return arr
 }

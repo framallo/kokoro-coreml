@@ -24,7 +24,7 @@ def main():
     p.add_argument('--out', default=str(BASE / 'Swift/KokoroPhase2/Fixtures/fixture_decoder_only_5s.json'))
     args = p.parse_args()
 
-    pipeline = HybridTTSPipeline(engine='coreml')
+    pipeline = HybridTTSPipeline(force_engine='coreml')
     vi = pipeline.extract_vocoder_inputs(args.text, voice=args.voice, speed=args.speed)
 
     # Prepare fixed 5s bucket shapes
@@ -42,17 +42,17 @@ def main():
     if t_asr > 0:
         asr_pad[:, :, :t_asr] = asr[:, :, :t_asr]
 
-    f0 = vi['f0_curve'].astype(np.float32)
-    f0_pad = np.zeros((1, 1, 400), dtype=np.float32)
+    f0 = vi['f0_curve'].astype(np.float32)  # (1, T_f0)
+    f0_pad = np.zeros((1, 400), dtype=np.float32)
     t_f0 = min(400, f0.shape[-1])
     if t_f0 > 0:
-        f0_pad[:, :, :t_f0] = f0[:, :, :t_f0]
+        f0_pad[:, :t_f0] = f0[:, :t_f0]
 
-    n = vi['n'].astype(np.float32)
-    n_pad = np.zeros((1, 1, 400), dtype=np.float32)
+    n = vi['n'].astype(np.float32)  # (1, T_f0)
+    n_pad = np.zeros((1, 400), dtype=np.float32)
     t_n = min(400, n.shape[-1])
     if t_n > 0:
-        n_pad[:, :, :t_n] = n[:, :, :t_n]
+        n_pad[:, :t_n] = n[:, :t_n]
 
     s = vi['s'].astype(np.float32)
 
