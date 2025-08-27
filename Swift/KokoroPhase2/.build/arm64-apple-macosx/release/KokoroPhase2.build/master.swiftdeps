@@ -1,0 +1,6 @@
+version: "Apple Swift version 6.1.2 (swiftlang-6.1.2.1.2 clang-1700.0.13.5)"
+options: "6ef449ebf531a60ded4b9dcb905a9877621dfc41a0dece0876460bb2f4ba7056"
+build_start_time: [1756314114, 545442000]
+build_end_time: [1756314115, 147415000]
+inputs:
+  "/Users/mattmireles/Documents/GitHub/talktome/kokoro-coreml/Swift/KokoroPhase2/Sources/KokoroPhase2/CoreMLDecoderOnly.swift": [1756314109, 222447677]

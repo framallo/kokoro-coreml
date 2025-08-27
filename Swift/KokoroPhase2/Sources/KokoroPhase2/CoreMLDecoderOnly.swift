@@ -32,7 +32,9 @@ public final class DecoderOnly5sRunner {
     public init(mlpackageURL: URL) throws {
         let config = MLModelConfiguration()
         config.computeUnits = .all
-        self.model = try MLModel(contentsOf: mlpackageURL, configuration: config)
+        // Ensure model is compiled (supports .mlmodel and .mlpackage)
+        let compiled = try MLModel.compileModel(at: mlpackageURL)
+        self.model = try MLModel(contentsOf: compiled, configuration: config)
     }
 
     public func predict(asr: MLMultiArray, f0: MLMultiArray, n: MLMultiArray, s: MLMultiArray) throws -> (audio: [Float], sampleRate: Int) {

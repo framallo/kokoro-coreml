@@ -1,0 +1,4 @@
+module KokoroPhase2 {
+    header "/Users/mattmireles/Documents/GitHub/talktome/kokoro-coreml/Swift/KokoroPhase2/.build/arm64-apple-macosx/release/KokoroPhase2.build/KokoroPhase2-Swift.h"
+    requires objc
+}
