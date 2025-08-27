@@ -10,6 +10,8 @@ struct Fixture: Codable {
     let shapes: [String:[Int]]
     let text: String
     let voice: String
+    let har_spec: [Float]?
+    let har_phase: [Float]?
 }
 
 func makeArray(_ values: [Float], shape: [Int]) throws -> MLMultiArray {
@@ -62,9 +64,55 @@ func main() throws {
     let f0 = try makeArray(fixture.f0_curve, shape: fixture.shapes["f0_curve"] ?? [1,1,1,400])
     let n = try makeArray(fixture.n, shape: fixture.shapes["n"] ?? [1,1,1,400])
     let s = try makeArray(fixture.s, shape: fixture.shapes["s"] ?? [1,128])
+    let maybeHarSpec: MLMultiArray? = {
+        if let arr = fixture.har_spec, let shp = fixture.shapes["har_spec"] { return try? makeArray(arr, shape: shp) }
+        return nil
+    }()
+    let maybeHarPhase: MLMultiArray? = {
+        if let arr = fixture.har_phase, let shp = fixture.shapes["har_phase"] { return try? makeArray(arr, shape: shp) }
+        return nil
+    }()
 
     let t1 = now()
-    let (audio, sr) = try runner.predict(asr: asr, f0: f0, n: n, s: s)
+    var audio: [Float]
+    var sr: Int = 24000
+    do {
+        (audio, sr) = try runner.predict(asr: asr, f0: f0, n: n, s: s)
+    } catch {
+        // If the model requires HAR inputs, retry with them (when available)
+        if (maybeHarSpec != nil || maybeHarPhase != nil) {
+            let provider = try MLDictionaryFeatureProvider(dictionary: [
+                "asr": MLFeatureValue(multiArray: asr),
+                "f0_curve": MLFeatureValue(multiArray: f0),
+                "n": MLFeatureValue(multiArray: n),
+                "s": MLFeatureValue(multiArray: s),
+                "har_spec": maybeHarSpec.map(MLFeatureValue.init(multiArray:)),
+                "har_phase": maybeHarPhase.map(MLFeatureValue.init(multiArray:)),
+            ].compactMapValues { $0 })
+            let out = try runner.rawModel.prediction(from: provider)
+            if let firstOut = out.featureNames.first, let arr = out.featureValue(for: firstOut)?.multiArrayValue {
+                if let harSpecShape = fixture.shapes["har_spec"], let f0Shape = fixture.shapes["f0_curve"] {
+                    // HAR model: channels x frames from shape [1,C,1,T]
+                    let channels = harSpecShape[1]
+                    let frames = harSpecShape[3]
+                    let f0Len = f0Shape.last ?? 400
+                    // Derive STFT params from shapes: nFFT = channels - 2, hop ~ 120000/24000 when f0Len=400 → 5
+                    let nFFT = max(4, channels - 2)
+                    let samplesPerF0Frame = 300 // 24k / 80 fps
+                    let hop = max(1, Int(round(Double(f0Len * samplesPerF0Frame) / Double(frames - 1))))
+                    let har = HarPostProcessor(nFFT: nFFT, hop: hop, winLength: nFFT)
+                    audio = try har.inverseFromNetworkOutput(arr, channels: channels, frames: frames)
+                } else {
+                    let floats = try DecoderOnly5sRunner.flattenFloatArrayStatic(arr)
+                    audio = floats
+                }
+            } else {
+                throw KokoroPhase2Error.predictionFailed("No output from HAR model")
+            }
+        } else {
+            throw error
+        }
+    }
     let t2 = now()
     try FileManager.default.createDirectory(at: outWav.deletingLastPathComponent(), withIntermediateDirectories: true)
     try WAV.writePCM16(fileURL: outWav, samples: audio, sampleRate: sr)

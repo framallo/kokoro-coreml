@@ -57,15 +57,42 @@ def main():
 
     s = vi['s'].astype(np.float32)
 
+    # Optional: compute HAR spec/phase via exact PyTorch path
+    har_spec = None
+    har_phase = None
+    try:
+        import torch
+        dec = pipeline.pytorch_model.decoder
+        with torch.no_grad():
+            f0_up = dec.generator.f0_upsamp(torch.from_numpy(f0_pad)[:, None]).transpose(1, 2)
+            har_source, _, _ = dec.generator.m_source(f0_up)
+            har_source = har_source.transpose(1, 2).squeeze(1)
+            _har_spec, _har_phase = dec.generator.stft.transform(har_source)
+        # Shapes for HAR CoreML: (1, C, 1, T)
+        har_spec = _har_spec.numpy().astype(np.float32)
+        har_phase = _har_phase.numpy().astype(np.float32)
+    except Exception as e:
+        # Non-fatal; decoder-only flow doesn't need these
+        har_spec = None
+        har_phase = None
+
     out = {
         'text': args.text,
         'voice': args.voice,
-        'shapes': shapes,
+        'shapes': {
+            **shapes,
+            **({'har_spec': [1, int(har_spec.shape[1]), 1, int(har_spec.shape[2])]} if har_spec is not None else {}),
+            **({'har_phase': [1, int(har_phase.shape[1]), 1, int(har_phase.shape[2])]} if har_phase is not None else {}),
+        },
         'asr': flatten(asr_pad.reshape(1, 512, 1, 200)),
         'f0_curve': flatten(f0_pad.reshape(1, 1, 1, 400)),
         'n': flatten(n_pad.reshape(1, 1, 1, 400)),
         's': flatten(s.reshape(1, 128)),
     }
+
+    if har_spec is not None and har_phase is not None:
+        out['har_spec'] = flatten(har_spec.reshape(1, har_spec.shape[1], 1, har_spec.shape[2]))
+        out['har_phase'] = flatten(har_phase.reshape(1, har_phase.shape[1], 1, har_phase.shape[2]))
 
     out_path = Path(args.out)
     out_path.parent.mkdir(parents=True, exist_ok=True)
