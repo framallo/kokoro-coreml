@@ -51,6 +51,20 @@ public enum KokoroTTS {
         harSpec: MLMultiArray,
         harPhase: MLMultiArray
     ) throws -> [Float] {
+        // Streaming gate: if requested, or if HAR time exceeds ANE limit (~16,384),
+        // switch to 3s windowed decoding with overlap-add using the 3s bucket.
+        let env = ProcessInfo.processInfo.environment
+        let harTime = harSpec.shape.last?.intValue ?? 0
+        if env["STREAM_HAR"] == "1" || harTime > 16384 {
+            let winSec = max(1, Int(env["STREAM_WINDOW_SEC"] ?? "3") ?? 3)
+            let overlapFrac = min(0.9, max(0.0, Float(env["STREAM_OVERLAP_FRAC"] ?? "0.5") ?? 0.5))
+            return try synthesizeHARStreaming(
+                asr: asr, f0: f0, n: n, s: s, harSpec: harSpec, harPhase: harPhase,
+                windowSeconds: winSec,
+                overlapFraction: overlapFrac
+            )
+        }
+
         let frames = asr.shape.last?.intValue ?? 0
         let bucket = pickBucket(fromFrames: frames)
         let model = try loadModel(resourceName: bucket.modelResourceName)
@@ -96,9 +110,16 @@ public enum KokoroTTS {
                 let latentURL = tmpDir.appendingPathComponent("kokoro_latent_\(UUID().uuidString).csv")
                 try lines.joined(separator: "\n").write(to: latentURL, atomically: true, encoding: .utf8)
                 let outWav = tmpDir.appendingPathComponent("kokoro_out_\(UUID().uuidString).wav")
-                // Call tools/reconstruct_from_latent.py
+                // Call tools/reconstruct_from_latent.py (resolve from multiple roots)
                 let cwd = URL(fileURLWithPath: FileManager.default.currentDirectoryPath)
-                let script = cwd.appendingPathComponent("tools/reconstruct_from_latent.py").path
+                let scriptCandidates = [
+                    cwd.appendingPathComponent("tools/reconstruct_from_latent.py").path,
+                    cwd.appendingPathComponent("../tools/reconstruct_from_latent.py").standardized.path,
+                    cwd.appendingPathComponent("../../tools/reconstruct_from_latent.py").standardized.path
+                ]
+                guard let script = scriptCandidates.first(where: { FileManager.default.fileExists(atPath: $0) }) else {
+                    throw Error.predictionFailed("reconstruct_from_latent.py not found")
+                }
                 let proc = Process(); proc.launchPath = "/usr/bin/env"
                 proc.arguments = ["python3", script, "--latent", latentURL.path, "--out_wav", outWav.path, "--n_fft", "20", "--hop", "5", "--sr", "24000"]
                 let pipe = Pipe(); proc.standardOutput = pipe; proc.standardError = pipe
@@ -147,6 +168,255 @@ public enum KokoroTTS {
         return samples
     }
 
+    /// Windowed streaming synthesis that keeps HAR time under ANE limits.
+    /// Uses a short bucket model (default 3s) and overlap-add stitching.
+    private static func synthesizeHARStreaming(
+        asr: MLMultiArray,
+        f0: MLMultiArray,
+        n: MLMultiArray,
+        s: MLMultiArray,
+        harSpec: MLMultiArray,
+        harPhase: MLMultiArray,
+        windowSeconds: Int = 3,
+        overlapFraction: Float = 0.5,
+        sampleRate: Int = 24000,
+        asrFps: Int = 40,
+        f0Fps: Int = 80,
+        harHopSamples: Int = 5
+    ) throws -> [Float] {
+        // Load streaming bucket (e.g., 3s)
+        let shortModelName = "KokoroDecoder_HAR_\(windowSeconds)s.mlpackage"
+        let model = try loadModel(resourceName: shortModelName)
+
+        // Flatten inputs for fast slicing
+        func flatten(_ a: MLMultiArray) -> [Float] {
+            var out = [Float](repeating: 0, count: a.count)
+            for i in 0..<a.count { out[i] = a[i].floatValue }
+            return out
+        }
+        let asrShape = asr.shape.map { $0.intValue }    // [1,512,1,T_asr]
+        let f0Shape  = f0.shape.map { $0.intValue }     // [1,1,1,T_f0]
+        let nShape   = n.shape.map { $0.intValue }      // [1,1,1,T_f0]
+        let sShape   = s.shape.map { $0.intValue }      // [1,128]
+        let hsShape  = harSpec.shape.map { $0.intValue } // [1,C,1,T_har]
+        let hpShape  = harPhase.shape.map { $0.intValue }
+        let totalAsrT = asrShape.last ?? 0
+        let totalF0T  = f0Shape.last ?? 0
+        let totalHarT = hsShape.last ?? 0
+        let harC = hsShape.count >= 2 ? hsShape[1] : 0
+
+        let asrFlat = flatten(asr)            // [512*T_asr]
+        let f0Flat  = flatten(f0)             // [T_f0]
+        let nFlat   = flatten(n)              // [T_f0]
+        let hsFlat  = flatten(harSpec)        // [C*T_har]
+        let hpFlat  = flatten(harPhase)       // [C*T_har]
+
+        // Derive per-window sizes from seconds/FPS and HAR mapping
+        let asrWin = max(1, windowSeconds * asrFps)          // e.g., 3s*40 = 120
+        let f0Win  = max(1, windowSeconds * f0Fps)           // e.g., 3s*80 = 240
+        // Map F0 frames to HAR frames: ratio ≈ (sr/harHop)/f0Fps, plus constant offset from STFT (+1)
+        let harFramesPerSec = sampleRate / harHopSamples      // 24000/5 = 4800
+        let ratioHarToF0 = max(1, harFramesPerSec / f0Fps)    // 4800/80 = 60
+        // Empirically, HAR time has a +1 offset vs ratio*F0 (e.g., 400*60 + 1 = 24001)
+        let harOffset = max(0, totalHarT - ratioHarToF0 * max(1, totalF0T))
+        let harWinT = ratioHarToF0 * f0Win + harOffset        // e.g., 60*240 + 1 = 14401
+
+        // Strides (50% overlap)
+        let asrStride = max(1, Int(Float(asrWin) * (1 - overlapFraction))) // 60
+        let f0Stride  = max(1, Int(Float(f0Win)  * (1 - overlapFraction))) // 120
+        let harStride = ratioHarToF0 * f0Stride                               // 60*120 = 7200
+
+        // Helpers to slice last dimension
+        func sliceASR(_ flat: [Float], totalT: Int, startT: Int, winT: Int) -> [Float] {
+            let channels = 512
+            var out = [Float](repeating: 0, count: channels * winT)
+            for c in 0..<channels {
+                let srcBase = c * totalT
+                let dstBase = c * winT
+                let copyT = min(winT, max(0, totalT - startT))
+                if copyT > 0 {
+                    for t in 0..<copyT { out[dstBase + t] = flat[srcBase + startT + t] }
+                }
+            }
+            return out
+        }
+        func slice1D(_ flat: [Float], totalT: Int, startT: Int, winT: Int) -> [Float] {
+            let copyT = min(winT, max(0, totalT - startT))
+            var out = [Float](repeating: 0, count: winT)
+            if copyT > 0 {
+                for t in 0..<copyT { out[t] = flat[startT + t] }
+            }
+            return out
+        }
+        func sliceHAR(_ flat: [Float], channels: Int, totalT: Int, startT: Int, winT: Int) -> [Float] {
+            // Flattened as [C*T]
+            var out = [Float](repeating: 0, count: channels * winT)
+            let copyT = min(winT, max(0, totalT - startT))
+            for c in 0..<channels {
+                let srcBase = c * totalT
+                let dstBase = c * winT
+                if copyT > 0 {
+                    for t in 0..<copyT { out[dstBase + t] = flat[srcBase + startT + t] }
+                }
+            }
+            return out
+        }
+        func makeMLMultiArray(shape: [Int], data: [Float]) throws -> MLMultiArray {
+            let total = shape.reduce(1, *)
+            let arr = try MLMultiArray(shape: shape.map { NSNumber(value: $0) }, dataType: .float32)
+            data.withUnsafeBytes { src in
+                memcpy(arr.dataPointer, src.baseAddress!, min(total, data.count) * MemoryLayout<Float>.size)
+            }
+            return arr
+        }
+
+        // Overlap-add buffers
+        let samplesPerFrame = sampleRate / asrFps                 // 24000 / 40 = 600
+        let chunkSamples = asrWin * samplesPerFrame               // e.g., 120*600 = 72000
+        let strideSamples = asrStride * samplesPerFrame           // 60*600 = 36000
+        func hann(_ n: Int) -> [Float] {
+            if n <= 0 { return [] }
+            var w = [Float](repeating: 0, count: n)
+            if n == 1 { w[0] = 1; return w }
+            for i in 0..<n { w[i] = 0.5 - 0.5 * cos(2.0 * .pi * Float(i) / Float(n)) }
+            return w
+        }
+        var winWeight = hann(chunkSamples)
+        if overlapFraction <= 0 { winWeight = [Float](repeating: 1, count: chunkSamples) }
+
+        func numWindows(total: Int, win: Int, stride: Int) -> Int {
+            if total <= 0 { return 0 }
+            if total <= win { return 1 }
+            return Int(ceil(Double(total - win) / Double(stride))) + 1
+        }
+        let nWin = numWindows(total: totalAsrT, win: asrWin, stride: asrStride)
+        let totalOutSamples = max(chunkSamples, (nWin - 1) * strideSamples + chunkSamples)
+        var accAudio = [Float](repeating: 0, count: totalOutSamples)
+        var accWeight = [Float](repeating: 0, count: totalOutSamples)
+
+        // Pre-create style vector MLMultiArray (shared across windows)
+        let sMA = s
+
+        // Process windows
+        for w in 0..<nWin {
+            let asrStart = w * asrStride
+            let f0Start  = w * f0Stride
+            let harStart = w * harStride
+
+            // Slice inputs
+            let asrSlice = sliceASR(asrFlat, totalT: totalAsrT, startT: asrStart, winT: asrWin)
+            let f0Slice  = slice1D(f0Flat,  totalT: totalF0T,  startT: f0Start,  winT: f0Win)
+            let nSlice   = slice1D(nFlat,   totalT: totalF0T,  startT: f0Start,  winT: f0Win)
+            let hsSlice  = sliceHAR(hsFlat, channels: harC, totalT: totalHarT, startT: harStart, winT: harWinT)
+            let hpSlice  = sliceHAR(hpFlat, channels: harC, totalT: totalHarT, startT: harStart, winT: harWinT)
+
+            // Build ML inputs for the short bucket
+            let asrMA = try makeMLMultiArray(shape: [1, 512, 1, asrWin], data: asrSlice)
+            let f0MA  = try makeMLMultiArray(shape: [1, 1,   1, f0Win], data: f0Slice)
+            let nMA   = try makeMLMultiArray(shape: [1, 1,   1, f0Win], data: nSlice)
+            let hsMA  = try makeMLMultiArray(shape: [1, harC, 1, harWinT], data: hsSlice)
+            let hpMA  = try makeMLMultiArray(shape: [1, harC, 1, harWinT], data: hpSlice)
+
+            let out = try model.prediction(from: try MLDictionaryFeatureProvider(dictionary: [
+                "har_spec": MLFeatureValue(multiArray: hsMA),
+                "har_phase": MLFeatureValue(multiArray: hpMA),
+                "asr": MLFeatureValue(multiArray: asrMA),
+                "f0_curve": MLFeatureValue(multiArray: f0MA),
+                "n": MLFeatureValue(multiArray: nMA),
+                "s": MLFeatureValue(multiArray: sMA),
+            ]))
+            guard let outName = model.modelDescription.outputDescriptionsByName.keys.first,
+                  let outArr = out.featureValue(for: outName)?.multiArrayValue else {
+                throw Error.predictionFailed("Missing output tensor (stream chunk)")
+            }
+
+            // Convert to waveform (supports latent or direct waveform)
+            let outShape = outArr.shape.map { $0.intValue }
+            var chunkWave: [Float] = []
+            if outShape.count == 3 && outShape.first == 1 && outShape[1] > 1 {
+                // Latent [1, C, T]
+                let channels = outShape[1]
+                let framesT = outShape[2]
+                var x: [[Float]] = Array(repeating: [Float](repeating: 0, count: framesT), count: channels)
+                for c in 0..<channels {
+                    for t in 0..<framesT { x[c][t] = outArr[[0, NSNumber(value: c), NSNumber(value: t)]].floatValue }
+                }
+                if ProcessInfo.processInfo.environment["PY_RECON"] == "1" {
+                    // Serialize latent to CSV and call Python parity for exactness
+                    let tmpDir = FileManager.default.temporaryDirectory
+                    let latentURL = tmpDir.appendingPathComponent("kokoro_latent_\(UUID().uuidString).csv")
+                    var lines: [String] = []; lines.reserveCapacity(channels)
+                    for c in 0..<channels {
+                        var row = [String](); row.reserveCapacity(framesT)
+                        for t in 0..<framesT { row.append(String(x[c][t])) }
+                        lines.append(row.joined(separator: ","))
+                    }
+                    try lines.joined(separator: "\n").write(to: latentURL, atomically: true, encoding: .utf8)
+                    let outWav = tmpDir.appendingPathComponent("kokoro_out_\(UUID().uuidString).wav")
+                    let cwd = URL(fileURLWithPath: FileManager.default.currentDirectoryPath)
+                    let scriptCandidates = [
+                        cwd.appendingPathComponent("tools/reconstruct_from_latent.py").path,
+                        cwd.appendingPathComponent("../tools/reconstruct_from_latent.py").standardized.path,
+                        cwd.appendingPathComponent("../../tools/reconstruct_from_latent.py").standardized.path
+                    ]
+                    guard let script = scriptCandidates.first(where: { FileManager.default.fileExists(atPath: $0) }) else {
+                        throw Error.predictionFailed("reconstruct_from_latent.py not found (stream)")
+                    }
+                    let proc = Process(); proc.launchPath = "/usr/bin/env"
+                    proc.arguments = ["python3", script, "--latent", latentURL.path, "--out_wav", outWav.path, "--n_fft", "20", "--hop", "5", "--sr", String(sampleRate)]
+                    let pipe = Pipe(); proc.standardOutput = pipe; proc.standardError = pipe
+                    proc.launch(); proc.waitUntilExit()
+                    guard proc.terminationStatus == 0 else {
+                        let data = pipe.fileHandleForReading.readDataToEndOfFile()
+                        let log = String(data: data, encoding: .utf8) ?? ""
+                        throw Error.predictionFailed("Python iSTFT failed (stream): \(log)")
+                    }
+                    let data = try Data(contentsOf: outWav)
+                    if data.count > 44 {
+                        let pcm = data.dropFirst(44)
+                        let samplesI16: [Int16] = pcm.withUnsafeBytes { raw in
+                            let buf = raw.bindMemory(to: Int16.self); return Array(buf)
+                        }
+                        chunkWave = samplesI16.map { Float($0) / 32767.0 }
+                    }
+                } else {
+                    chunkWave = reconstructWaveformFromDecoderHAROutput(xChannelsByTime: x)
+                }
+            } else {
+                // Waveform path [1,1,T] or [T]
+                chunkWave = mlMultiArrayToVector(outArr)
+            }
+
+            // Accumulate with window
+            let startSample = w * strideSamples
+            for i in 0..<chunkWave.count {
+                let idx = startSample + i
+                if idx < accAudio.count {
+                    let wv = i < winWeight.count ? winWeight[i] : 1.0
+                    accAudio[idx] += chunkWave[i] * wv
+                    accWeight[idx] += wv
+                }
+            }
+        }
+
+        // Normalize by accumulated weights
+        for i in 0..<accAudio.count {
+            let w = accWeight[i]
+            if w > 0 { accAudio[i] /= w }
+        }
+
+        // Trim to expected duration
+        let expectedSamples = max(0, totalAsrT * (sampleRate / asrFps))
+        var audio = accAudio
+        if expectedSamples > 0 && expectedSamples < audio.count {
+            audio = Array(audio[0..<expectedSamples])
+        }
+
+        // Postprocess
+        applyPostprocessing(&audio, sampleRate: sampleRate)
+        return audio
+    }
+
     /// Selects bucket based on input length (frames at ~40 fps).
     public static func pickBucket(fromFrames frames: Int) -> Bucket {
         // Heuristic thresholds: 5s ~ 200 frames; 15s ~ 600 frames
@@ -162,11 +432,12 @@ public enum KokoroTTS {
         let bundleURL = execURL
             .appendingPathComponent("KokoroPhase2_KokoroPhase2.resources")
             .appendingPathComponent(resourceName)
+        let cwd = URL(fileURLWithPath: FileManager.default.currentDirectoryPath)
         let candidateURLs: [URL] = [
             bundleURL,
-            URL(fileURLWithPath: FileManager.default.currentDirectoryPath)
-                .appendingPathComponent("Swift/KokoroPhase2/Resources/")
-                .appendingPathComponent(resourceName)
+            cwd.appendingPathComponent("Resources").appendingPathComponent(resourceName),
+            cwd.appendingPathComponent("Swift/KokoroPhase2/Resources").appendingPathComponent(resourceName),
+            cwd.appendingPathComponent(resourceName)
         ]
         guard let found = candidateURLs.first(where: { FileManager.default.fileExists(atPath: $0.path) }) else {
             throw Error.modelNotFound(resourceName)

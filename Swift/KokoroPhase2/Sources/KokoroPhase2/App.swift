@@ -45,11 +45,18 @@ func locateResource(named name: String) -> URL {
     let execURL = URL(fileURLWithPath: CommandLine.arguments[0]).deletingLastPathComponent()
     let bundleURL = execURL.appendingPathComponent("KokoroPhase2_KokoroPhase2.resources").appendingPathComponent(name)
     if FileManager.default.fileExists(atPath: bundleURL.path) { return bundleURL }
-    // 2) Project-relative path when running from repo root
+    // 2) Common locations when running from repo root or from Swift/KokoroPhase2/
     let cwd = URL(fileURLWithPath: FileManager.default.currentDirectoryPath)
-    let projectURL = cwd.appendingPathComponent("Swift/KokoroPhase2/Resources/")
-    let fileURL = projectURL.appendingPathComponent(name)
-    return fileURL
+    let candidates: [URL] = [
+        cwd.appendingPathComponent("Resources").appendingPathComponent(name),
+        cwd.appendingPathComponent("Swift/KokoroPhase2/Resources").appendingPathComponent(name),
+        cwd.appendingPathComponent(name)
+    ]
+    if let found = candidates.first(where: { FileManager.default.fileExists(atPath: $0.path) }) {
+        return found
+    }
+    // Fallback to expected repo path
+    return cwd.appendingPathComponent("Swift/KokoroPhase2/Resources").appendingPathComponent(name)
 }
 
 func makeMLMultiArray(shape: [Int], data: [Float]) throws -> MLMultiArray {
