@@ -19,6 +19,8 @@ public enum KokoroPhase2Error: Error {
 public final class DecoderOnly5sRunner {
     private let model: MLModel
     public var rawModel: MLModel { model }
+    private var postFilter: MLModel?
+    public var hasPostFilter: Bool { postFilter != nil }
 
     public struct InputShapes {
         public let asr: [Int]
@@ -53,6 +55,19 @@ public final class DecoderOnly5sRunner {
         // Ensure model is compiled (supports .mlmodel and .mlpackage)
         let compiled = try MLModel.compileModel(at: mlpackageURL)
         self.model = try MLModel(contentsOf: compiled, configuration: config)
+        // Optional post-filter (KokoroPostFilter.mlpackage) in ./coreml
+        if let pfPath = ProcessInfo.processInfo.environment["KOKORO_POSTFILTER_PATH"] {
+            if FileManager.default.fileExists(atPath: pfPath) {
+                let pfCompiled = try MLModel.compileModel(at: URL(fileURLWithPath: pfPath))
+                self.postFilter = try? MLModel(contentsOf: pfCompiled, configuration: config)
+            }
+        } else {
+            let defaultPF = URL(fileURLWithPath: "coreml/KokoroPostFilter.mlpackage")
+            if FileManager.default.fileExists(atPath: defaultPF.path) {
+                let pfCompiled = try MLModel.compileModel(at: defaultPF)
+                self.postFilter = try? MLModel(contentsOf: pfCompiled, configuration: config)
+            }
+        }
     }
 
     public func predict(asr: MLMultiArray, f0: MLMultiArray, n: MLMultiArray, s: MLMultiArray) throws -> (audio: [Float], sampleRate: Int) {
@@ -62,8 +77,23 @@ public final class DecoderOnly5sRunner {
             throw KokoroPhase2Error.predictionFailed("No output multiArray")
         }
         // Flatten to Float
-        let floats = try Self.flattenFloatArrayStatic(arr)
+        var floats = try Self.flattenFloatArrayStatic(arr)
+        floats = applyPostFilterIfAvailable(samples: floats)
         return (floats, 24000)
+    }
+    public func applyPostFilterIfAvailable(samples: [Float]) -> [Float] {
+        guard let pf = postFilter else { return samples }
+        let T = samples.count
+        guard let inArr = try? MLMultiArray(shape: [1,1,NSNumber(value:T)], dataType: .float32) else { return samples }
+        let ptr = UnsafeMutableBufferPointer(start: inArr.dataPointer.assumingMemoryBound(to: Float.self), count: inArr.count)
+        for i in 0..<T { ptr[i] = samples[i] }
+        guard let out = try? pf.prediction(from: MLDictionaryFeatureProvider(dictionary:["audio_in": MLFeatureValue(multiArray: inArr)])),
+              let outArr = out.featureValue(for: out.featureNames.first!)?.multiArrayValue,
+              outArr.count == T,
+              let outFloats = try? Self.flattenFloatArrayStatic(outArr) else {
+            return samples
+        }
+        return outFloats
     }
 
     private func makeInputProvider(asr: MLMultiArray, f0: MLMultiArray, n: MLMultiArray, s: MLMultiArray) throws -> MLDictionaryFeatureProvider {

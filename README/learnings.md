@@ -300,3 +300,5 @@ Implications:
 - Phase scale sweep across [0.3..0.7] shows a shallow optimum near 0.3–0.4 (corr ≈ 0.6747 at 0.3). Gains are modest but consistent; we will set default `KOKORO_PHASE_SCALE=0.3` while keeping it tunable.
 
 - Current best (5s fixture): corr ≈ 0.6747 (HAR Swift with phase_scale=0.3). Next: validate on additional sentences and 15s/30s buckets to ensure robustness; if stable, encode this into model export or Swift defaults.
+
+- On-device post-filter (Core ML) now runs in Swift path; 5s fixture correlation improved from ~0.675 to ~0.778. Next: expand training data (multi-sentence, 15s/30s buckets) and increase model capacity/epochs to target >0.9.
