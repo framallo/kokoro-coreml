@@ -24,6 +24,23 @@ func makeArray(_ values: [Float], shape: [Int]) throws -> MLMultiArray {
     return arr
 }
 
+func rmsDBFS(_ x: [Float]) -> Double {
+    if x.isEmpty { return -120.0 }
+    var sum: Double = 0
+    for v in x { sum += Double(v) * Double(v) }
+    let mean = sum / Double(x.count)
+    let rms = sqrt(max(mean, 1e-12))
+    return 20.0 * log10(rms)
+}
+
+func applyTargetDBFS(_ x: inout [Float], targetDBFS: Double) {
+    let cur = rmsDBFS(x)
+    let delta = targetDBFS - cur
+    let gain = pow(10.0, delta / 20.0)
+    let g = Float(gain)
+    for i in 0..<x.count { x[i] *= g }
+}
+
 func loadFixture(url: URL) throws -> Fixture {
     let data = try Data(contentsOf: url)
     return try JSONDecoder().decode(Fixture.self, from: data)
@@ -91,17 +108,22 @@ func main() throws {
             ].compactMapValues { $0 })
             let out = try runner.rawModel.prediction(from: provider)
             if let firstOut = out.featureNames.first, let arr = out.featureValue(for: firstOut)?.multiArrayValue {
-                if let harSpecShape = fixture.shapes["har_spec"], let f0Shape = fixture.shapes["f0_curve"] {
-                    // HAR model: channels x frames from shape [1,C,1,T]
-                    let channels = harSpecShape[1]
-                    let frames = harSpecShape[3]
+                if let harSpecShape = fixture.shapes["har_spec"], let f0Shape = fixture.shapes["f0_curve"], let arrShape = arr.shape as? [NSNumber], arrShape.count == 3 {
+                    // Shapes
+                    // har_spec: [1,C,1,T] → C
+                    let channelsIn = harSpecShape[1]
+                    // model output: [1,Cout,Frames]
+                    let cOut = arrShape[1].intValue
+                    let frames = arrShape[2].intValue
+                    // Derive nFFT and hop from output and f0 length
+                    let nFFT = max(4, cOut - 2)
                     let f0Len = f0Shape.last ?? 400
-                    // Derive STFT params from shapes: nFFT = channels - 2, hop ~ 120000/24000 when f0Len=400 → 5
-                    let nFFT = max(4, channels - 2)
-                    let samplesPerF0Frame = 300 // 24k / 80 fps
-                    let hop = max(1, Int(round(Double(f0Len * samplesPerF0Frame) / Double(frames - 1))))
+                    let seconds = Double(f0Len) / 80.0
+                    let targetSamples = Int(seconds * 24000.0)
+                    // With center padding, frames ≈ targetSamples / hop + 1 ⇒ hop ≈ targetSamples / (frames-1)
+                    let hop = max(1, Int(round(Double(targetSamples) / Double(max(1, frames - 1)))))
                     let har = HarPostProcessor(nFFT: nFFT, hop: hop, winLength: nFFT)
-                    audio = try har.inverseFromNetworkOutput(arr, channels: channels, frames: frames)
+                    audio = try har.inverseFromNetworkOutput(arr, channels: cOut, frames: frames)
                 } else {
                     let floats = try DecoderOnly5sRunner.flattenFloatArrayStatic(arr)
                     audio = floats
@@ -115,7 +137,12 @@ func main() throws {
     }
     let t2 = now()
     try FileManager.default.createDirectory(at: outWav.deletingLastPathComponent(), withIntermediateDirectories: true)
-    try WAV.writePCM16(fileURL: outWav, samples: audio, sampleRate: sr)
+    // Optional gain calibration to target dBFS
+    var audioOut = audio
+    if let t = ProcessInfo.processInfo.environment["KOKORO_TARGET_DBFS"], let target = Double(t) {
+        applyTargetDBFS(&audioOut, targetDBFS: target)
+    }
+    try WAV.writePCM16(fileURL: outWav, samples: audioOut, sampleRate: sr)
     // Optional: dump inputs for parity checks
     if ProcessInfo.processInfo.environment["KOKORO_DUMP_INPUTS"] == "1" {
         func writeCSV(_ path: URL, _ rows: [[Float]]) throws {
@@ -163,6 +190,10 @@ func main() throws {
             "load_s": t1 - t0,
             "coreml_s": t2 - t1,
             "total_s": t2 - t0,
+        ],
+        "levels": [
+            "dbfs_raw": rmsDBFS(audio),
+            "dbfs_written": rmsDBFS(audioOut),
         ]
     ]
     let metaURL = runDir.appendingPathComponent("metadata.json")

@@ -6,21 +6,31 @@ public struct HarPostProcessor {
     public let nFFT: Int
     public let hop: Int
     public let winLength: Int
-    private let dft: vDSP.DiscreteFourierTransform<Float>?
     private let window: [Float]
+    private let cosTable: [Float]
+    private let sinTable: [Float]
 
     public init(nFFT: Int = 800, hop: Int = 200, winLength: Int = 800) {
         self.nFFT = nFFT
         self.hop = hop
         self.winLength = winLength
-        self.dft = try? vDSP.DiscreteFourierTransform<Float>(count: nFFT,
-                                                             direction: .inverse,
-                                                             transformType: .complexComplex,
-                                                             ofType: Float.self)
         // Periodic Hann window
         var w = [Float](repeating: 0, count: winLength)
         vDSP_hann_window(&w, vDSP_Length(winLength), Int32(vDSP_HANN_NORM))
         self.window = w
+        // Precompute IFFT twiddle factors for N and all n
+        var c = [Float](repeating: 0, count: nFFT * nFFT)
+        var s = [Float](repeating: 0, count: nFFT * nFFT)
+        let twoPiOverN = 2.0 * Float.pi / Float(nFFT)
+        for k in 0..<nFFT {
+            for n in 0..<nFFT {
+                let angle = twoPiOverN * Float(k * n)
+                c[k * nFFT + n] = cosf(angle)
+                s[k * nFFT + n] = sinf(angle)
+            }
+        }
+        self.cosTable = c
+        self.sinTable = s
     }
 
     public func inverseFromNetworkOutput(_ output: MLMultiArray, channels: Int, frames: Int) throws -> [Float] {
@@ -39,22 +49,36 @@ public struct HarPostProcessor {
         // Working buffers
         var real = [Float](repeating: 0, count: nFFT)
         var imag = [Float](repeating: 0, count: nFFT)
-        var sigReal = [Float](repeating: 0, count: nFFT)
-        var sigImag = [Float](repeating: 0, count: nFFT)
 
+        let useRawPhase = (ProcessInfo.processInfo.environment["KOKORO_USE_RAW_PHASE"] == "1")
         for t in 0..<frames {
             // Build complex spectrum from magnitude/phase
             for k in 0..<bins {
                 let logMag = data[k*strideT + t]
                 let phaseRaw = data[(bins + k)*strideT + t]
                 let mag = expf(logMag)
-                let angle = sinf(phaseRaw) // mimic torch.sin before inverse
-                real[k] = mag * cosf(angle)
-                imag[k] = mag * sinf(angle)
+                if k == 0 || k == bins - 1 {
+                    // DC and Nyquist are purely real in onesided representation
+                    real[k] = mag
+                    imag[k] = 0
+                } else {
+                    let angle = useRawPhase ? phaseRaw : sinf(phaseRaw)
+                    real[k] = mag * cosf(angle)
+                    imag[k] = mag * sinf(angle)
+                }
             }
-            // Hermitian symmetry for k=1..bins-1
-            if bins >= 2 {
-                for k in 1..<(bins) {
+            // Scale interior bins by 1/2 when constructing two-sided spectrum
+            if bins > 2 {
+                for k in 1..<(bins - 1) {
+                    real[k] *= 0.5
+                    imag[k] *= 0.5
+                }
+            }
+            // Hermitian symmetry for full spectrum synthesis
+            // Mirror interior bins 1..bins-2 when Nyquist present; 1..bins-1 otherwise
+            let mirrorUpper = (bins == halfBins) ? (bins - 1) : bins
+            if mirrorUpper > 1 {
+                for k in 1..<(mirrorUpper) {
                     let rk = real[k]
                     let ik = imag[k]
                     real[nFFT - k] = rk
@@ -63,32 +87,40 @@ public struct HarPostProcessor {
             }
             // k=0 and k=Nyquist already set, mirror not needed
 
-            // IFFT to time domain
-            real.withUnsafeBufferPointer { rPtr in
-                imag.withUnsafeBufferPointer { iPtr in
-                    sigReal.withUnsafeMutableBufferPointer { srPtr in
-                        sigImag.withUnsafeMutableBufferPointer { siPtr in
-                            dft?.transform(inputReal: rPtr, inputImaginary: iPtr, outputReal: &srPtr, outputImaginary: &siPtr)
-                        }
-                    }
+            // IFFT to time domain using precomputed twiddles (N is small)
+            var sigReal = [Float](repeating: 0, count: nFFT)
+            for n in 0..<nFFT {
+                var sum: Float = 0
+                for k in 0..<nFFT {
+                    let c = cosTable[k * nFFT + n]
+                    let s = sinTable[k * nFFT + n]
+                    // Re{ X[k] * e^{i 2πkn/N} } = Re{ (a+ib)(c+is) } = a c - b s
+                    sum += real[k] * c - imag[k] * s
                 }
+                sigReal[n] = sum
             }
-            // Scale (inverse DFT is unnormalized)
-            let scale: Float = 1.0 / Float(nFFT)
-            for i in 0..<nFFT { sigReal[i] *= scale }
 
             // Overlap-add with window
             let start = t * hop
             for i in 0..<nFFT {
-                let sample = sigReal[i] * window[i]
+                let w = window[i]
+                let sample = sigReal[i] * w
                 out[start + i] += sample
-                acc[start + i] += window[i]
+                acc[start + i] += w * w
             }
         }
         // Normalize by accumulated window
         for i in 0..<totalLen {
             let a = max(acc[i], 1e-6)
             out[i] /= a
+        }
+        // Centered STFT alignment: remove pad of nFFT/2 at both ends and trim to (frames-1)*hop samples
+        let pad = nFFT / 2
+        let desired = max(0, (frames - 1) * hop)
+        let start = min(pad, out.count)
+        let end = min(out.count, start + desired)
+        if start < end {
+            return Array(out[start..<end])
         }
         return out
     }

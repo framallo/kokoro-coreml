@@ -28,6 +28,10 @@
         },
         {
           "kind" : "file",
+          "name" : "/Users/mattmireles/Documents/GitHub/talktome/kokoro-coreml/Swift/KokoroPhase2/Sources/KokoroPhase2/HarPost.swift"
+        },
+        {
+          "kind" : "file",
           "name" : "/Users/mattmireles/Documents/GitHub/talktome/kokoro-coreml/Swift/KokoroPhase2/.build/arm64-apple-macosx/release/swift-version--58304C5D6DBC2206.txt"
         },
         {
@@ -39,7 +43,8 @@
       "moduleName" : "KokoroPhase2",
       "moduleOutputPath" : "/Users/mattmireles/Documents/GitHub/talktome/kokoro-coreml/Swift/KokoroPhase2/.build/arm64-apple-macosx/release/Modules/KokoroPhase2.swiftmodule",
       "objects" : [
-        "/Users/mattmireles/Documents/GitHub/talktome/kokoro-coreml/Swift/KokoroPhase2/.build/arm64-apple-macosx/release/KokoroPhase2.build/CoreMLDecoderOnly.swift.o"
+        "/Users/mattmireles/Documents/GitHub/talktome/kokoro-coreml/Swift/KokoroPhase2/.build/arm64-apple-macosx/release/KokoroPhase2.build/CoreMLDecoderOnly.swift.o",
+        "/Users/mattmireles/Documents/GitHub/talktome/kokoro-coreml/Swift/KokoroPhase2/.build/arm64-apple-macosx/release/KokoroPhase2.build/HarPost.swift.o"
       ],
       "otherArguments" : [
         "-target",
@@ -54,7 +59,6 @@
         "-emit-objc-header",
         "-emit-objc-header-path",
         "/Users/mattmireles/Documents/GitHub/talktome/kokoro-coreml/Swift/KokoroPhase2/.build/arm64-apple-macosx/release/KokoroPhase2.build/KokoroPhase2-Swift.h",
-        "-color-diagnostics",
         "-swift-version",
         "5",
         "-sdk",
@@ -95,12 +99,17 @@
         },
         {
           "kind" : "file",
+          "name" : "/Users/mattmireles/Documents/GitHub/talktome/kokoro-coreml/Swift/KokoroPhase2/.build/arm64-apple-macosx/release/KokoroPhase2.build/HarPost.swift.o"
+        },
+        {
+          "kind" : "file",
           "name" : "/Users/mattmireles/Documents/GitHub/talktome/kokoro-coreml/Swift/KokoroPhase2/.build/arm64-apple-macosx/release/Modules/KokoroPhase2.swiftmodule"
         }
       ],
       "prepareForIndexing" : false,
       "sources" : [
-        "/Users/mattmireles/Documents/GitHub/talktome/kokoro-coreml/Swift/KokoroPhase2/Sources/KokoroPhase2/CoreMLDecoderOnly.swift"
+        "/Users/mattmireles/Documents/GitHub/talktome/kokoro-coreml/Swift/KokoroPhase2/Sources/KokoroPhase2/CoreMLDecoderOnly.swift",
+        "/Users/mattmireles/Documents/GitHub/talktome/kokoro-coreml/Swift/KokoroPhase2/Sources/KokoroPhase2/HarPost.swift"
       ],
       "tempsPath" : "/Users/mattmireles/Documents/GitHub/talktome/kokoro-coreml/Swift/KokoroPhase2/.build/arm64-apple-macosx/release/KokoroPhase2.build",
       "wholeModuleOptimization" : true
@@ -146,7 +155,6 @@
         "-entry-point-function-name",
         "-Xfrontend",
         "kokoro_phase2_cli_main",
-        "-color-diagnostics",
         "-swift-version",
         "5",
         "-sdk",
@@ -213,6 +221,7 @@
       "24",
       "-c",
       "/Users/mattmireles/Documents/GitHub/talktome/kokoro-coreml/Swift/KokoroPhase2/Sources/KokoroPhase2/CoreMLDecoderOnly.swift",
+      "/Users/mattmireles/Documents/GitHub/talktome/kokoro-coreml/Swift/KokoroPhase2/Sources/KokoroPhase2/HarPost.swift",
       "-I",
       "/Users/mattmireles/Documents/GitHub/talktome/kokoro-coreml/Swift/KokoroPhase2/.build/arm64-apple-macosx/release/Modules",
       "-target",
@@ -227,7 +236,6 @@
       "-emit-objc-header",
       "-emit-objc-header-path",
       "/Users/mattmireles/Documents/GitHub/talktome/kokoro-coreml/Swift/KokoroPhase2/.build/arm64-apple-macosx/release/KokoroPhase2.build/KokoroPhase2-Swift.h",
-      "-color-diagnostics",
       "-swift-version",
       "5",
       "-sdk",
@@ -287,7 +295,6 @@
       "-entry-point-function-name",
       "-Xfrontend",
       "kokoro_phase2_cli_main",
-      "-color-diagnostics",
       "-swift-version",
       "5",
       "-sdk",
@@ -351,6 +358,10 @@
         {
           "kind" : "file",
           "name" : "/Users/mattmireles/Documents/GitHub/talktome/kokoro-coreml/Swift/KokoroPhase2/Sources/KokoroPhase2/CoreMLDecoderOnly.swift"
+        },
+        {
+          "kind" : "file",
+          "name" : "/Users/mattmireles/Documents/GitHub/talktome/kokoro-coreml/Swift/KokoroPhase2/Sources/KokoroPhase2/HarPost.swift"
         }
       ],
       "outputFilePath" : "/Users/mattmireles/Documents/GitHub/talktome/kokoro-coreml/Swift/KokoroPhase2/.build/arm64-apple-macosx/release/KokoroPhase2.build/sources"
@@ -365,6 +376,10 @@
         {
           "kind" : "file",
           "name" : "/Users/mattmireles/Documents/GitHub/talktome/kokoro-coreml/Swift/KokoroPhase2/.build/arm64-apple-macosx/release/KokoroPhase2.build/CoreMLDecoderOnly.swift.o"
+        },
+        {
+          "kind" : "file",
+          "name" : "/Users/mattmireles/Documents/GitHub/talktome/kokoro-coreml/Swift/KokoroPhase2/.build/arm64-apple-macosx/release/KokoroPhase2.build/HarPost.swift.o"
         },
         {
           "kind" : "file",
