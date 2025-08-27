@@ -16,7 +16,7 @@ public struct HarPostProcessor {
         self.winLength = winLength
         // Periodic Hann window
         var w = [Float](repeating: 0, count: winLength)
-        vDSP_hann_window(&w, vDSP_Length(winLength), Int32(vDSP_HANN_NORM))
+        vDSP_hann_window(&w, vDSP_Length(winLength), Int32(vDSP_HANN_DENORM))
         self.window = w
         // Precompute IFFT twiddle factors for N and all n
         var c = [Float](repeating: 0, count: nFFT * nFFT)
@@ -36,9 +36,10 @@ public struct HarPostProcessor {
     public func inverseFromNetworkOutput(_ output: MLMultiArray, channels: Int, frames: Int) throws -> [Float] {
         let data = try DecoderOnly5sRunner.flattenFloatArrayStatic(output)
         let strideT = frames
-        let halfBins = nFFT/2 + 1 // 401 when nFFT=800
-        // HAR CoreML output packs [log|phase] pairs per bin in channel dimension: C = 2*halfBins-? ; decode from provided channels
-        let bins = channels / 2
+        let halfBins = nFFT/2 + 1 // spec bins (onesided)
+        // HAR CoreML output packs [log|phase] pairs per bin in channel dimension: C_out = nFFT + 2
+        // Use exact spec bin count
+        let bins = halfBins
         precondition(bins == halfBins - 1 || bins == halfBins, "Unexpected HAR channels: \(channels)")
 
         // Output buffer with COLA normalization
@@ -88,7 +89,9 @@ public struct HarPostProcessor {
             // k=0 and k=Nyquist already set, mirror not needed
 
             // IFFT to time domain using precomputed twiddles (N is small)
+            // Using definition with 1/N scaling on the inverse transform
             var sigReal = [Float](repeating: 0, count: nFFT)
+            let invN: Float = 1.0 / Float(nFFT)
             for n in 0..<nFFT {
                 var sum: Float = 0
                 for k in 0..<nFFT {
@@ -97,7 +100,7 @@ public struct HarPostProcessor {
                     // Re{ X[k] * e^{i 2πkn/N} } = Re{ (a+ib)(c+is) } = a c - b s
                     sum += real[k] * c - imag[k] * s
                 }
-                sigReal[n] = sum
+                sigReal[n] = sum * invN
             }
 
             // Overlap-add with window
