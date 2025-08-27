@@ -513,6 +513,104 @@ def extract_and_convert_vocoder(model):
     
     return output_path
 
+def export_decoder_only_5s(model):
+    """
+    Export a fixed-shape, decoder-only CoreML model for the 5s bucket.
+
+    This variant matches the Phase 1 requirement exactly:
+    - Inputs: asr (1,512,1,200), f0_curve (1,1,1,400), n (1,1,1,400), s (1,128)
+    - Backend: Prefer 'neuralnetwork' for stability; fall back to 'mlprogram' if needed
+    - Precision: FP16; Compute Units: ALL (enables ANE)
+
+    Returns:
+        str: Path to the saved .mlpackage
+    """
+    print("\n🚀 Exporting decoder-only CoreML model for 5s bucket…")
+    decoder = model.decoder
+    # Monkey-patch hn-nsf source to a CoreML-friendly implementation to avoid
+    # unsupported ops (e.g., multiply) while preserving overall behavior.
+    try:
+        print("🔧 Installing CoreMLFriendlySource in decoder.generator.m_source…")
+        decoder.generator.m_source = CoreMLFriendlySource(
+            sampling_rate=ExportConstants.SAMPLE_RATE,
+            harmonic_num=8,
+            voiced_threshold=1.0,
+            sine_amp=0.2,
+            noise_std=0.001,
+        )
+        print("✅ CoreMLFriendlySource installed")
+    except Exception as e:
+        print(f"⚠️ Could not install CoreMLFriendlySource: {e}. Proceeding anyway.")
+    wrapper = VocoderWrapper(decoder).eval()
+
+    # Fixed 5s shapes (fps=80 → f0_len=400; asr_len=f0_len/2)
+    asr_len = ExportConstants.SEQUENCE_LENGTH_ASR  # 200
+    f0_len = ExportConstants.SEQUENCE_LENGTH_INPUT  # 400
+
+    # Create representative sample inputs for tracing
+    sample_inputs = (
+        torch.zeros(1, ExportConstants.ASR_FEATURE_DIM, 1, asr_len, dtype=torch.float32),
+        torch.zeros(1, 1, 1, f0_len, dtype=torch.float32),
+        torch.zeros(1, 1, 1, f0_len, dtype=torch.float32),
+        torch.zeros(1, ExportConstants.STYLE_EMBEDDING_DIM, dtype=torch.float32),
+    )
+
+    # Trace
+    print("⚡ Tracing decoder-only wrapper with fixed 5s shapes…")
+    with torch.no_grad():
+        traced = torch.jit.trace(wrapper, sample_inputs, strict=False)
+
+    # Define Core ML input specs
+    inputs = [
+        ct.TensorType(name="asr", shape=(1, ExportConstants.ASR_FEATURE_DIM, 1, asr_len), dtype=np.float32),
+        ct.TensorType(name="f0_curve", shape=(1, 1, 1, f0_len), dtype=np.float32),
+        ct.TensorType(name="n", shape=(1, 1, 1, f0_len), dtype=np.float32),
+        ct.TensorType(name="s", shape=(1, ExportConstants.STYLE_EMBEDDING_DIM), dtype=np.float32),
+    ]
+
+    # Convert: prefer neuralnetwork backend, then fall back to mlprogram
+    print("🍎 Converting to Core ML (neuralnetwork backend preferred)…")
+    mlmodel = None
+    try:
+        mlmodel = ct.convert(
+            traced,
+            inputs=inputs,
+            convert_to="neuralnetwork",
+            compute_precision=ct.precision.FLOAT16,
+            minimum_deployment_target=ct.target.macOS13,
+            compute_units=ct.ComputeUnit.ALL,
+        )
+        print("✅ Conversion successful (neuralnetwork)")
+    except Exception as e:
+        print(f"⚠️ neuralnetwork conversion failed: {e}")
+        print("🔄 Falling back to mlprogram…")
+        mlmodel = ct.convert(
+            traced,
+            inputs=inputs,
+            convert_to="mlprogram",
+            compute_precision=ct.precision.FLOAT16,
+            minimum_deployment_target=ct.target.macOS13,
+            compute_units=ct.ComputeUnit.ALL,
+        )
+        print("✅ Conversion successful (mlprogram fallback)")
+
+    # Normalize output name
+    try:
+        spec = mlmodel.get_spec()
+        if spec.description.output and spec.description.output[0].name != "waveform":
+            spec.description.output[0].name = "waveform"
+        mlmodel = ct.models.MLModel(spec)
+    except Exception as e:
+        print(f"⚠️ Could not rename output to 'waveform': {e}")
+
+    # Save
+    import os
+    os.makedirs("coreml", exist_ok=True)
+    out_path = "coreml/kokoro_decoder_only_5s.mlpackage"
+    mlmodel.save(out_path)
+    print(f"✅ Saved decoder-only 5s model to: {out_path}")
+    return out_path
+
 def export_decoder_with_har_input(model):
     print("\n🚀 Exporting Decoder variant that accepts hn-nsf source as input (exact parity)")
     decoder = model.decoder
@@ -675,6 +773,7 @@ def main():
     import argparse
     parser = argparse.ArgumentParser()
     parser.add_argument("--export-vocoder", action="store_true", help="Export KokoroVocoder.mlpackage (full decoder wrapper)")
+    parser.add_argument("--export-decoder-only-5s", action="store_true", help="Export decoder-only 5s bucket (kokoro_decoder_only_5s.mlpackage)")
     parser.add_argument("--export-decoder-har", action="store_true", help="Export Decoder_HAR window model (5s window)")
     parser.add_argument("--har-buckets", type=str, default="", help="Comma-separated seconds for Decoder_HAR buckets, e.g. '5,15,30'")
     args = parser.parse_args()
@@ -702,6 +801,10 @@ def main():
             print("1. Test the vocoder with test_ane_pipeline.py")
             print("2. Verify ANE usage with Instruments or powermetrics")
             print("3. Compare performance vs CPU-only pipeline")
+
+        if args.export_decoder_only_5s:
+            out = export_decoder_only_5s(model)
+            print(f"\n🎉 Decoder-only 5s export complete → {out}")
 
         if args.export_decoder_har:
             export_decoder_with_har_input(model)

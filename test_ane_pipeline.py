@@ -39,7 +39,12 @@ BASE_DIR = Path(__file__).parent
 # Check if CoreML conversion worked (resolve relative to this file)
 COREML_MODEL_PATH = str(BASE_DIR / "coreml" / "KokoroVocoder.mlpackage")
 COREML_DECODER_HAR_PATH = str(BASE_DIR / "coreml" / "KokoroDecoder_HAR.mlpackage")
-COREML_AVAILABLE = os.path.exists(COREML_MODEL_PATH) or os.path.exists(COREML_DECODER_HAR_PATH)
+COREML_DECODER_ONLY_5S_PATH = str(BASE_DIR / "coreml" / "kokoro_decoder_only_5s.mlpackage")
+COREML_AVAILABLE = any([
+    os.path.exists(COREML_MODEL_PATH),
+    os.path.exists(COREML_DECODER_HAR_PATH),
+    os.path.exists(COREML_DECODER_ONLY_5S_PATH),
+])
 
 if COREML_AVAILABLE:
     try:
@@ -79,6 +84,7 @@ class HybridTTSPipeline:
             try:
                 self.coreml_vocoder = ct.models.MLModel(COREML_MODEL_PATH) if os.path.exists(COREML_MODEL_PATH) else None
                 self.coreml_decoder_har = ct.models.MLModel(COREML_DECODER_HAR_PATH) if os.path.exists(COREML_DECODER_HAR_PATH) else None
+                self.coreml_decoder_only_5s = ct.models.MLModel(COREML_DECODER_ONLY_5S_PATH) if os.path.exists(COREML_DECODER_ONLY_5S_PATH) else None
                 # Load synthesizer bucket models if present (search local and parent coreml dirs)
                 import glob
                 self.coreml_synth_buckets = {}
@@ -119,6 +125,8 @@ class HybridTTSPipeline:
                     print("✅ CoreML vocoder loaded successfully")
                 if self.coreml_decoder_har is not None:
                     print("✅ CoreML Decoder_HAR loaded successfully (exact hn-nsf parity)")
+                if self.coreml_decoder_only_5s is not None:
+                    print("✅ CoreML Decoder-Only 5s loaded successfully")
                 
                 # Print vocoder specifications
                 print("\n📋 CoreML Vocoder Info:")
@@ -141,6 +149,203 @@ class HybridTTSPipeline:
             self.use_coreml = True
             print(f"✅ Buckets → synth: {len(getattr(self, 'coreml_synth_buckets', {}))}, decoder_har: {len(getattr(self, 'coreml_decoder_har_buckets', {}))}")
         print(f"\n🎯 Pipeline Mode: {'Hybrid (PyTorch + CoreML)' if self.use_coreml else 'PyTorch Only'}")
+
+    def run_phase1_decoder_only_5s(self, text: str, voice: str = 'af_heart', speed: float = 1.0, out_base: str = 'outputs/local') -> dict | None:
+        """Phase 1: Run fixed 5s decoder-only Core ML model and save artifacts.
+
+        Returns a dict with output paths and latency, or None on failure.
+        """
+        model = getattr(self, 'coreml_decoder_only_5s', None) or getattr(self, 'coreml_vocoder', None)
+        if model is None:
+            print("❌ Decoder-only 5s CoreML model not available (also no KokoroVocoder). Export it first.")
+            return None
+
+        # Pre-decoder: extract features (phonemizer, durations, alignment, F0/N, asr)
+        t0 = time.time()
+        vi = self.extract_vocoder_inputs(text, voice=voice, speed=speed)
+        if vi is None:
+            return None
+        # Fixed shapes for 5s bucket
+        asr_len = 200  # 5s @ 80fps → f0_len=400, asr_len=f0_len/2
+        f0_len = 400
+        # Pad/truncate
+        asr = vi['asr'].astype(np.float32)
+        f0 = vi['f0_curve'].astype(np.float32)
+        n = vi['n'].astype(np.float32)
+        s = vi['s'].astype(np.float32)
+        asr_pad = np.zeros((1, 512, asr_len), dtype=np.float32)
+        t_asr = min(asr_len, asr.shape[-1])
+        if t_asr > 0:
+            asr_pad[:, :, :t_asr] = asr[:, :, :t_asr]
+        f0_pad = np.zeros((1, f0_len), dtype=np.float32)
+        n_pad = np.zeros((1, f0_len), dtype=np.float32)
+        t_f0 = min(f0_len, f0.shape[-1])
+        if t_f0 > 0:
+            f0_pad[:, :t_f0] = f0[:, :t_f0]
+            n_pad[:, :t_f0] = n[:, :t_f0]
+        t1 = time.time()
+
+        # Core ML inference
+        print("🍎 Running CoreML decoder-only 5s…")
+        inputs = {
+            'asr': asr_pad.reshape(1, 512, 1, asr_len),
+            'f0_curve': f0_pad.reshape(1, 1, 1, f0_len),
+            'n': n_pad.reshape(1, 1, 1, f0_len),
+            's': s,
+        }
+        t2 = time.time()
+        res = model.predict(inputs)
+        out_key = 'waveform' if 'waveform' in res else list(res.keys())[0]
+        audio = res[out_key].squeeze().astype(np.float32)
+        t3 = time.time()
+
+        # Save artifacts
+        from datetime import datetime
+        out_dir = Path(out_base) / f"phase1_{datetime.now().strftime('%Y%m%d_%H%M%S')}"
+        out_dir.mkdir(parents=True, exist_ok=True)
+        wav_path = out_dir / 'output.wav'
+        if SOUNDFILE_AVAILABLE:
+            sf.write(wav_path, audio, 24000)
+        else:
+            try:
+                import wave, struct
+                with wave.open(str(wav_path), 'wb') as w:
+                    w.setnchannels(1)
+                    w.setsampwidth(2)
+                    w.setframerate(24000)
+                    # naive float→int16
+                    arr = np.clip(audio, -1.0, 1.0)
+                    data = (arr * 32767.0).astype(np.int16).tobytes()
+                    w.writeframes(data)
+            except Exception as e:
+                print(f"⚠️ Could not save WAV: {e}")
+
+        # Mel spectrogram PNG and CSV
+        mel_png = out_dir / 'mel_spectrogram.png'
+        mel_csv = out_dir / 'mel_spectrogram.csv'
+        try:
+            import librosa, librosa.display
+            import matplotlib.pyplot as plt
+            S = librosa.feature.melspectrogram(
+                y=audio, sr=24000, n_fft=1024, hop_length=300,
+                n_mels=80, fmin=0.0, fmax=12000.0, power=2.0
+            )
+            S_db = librosa.power_to_db(S, ref=np.max)
+            np.savetxt(mel_csv, S, delimiter=',')
+            plt.figure(figsize=(8, 3))
+            librosa.display.specshow(S_db, sr=24000, hop_length=300, x_axis='time', y_axis='mel', fmax=12000)
+            plt.colorbar(format='%+2.0f dB')
+            plt.tight_layout()
+            plt.savefig(mel_png)
+            plt.close()
+        except Exception as e:
+            print(f"⚠️ Mel spectrogram generation failed: {e}")
+
+        # Metadata
+        meta = {
+            'input_text': text,
+            'bucket_seconds': 5,
+            'sample_rate': 24000,
+            'mel_params': {
+                'n_mels': 80, 'hop_length': 300, 'n_fft': 1024, 'fmin': 0, 'fmax': 12000
+            },
+            'model': 'kokoro_decoder_only_5s.mlpackage',
+            'latency': {
+                'pre_decoder_s': t1 - t0,
+                'coreml_s': t3 - t2,
+                'total_s': t3 - t0,
+            },
+        }
+        try:
+            import json
+            with open(out_dir / 'metadata.json', 'w', encoding='utf-8') as f:
+                json.dump(meta, f, indent=2)
+        except Exception as e:
+            print(f"⚠️ Could not write metadata.json: {e}")
+
+        # Playback via afplay (best-effort)
+        try:
+            if os.uname().sysname == 'Darwin':
+                os.system(f"afplay '{wav_path}' >/dev/null 2>&1 &")
+        except Exception:
+            pass
+
+        print(f"✅ Phase 1 artifacts saved in: {out_dir}")
+        return {
+            'output_dir': str(out_dir),
+            'wav': str(wav_path),
+            'mel_png': str(mel_png),
+            'mel_csv': str(mel_csv),
+            'metadata': str(out_dir / 'metadata.json'),
+            'latency': meta['latency'],
+        }
+
+    def run_golden_reference(self, text: str, voice: str = 'af_heart', speed: float = 1.0, mode: str = 'har') -> dict | None:
+        """Generate golden reference artifacts into outputs/golden.
+
+        mode:
+          - 'har': use Decoder_HAR bucket path (highest fidelity)
+          - 'decoder-only-5s': use decoder-only 5s model
+        """
+        base = 'outputs/golden'
+        if mode == 'decoder-only-5s':
+            return self.run_phase1_decoder_only_5s(text, voice, speed, out_base=base)
+        # default: HAR bucket
+        audio = self.run_coreml_decoder_har_bucket(text, voice, speed)
+        if audio is None:
+            print('❌ HAR bucket path failed; falling back to decoder-only-5s')
+            return self.run_phase1_decoder_only_5s(text, voice, speed, out_base=base)
+        # Save artifacts similar to Phase 1
+        from datetime import datetime
+        out_dir = Path(base) / f"golden_{datetime.now().strftime('%Y%m%d_%H%M%S')}"
+        out_dir.mkdir(parents=True, exist_ok=True)
+        wav_path = out_dir / 'output.wav'
+        if SOUNDFILE_AVAILABLE:
+            sf.write(wav_path, audio, 24000)
+        else:
+            try:
+                import wave
+                arr = np.clip(audio, -1.0, 1.0)
+                data = (arr * 32767.0).astype(np.int16).tobytes()
+                with wave.open(str(wav_path), 'wb') as w:
+                    w.setnchannels(1); w.setsampwidth(2); w.setframerate(24000); w.writeframes(data)
+            except Exception as e:
+                print(f"⚠️ Could not save WAV: {e}")
+        # Mel specs
+        mel_png = out_dir / 'mel_spectrogram.png'
+        mel_csv = out_dir / 'mel_spectrogram.csv'
+        try:
+            import librosa, librosa.display
+            import matplotlib.pyplot as plt
+            S = librosa.feature.melspectrogram(y=audio, sr=24000, n_fft=1024, hop_length=300, n_mels=80, fmin=0.0, fmax=12000.0, power=2.0)
+            S_db = librosa.power_to_db(S, ref=np.max)
+            np.savetxt(mel_csv, S, delimiter=',')
+            plt.figure(figsize=(8, 3))
+            librosa.display.specshow(S_db, sr=24000, hop_length=300, x_axis='time', y_axis='mel', fmax=12000)
+            plt.colorbar(format='%+2.0f dB'); plt.tight_layout(); plt.savefig(mel_png); plt.close()
+        except Exception as e:
+            print(f"⚠️ Mel spectrogram generation failed: {e}")
+        # Metadata
+        meta = {
+            'input_text': text,
+            'model': 'Decoder_HAR bucket (auto-selected)',
+            'sample_rate': 24000,
+            'mel_params': {'n_mels': 80, 'hop_length': 300, 'n_fft': 1024, 'fmin': 0, 'fmax': 12000},
+        }
+        try:
+            import json
+            with open(out_dir / 'metadata.json', 'w', encoding='utf-8') as f:
+                json.dump(meta, f, indent=2)
+        except Exception as e:
+            print(f"⚠️ Could not write metadata.json: {e}")
+        print(f"✅ Golden reference saved in: {out_dir}")
+        return {
+            'output_dir': str(out_dir),
+            'wav': str(wav_path),
+            'mel_png': str(mel_png),
+            'mel_csv': str(mel_csv),
+            'metadata': str(out_dir / 'metadata.json'),
+        }
     
     def extract_vocoder_inputs(self, text, voice='af_heart', speed=1.0):
         """
@@ -199,28 +404,28 @@ class HybridTTSPipeline:
                 d_en = self.pytorch_model.bert_encoder(bert_dur).transpose(-1, -2)
                 s = ref_s[:, 128:]  # Style embedding
                 
-                # Prosody prediction
+                # Prosody prediction (durations)
                 d = self.pytorch_model.predictor.text_encoder(d_en, s, input_lengths, text_mask)
                 x, _ = self.pytorch_model.predictor.lstm(d)
                 duration = self.pytorch_model.predictor.duration_proj(x)
                 duration = torch.sigmoid(duration).sum(axis=-1) / speed
                 pred_dur = torch.round(duration).clamp(min=1).long().squeeze()
-                
+
                 # Duration alignment
                 indices = torch.repeat_interleave(
                     torch.arange(input_ids.shape[1], device=self.pytorch_model.device), pred_dur)
-                pred_aln_trg = torch.zeros((input_ids.shape[1], indices.shape[0]), 
+                pred_aln_trg = torch.zeros((input_ids.shape[1], indices.shape[0]),
                                          device=self.pytorch_model.device)
                 pred_aln_trg[indices, torch.arange(indices.shape[0])] = 1
                 pred_aln_trg = pred_aln_trg.unsqueeze(0).to(self.pytorch_model.device)
-                
-                # Generate F0 and noise predictions
-                en = d.transpose(-1, -2) @ pred_aln_trg
-                F0_pred, N_pred = self.pytorch_model.predictor.F0Ntrain(en, s)
-                
-                # Text encoder features
+
+                # Text encoder features and ASR alignment
                 t_en = self.pytorch_model.text_encoder(input_ids, input_lengths, text_mask)
                 asr = t_en @ pred_aln_trg
+
+                # Generate F0 and noise predictions from aligned d (linguistic enc) to match expected dims
+                en = d.transpose(-1, -2) @ pred_aln_trg
+                F0_pred, N_pred = self.pytorch_model.predictor.F0Ntrain(en, s)
                 
                 # Extract vocoder inputs
                 vocoder_inputs = {
@@ -902,6 +1107,9 @@ def main():
     print("=" * 50)
     parser = argparse.ArgumentParser()
     parser.add_argument('--engine', choices=['pytorch', 'coreml'], default='pytorch')
+    parser.add_argument('--phase1-decoder-only-5s', action='store_true', help='Run Phase 1: decoder-only 5s pipeline and save artifacts')
+    parser.add_argument('--golden', choices=['har', 'decoder-only-5s'], help='Generate golden reference into outputs/golden using selected path')
+    parser.add_argument('--text', type=str, default="Hello Matt, this is Kokoro running on Apple Neural Engine.", help='Input text for run')
     args = parser.parse_args()
 
     # Initialize pipeline
@@ -909,6 +1117,18 @@ def main():
         pipeline = HybridTTSPipeline(force_engine=args.engine)
     except Exception as e:
         print(f"❌ Failed to initialize pipeline: {e}")
+        return
+    # Golden reference generation
+    if args.golden:
+        res = pipeline.run_golden_reference(args.text, mode=args.golden)
+        if res is None:
+            print('❌ Golden generation failed')
+        return
+    # Phase 1 single-run mode
+    if args.phase1_decoder_only_5s:
+        res = pipeline.run_phase1_decoder_only_5s(args.text)
+        if res is None:
+            print("❌ Phase 1 run failed")
         return
     
     # Check ANE usage capabilities
@@ -927,7 +1147,7 @@ def main():
     
     # Generate sample outputs
     print("\n🎵 Generating Sample Audio Files...")
-    output_dir = Path("outputs")
+    output_dir = Path("outputs/local")
     output_dir.mkdir(exist_ok=True)
     
     for i, text in enumerate(test_texts[:2]):  # Just first two for samples

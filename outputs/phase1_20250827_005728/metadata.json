@@ -1,0 +1,18 @@
+{
+  "input_text": "Hello Matt, this is Kokoro running on Apple Neural Engine.",
+  "bucket_seconds": 5,
+  "sample_rate": 24000,
+  "mel_params": {
+    "n_mels": 80,
+    "hop_length": 300,
+    "n_fft": 1024,
+    "fmin": 0,
+    "fmax": 12000
+  },
+  "model": "kokoro_decoder_only_5s.mlpackage",
+  "latency": {
+    "pre_decoder_s": 0.31409406661987305,
+    "coreml_s": 1.1353139877319336,
+    "total_s": 1.4494109153747559
+  }
+}

@@ -29,7 +29,7 @@ def main():
     ap.add_argument('--text', required=True)
     ap.add_argument('--voice', default='af_heart')
     ap.add_argument('--speed', type=float, default=1.0)
-    ap.add_argument('--out', default='outputs/out.wav')
+    ap.add_argument('--out', default='outputs/local/out.wav')
     args = ap.parse_args()
 
     p = HybridTTSPipeline(force_engine=args.engine)
