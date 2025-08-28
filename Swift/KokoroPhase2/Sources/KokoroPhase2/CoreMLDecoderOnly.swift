@@ -56,12 +56,13 @@ public final class DecoderOnly5sRunner {
         let compiled = try MLModel.compileModel(at: mlpackageURL)
         self.model = try MLModel(contentsOf: compiled, configuration: config)
         // Optional post-filter (KokoroPostFilter.mlpackage) in ./coreml
-        if let pfPath = ProcessInfo.processInfo.environment["KOKORO_POSTFILTER_PATH"] {
+        let disablePF = (ProcessInfo.processInfo.environment["KOKORO_DISABLE_POSTFILTER"] == "1")
+        if !disablePF, let pfPath = ProcessInfo.processInfo.environment["KOKORO_POSTFILTER_PATH"] {
             if FileManager.default.fileExists(atPath: pfPath) {
                 let pfCompiled = try MLModel.compileModel(at: URL(fileURLWithPath: pfPath))
                 self.postFilter = try? MLModel(contentsOf: pfCompiled, configuration: config)
             }
-        } else {
+        } else if !disablePF {
             let defaultPF = URL(fileURLWithPath: "coreml/KokoroPostFilter.mlpackage")
             if FileManager.default.fileExists(atPath: defaultPF.path) {
                 let pfCompiled = try MLModel.compileModel(at: defaultPF)

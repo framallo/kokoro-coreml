@@ -112,3 +112,7 @@ Next up (Phase 2):
 
 
  
+- Training pipeline artifacts:
+  - `tools/postfilter_model.py`, `tools/train_postfilter.py` — train/export Core ML post-filter
+  - `tools/generate_phase2_runs.py`, `tools/postfilter_texts.json` — generate runs and mine training text from README
+  - Goal: correlation ≥ 0.90; iterate with multi-band STFT/perceptual losses and bucket-specific models
