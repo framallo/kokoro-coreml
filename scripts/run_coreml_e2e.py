@@ -654,6 +654,10 @@ def main() -> int:
         t5 = time.perf_counter()
         wave_key = list(syn_out.keys())[0]
         audio = syn_out[wave_key].astype(np.float32).reshape(-1)
+        # Trim to predicted content length (sum of pred_dur frames × 600 samples per frame at 24kHz)
+        predicted_samples = int(np.int64(np.sum(pred_dur_vec))) * 600
+        if predicted_samples > 0:
+            audio = audio[:predicted_samples]
         timings = {
             'duration_ms': (t1 - t0) * 1000.0,
             'align_ms': (t3 - t2) * 1000.0,

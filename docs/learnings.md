@@ -967,3 +967,45 @@ Mitigations:
 - Added `com.talktome.dev.tokenizerPython` override to select the venv interpreter used by the app.
 - Next: update `dev_tokenize.py` to map phoneme strings to integer IDs consistently, or call a `KPipeline` API that returns ids directly. Once Python ids flow, Duration → Synth should produce intelligible speech.
 
+## 22. Powermetrics variability and ANE verification best practices — 2025-08-28
+
+- Powermetrics on macOS 14.6: The `--samplers ane` flag may not be available. Use `--samplers all` and parse lines containing "ANE Power:".
+- Units: Some systems report in mW. Normalize to W when aggregating.
+- Sudo: Configure a passwordless sudoers drop-in for `/usr/bin/powermetrics` to enable automated sampling from the harness.
+
+```bash
+# /etc/sudoers.d/powermetrics (edit with visudo -f)
+%admin ALL=(root) NOPASSWD: /usr/bin/powermetrics
+```
+
+Best practices for ANE verification:
+
+- Treat Python `MLModel.predict()` ANE readings as advisory only. The Core ML Python bridge may execute on CPU/GPU despite `.all` compute units.
+- Definitive method: capture an Instruments trace (`xcrun xctrace` Core ML template) and confirm "Neural Engine" activity during the synthesizer predict window.
+- For product validation, prefer a minimal Swift app, set `MLModelConfiguration(computeUnits: .all)`, and verify in Instruments.
+
+## 23. Python vs app ANE behavior — 2025-08-28
+
+- Python path often shows 0 mW ANE power even when the same `.mlpackage` uses ANE in an app. Assume differences in backend engagement or optimizer passes.
+- Practical guidance: Use Python for I/O contract and timing sanity only; rely on app + Instruments for ANE confirmation.
+
+## 24. Shape introspection + trimming strategy — 2025-08-28
+
+- The harness introspects synthesizer shapes from the `.mlpackage` spec (`trace_length`, `frame_count`, `hidden_size`).
+- If a bucket model outputs a longer-than-expected waveform (mis-export), trim the saved audio to the predicted content length: `predicted_samples = sum(pred_dur) * 600` at 24 kHz.
+- Recommendation: Re-export bucket models to match intended durations (e.g., 3 s → 72,000 samples) and keep Duration/Synth `trace_length` consistent.
+
+## 25. CPU feature fallback mapping — 2025-08-28
+
+- When the Duration Core ML outputs are ambiguous or incomplete (e.g., missing `d` or `t_en` channels), compute them on CPU using `KModel` and map to synthesizer inputs:
+  - `t_en`: prefer shape `[1, 512, T]`; transpose from `[1, T, 512]` if needed.
+  - `d`: ensure `[1, 640, T]` by concatenating `[1, 512, T]` base features with repeated `s` `[1, 128]` along time.
+  - `s`: prefer `[1, 128]` from duration output; else derive from `ref_s[:, 128:]`.
+- Build `pred_aln_trg[T, frames]` from integer `pred_dur` by repeating token indices and clamping/padding to frame width.
+
+Cross-links:
+
+- Harness: `scripts/run_coreml_e2e.py`
+- Benchmarking guide: `docs/benchmarking-tool.md`
+- Make: `make coreml_e2e`
+

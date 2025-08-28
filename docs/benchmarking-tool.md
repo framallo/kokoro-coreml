@@ -30,7 +30,7 @@ make coreml_e2e
 - Saves `outputs/coreml_e2e.wav`
 - Prints per‑stage timings and total RTF
 - ANE Auto‑Verifier:
-  - Primary: `sudo powermetrics -i 200 --samplers ane` → parses "ANE Power"
+  - Primary: `sudo powermetrics -i 200 --samplers all` → parses lines containing "ANE Power:" (on macOS 14.6, `ane` sampler may not exist)
   - Fallback: Instructions to capture and export an `xctrace` Core ML trace
 
 ## 🔧 CLI Flags

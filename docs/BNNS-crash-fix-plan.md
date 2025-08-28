@@ -41,3 +41,71 @@ Notes
 - Ensure token_type_ids dtype=int32.
 - Confirm ref_s alias fix via clone().
 - Manual F0/N path mirrors predictor internals; parity validated against PyTorch within perceptual tolerance.
+
+## Implementation Progress
+
+### 2025-08-28 — E2E harness, ANE verification, and bucket mismatch
+
+- End-to-end harness: Added `scripts/run_coreml_e2e.py` that runs Duration → Synthesizer, prints per-stage timings, saves `outputs/coreml_e2e.wav`, and verifies ANE activity.
+- ANE verifier change: On macOS 14.6+, the dedicated `ane` sampler may be unavailable. The harness now runs `powermetrics --samplers all` and parses lines containing "ANE Power:".
+- Observed behavior: With Python Core ML (`ct.models.MLModel.predict()`), ANE power readings are 0 mW during Synth predictions on our setup, implying CPU/GPU fallback for Python. Treat ANE usage from Python as non-definitive; rely on Instruments.
+- Audio bucket mismatch: Current `coreml/kokoro_synthesizer_3s.mlpackage` produces a waveform much longer than 3 s (~64 s). The harness trims the audio to the predicted content length using `sum(pred_dur) * 600` samples at 24 kHz (600 samples per frame).
+
+Repro commands:
+
+```bash
+# Makefile shortcut
+make coreml_e2e
+
+# Direct run (no sudo, skips ANE check)
+python scripts/run_coreml_e2e.py --no-ane-check --repeat 2
+
+# With voice download (af_heart) and ANE check enabled (requires sudoers entry below)
+python scripts/run_coreml_e2e.py --text "This is Kokoro running on Apple Neural Engine." --voice af_heart --repeat 3
+
+# Fallback ANE verification via Xcode Instruments (no sudo required)
+xcrun xctrace record --template "Core ML" --time-limit 6s --output outputs/coreml_e2e.trace &
+python scripts/run_coreml_e2e.py --no-ane-check --repeat 1
+xcrun xctrace export --input outputs/coreml_e2e.trace --output outputs/coreml_e2e.json --format json
+```
+
+Powermetrics sudoers (for passwordless sampling):
+
+```bash
+# /etc/sudoers.d/powermetrics  (edit via: sudo visudo -f /etc/sudoers.d/powermetrics)
+%admin ALL=(root) NOPASSWD: /usr/bin/powermetrics
+```
+
+Current harness outputs (captured locally; M2 Ultra, macOS 15.6):
+
+```
+Synthesizer bucket reported: frames=2560, hidden=640, trace_length=256  # 2560*600/24000 = 64s bucket
+
+Run 1/1: duration=840.8ms, align=0.1ms, synth=34797.0ms, total=35638.5ms, rtf=3.853
+
+Summary: audio_sec=9.250s, duration_ms=840.8, align_ms=0.1, synth_ms=34797.0, total_ms=35638.5, rtf=3.853
+ANE Power (Python): ~0 mW typically observed → likely CPU/GPU fallback in Python; use Instruments for definitive check
+```
+
+Definitive ANE proof:
+
+- Prefer `xcrun xctrace` Core ML template. Export JSON and verify "Neural Engine" activity during the Synth phase.
+- For product-level verification, build a minimal macOS Swift app that loads both `.mlpackage` files with `MLModelConfiguration(computeUnits: .all)` and profile with Instruments.
+
+Audio bucket detail:
+
+- Mis-exported `kokoro_synthesizer_3s.mlpackage` currently yields ~64 s output. The harness trims to predicted content length (`sum(pred_dur) * 600` samples) so the saved WAV reflects the text content rather than the full padded buffer.
+- Recommendation: Re-export the proper 3 s bucket so the waveform output length is 72,000 samples at 24 kHz; re-run the harness to confirm.
+
+Next actions and owners:
+
+- Re-export synthesizer buckets at correct durations (3s first). Owner: Matt.
+- Re-run harness with `--voice af_heart` and capture timings + WAV. Owner: Matt.
+- Capture `xctrace` during a single Synth run; export JSON and archive in `outputs/`. Owner: Matt.
+- Add a minimal Swift app skeleton (`examples/swift/macos-synth/`) for definitive ANE verification. Owner: Matt.
+
+Cross-links:
+
+- Harness script: `scripts/run_coreml_e2e.py`
+- Benchmarking guide: `docs/benchmarking-tool.md`
+- Make target: `make coreml_e2e`
