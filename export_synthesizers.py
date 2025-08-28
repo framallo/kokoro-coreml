@@ -344,14 +344,12 @@ class SynthesizerModel(nn.Module):
         if t_en.shape[-1] != d.shape[-1]:
             t_en = torch.nn.functional.interpolate(t_en, size=d.shape[-1], mode='nearest')
         # Align duration features to target frames without einsum to avoid CoreML BNNS bugs
-        # (B, H, T) x (T, F) -> (B, F, H) via batched matmul
+        # (B, C, T) x (T, F) -> (B, C, F) via batched matmul
         B = d.shape[0]
-        # pred_aln_trg: (T, F) -> (F, T) -> expand to (B, F, T)
-        pred_bt = pred_aln_trg.transpose(0, 1).unsqueeze(0).expand(B, -1, -1)
-        d_bt = d.transpose(1, 2)  # (B, T, H)
-        en = torch.bmm(pred_bt, d_bt)  # (B, F, H)
+        pred_btf = pred_aln_trg.unsqueeze(0).expand(B, -1, -1)  # (B, T, F)
+        en = torch.bmm(d, pred_btf)  # (B, C, F)
         # Prosody: prefer true F0/N predictions if available; else manual branch
-        B, F, H = en.shape
+        B, H, F = t_en.shape[0], t_en.shape[1], en.shape[-1]
         if hasattr(k.predictor, 'F0Ntrain') and callable(getattr(k.predictor, 'F0Ntrain')):
             F0_pred, N_pred = k.predictor.F0Ntrain(en, s)  # shapes: (B, F), (B, F)
         else:

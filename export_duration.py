@@ -30,13 +30,19 @@ def _load_module_from(path_rel: str, name: str):
     return mod
 
 kokoro_istftnet = _load_module_from("kokoro/istftnet.py", "kokoro_istftnet")
+sys.modules['kokoro_istftnet'] = kokoro_istftnet
 kokoro_modules_src = (_ROOT / "kokoro/modules.py").read_text()
+# Replace relative istftnet import with our loaded module
+kokoro_modules_src = kokoro_modules_src.replace("from .istftnet import AdainResBlk1d", "from kokoro_istftnet import AdainResBlk1d")
 kokoro_modules = importlib.util.module_from_spec(importlib.util.spec_from_loader("kokoro_modules", loader=None))
 kokoro_modules.__dict__['kokoro_istftnet'] = kokoro_istftnet
 kokoro_modules.__dict__['__name__'] = 'kokoro_modules'
 exec(kokoro_modules_src, kokoro_modules.__dict__)
 sys.modules['kokoro_modules'] = kokoro_modules
 kokoro_model_src = (_ROOT / "kokoro/model.py").read_text()
+# Patch relative imports to use our loaded modules
+kokoro_model_src = kokoro_model_src.replace("from .istftnet import Decoder", "from kokoro_istftnet import Decoder")
+kokoro_model_src = kokoro_model_src.replace("from .modules import CustomAlbert, ProsodyPredictor, TextEncoder", "from kokoro_modules import CustomAlbert, ProsodyPredictor, TextEncoder")
 kokoro_model = importlib.util.module_from_spec(importlib.util.spec_from_loader("kokoro_model", loader=None))
 kokoro_model.__dict__['kokoro_modules'] = kokoro_modules
 kokoro_model.__dict__['__name__'] = 'kokoro_model'
@@ -149,10 +155,10 @@ def main():
     duration_ml = ct.convert(
         traced,
         inputs=[
-            ct.TensorType(name="input_ids",      shape=(ct.RangeDim(1, 512),),  dtype=np.int32),
-            ct.TensorType(name="ref_s",          shape=(256,),                  dtype=np.float32),
+            ct.TensorType(name="input_ids",      shape=(1, ct.RangeDim(1, 512)),  dtype=np.int32),
+            ct.TensorType(name="ref_s",          shape=(1, 256),                  dtype=np.float32),
             ct.TensorType(name="speed",          shape=(1,),                    dtype=np.float32),
-            ct.TensorType(name="attention_mask", shape=(ct.RangeDim(1, 512),),  dtype=np.int32),
+            ct.TensorType(name="attention_mask", shape=(1, ct.RangeDim(1, 512)),  dtype=np.int32),
         ],
         convert_to="mlprogram",
         minimum_deployment_target=ct.target.macOS12,
