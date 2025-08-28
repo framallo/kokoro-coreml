@@ -1,147 +1,126 @@
-# 🎤 Kokoro TTS Benchmark Tool
+# 🎤 Kokoro TTS Benchmark & ANE Verification
 
-A comprehensive benchmarking tool for testing and comparing different Kokoro TTS models (full precision and quantized versions) on performance, latency, and audio quality.
+This guide explains how to run the end‑to‑end Core ML harness, verify Apple Neural Engine (ANE) usage automatically, and interpret latency metrics. It also sketches a macOS Swift app plan for one‑click benchmarking.
 
-## 🚀 Features
-
-- **Performance Metrics**: Detailed timing analysis including load time, inference time, and real-time factors
-- **Memory Usage Tracking**: Monitor peak memory consumption during generation
-- **Audio Playback**: Automatic playback of generated audio for quality comparison
-- **Batch Comparison**: Test all models with the same text/voice for direct comparison
-- **Results Export**: Save audio files and benchmark metrics to JSON for analysis
-
-
-## 🎭 Available Voices
-
-**Female**: af_heart, af_bella, af_sarah, af_nicole, af_sky, af_river  
-**Male**: am_michael, am_adam, am_eric, am_liam, am_onyx, am_puck
-
-## 📦 Prerequisites
-
-Make sure you have the mlx-audio package installed with all dependencies:
+## 🚦 Quick Start
 
 ```bash
-# Install mlx-audio with dependencies
-pip install -e .
+# 1) Ensure Core ML packages exist
+ls coreml/
+# Expected: kokoro_duration.mlpackage, kokoro_synthesizer_3s.mlpackage
 
-# Ensure MLX and other dependencies are available
-pip install mlx soundfile sounddevice numpy
+# 2) Create a WAV and print timings (no sudo needed)
+python scripts/run_coreml_e2e.py --no-ane-check
+
+# 3) Full run with ANE auto-verifier (requires sudo NOPASSWD for powermetrics)
+python scripts/run_coreml_e2e.py
 ```
 
-## 🔧 Usage
-
-### Basic Usage
+Makefile convenience:
 
 ```bash
-python kokoro_benchmark.py
+make coreml_e2e
 ```
 
-### Interactive Flow
+## 🧪 What the Harness Does
 
-2. **Choose Voice**: Select from available female/male voices (default: af_heart)
-3. **Enter Text**: Input text to synthesize (or use default benchmark text)
-4. **Review Results**: View detailed performance metrics
-5. **Listen to Audio**: Optional playback of generated speech
-6. **Save Results**: Export audio files and metrics for further analysis
+- Runs stage 1 `kokoro_duration.mlpackage` to produce: `pred_dur`, `d`, `t_en`, `s`
+- Builds the alignment matrix on CPU from `pred_dur`
+- Runs stage 2 `kokoro_synthesizer_3s.mlpackage` to produce waveform
+- Saves `outputs/coreml_e2e.wav`
+- Prints per‑stage timings and total RTF
+- ANE Auto‑Verifier:
+  - Primary: `sudo powermetrics -i 200 --samplers ane` → parses "ANE Power"
+  - Fallback: Instructions to capture and export an `xctrace` Core ML trace
 
-### Example Session
+## 🔧 CLI Flags
 
-```
-🎤 KOKORO TTS BENCHMARK TOOL
-=======================================
-
-
-🎭 Available Voices:
-Female voices: af_heart, af_bella, af_sarah, af_nicole, af_sky, af_river
-Male voices: am_michael, am_adam, am_eric, am_liam, am_onyx, am_puck
-
-Select voice (default: af_heart): af_heart
-
-📝 Text Input:
-Enter text to synthesize (or press Enter for default):
-> This is Kokoro running on Apple Neural Engine
+```bash
+python scripts/run_coreml_e2e.py \
+  --text "This is Kokoro running on Apple Neural Engine." \
+  --voice af_heart \            # or 'zeros' (default) to avoid HF download
+  --repeat 3 \                   # repeat runs for stable timing
+  --trace-length 64 \            # override duration trace tokens (pad/truncate)
+  --no-ane-check                 # skip powermetrics (useful in CI)
 ```
 
-## 📊 Metrics Explained
+Defaults:
+- `--text`: "This is Kokoro running on Apple Neural Engine."
+- `--voice`: `zeros` (uses zeroed `ref_s` to avoid downloads)
+- `--repeat`: 3
+- `--out`: `outputs/coreml_e2e.wav`
 
-### Performance Metrics
-- **Model Load Time**: Time to load model weights and initialize
-- **Inference Time**: Time for actual text-to-speech generation
-= **Time to First Audio**: Time until the first audio is played
-- **Total Time**: Combined load + inference time
-- **Real-time Factor (RTF)**: Inference time / Audio duration (lower is better)
-- **Samples/sec**: Audio samples generated per second
+## 📦 Expected I/O Shapes
 
-### Quality Metrics
-- **Audio Duration**: Length of generated speech
-- **Sample Rate**: Audio sampling frequency (typically 24kHz)
-- **Peak Memory**: Maximum memory usage during generation
+- Duration model inputs: `(trace_length,)` for `input_ids`, `attention_mask`; `(256,)` for `ref_s`; `(1,)` for `speed`
+- Duration outputs:
+  - `pred_dur`: `(trace_length,)` or `(1, trace_length)`
+  - `d`, `t_en`: `(1, hidden, trace_length)`
+  - `s`: `(1, 128)`
+- Synthesizer inputs:
+  - `d`, `t_en`: `(1, hidden, trace_length)`
+  - `s`: `(1, 128)`
+  - `ref_s`: `(1, 256)`
+  - `pred_aln_trg`: `(trace_length, frame_count)`
+- Waveform output: `(frame_count,)` at 24kHz (3s bucket → 72,000 samples)
 
-### Comparison Table Example
-```
-📊 BENCHMARK COMPARISON
-====================================================================================================
-Model                     Load(s)  Infer(s)  Total(s)  RTF    Samples/s  Memory(GB)
-----------------------------------------------------------------------------------------------------   
-Kokoro-82M-bf16          2.42     0.71      3.13      0.35   33803      3.21      
-----------------------------------------------------------------------------------------------------
-```
+> Note: The harness auto‑reads shapes from the synthesizer `.mlpackage` spec.
 
-## 💾 Output Files
+## ⚡ Interpreting Metrics
 
-Results are saved to `benchmark_results/`:
-- **Audio files**: `01_Kokoro-82M-bf16_af_heart.wav`, etc.
-- **Metrics JSON**: `benchmark_results_YYYYMMDD_HHMMSS.json`
+- `duration_ms`: Stage‑1 runtime
+- `align_ms`: CPU time to build alignment
+- `synth_ms`: Stage‑2 runtime (should dominate and use ANE)
+- `total_ms`: End‑to‑end time
+- `rtf`: Real‑time factor = `total_sec / audio_sec` (<1.0 is faster than real‑time)
 
-### JSON Structure
-```json
-[
-  {
-    "model_name": "mlx-community/Kokoro-82M-bf16",
-    "model_description": "Kokoro 82M (bfloat16 - Full Precision)",
-    "text": "Hello world...",
-    "voice": "af_heart",
-    "model_load_time": 2.42,
-    "inference_time": 0.71,
-    "total_time": 3.13,
-    "audio_duration": 2.05,
-    "real_time_factor": 0.35,
-    "samples_per_sec": 33803,
-    "peak_memory_gb": 3.21,
-    "sample_rate": 24000
-  }
-]
+## 🔋 ANE Auto‑Verification
+
+### Primary: powermetrics (recommended)
+
+- Configure passwordless sudo for powermetrics:
+
+```bash
+# Add a sudoers drop-in (admin users only)
+# /etc/sudoers.d/powermetrics (via visudo -f)
+%admin ALL=(root) NOPASSWD: /usr/bin/powermetrics
 ```
 
-## 🎯 Use Cases
+- Then run the harness without `--no-ane-check`. It samples "ANE Power" and asserts >0 W for N samples.
 
-### Model Selection
-Compare quantized vs full precision models to find the best balance of quality and performance for your use case.
+### Fallback: Xcode Instruments trace (no sudo)
 
-### Performance Analysis
-Identify bottlenecks in your TTS pipeline and optimize for specific hardware constraints.
+- Record a short Core ML trace while running the harness:
 
-### Quality Assessment
-Listen to side-by-side audio comparisons to evaluate quality trade-offs with quantization.
+```bash
+xcrun xctrace record --template "Core ML" --time-limit 6s --output outputs/coreml_e2e.trace &
+python scripts/run_coreml_e2e.py --no-ane-check --repeat 1
+xcrun xctrace export --input outputs/coreml_e2e.trace --output outputs/coreml_e2e.json --format json
+```
 
-### Research & Development
-Generate reproducible benchmarks for model optimization and comparison studies.
+- Open the JSON and search for "Neural Engine" activity. Presence during Stage‑2 implies ANE usage.
 
-## 🔍 Troubleshooting
+## 🖥️ macOS Swift App Plan (skeleton)
 
-### Import Errors
-- Ensure `mlx-audio` is installed: `pip install -e .`
-- Check MLX installation: `python -c "import mlx.core; print('MLX OK')"`
+- Xcode project `examples/swift/macos-synth/`
+  - Load `coreml/kokoro_duration.mlpackage` and `coreml/kokoro_synthesizer_3s.mlpackage`
+  - Use `MLModelConfiguration(computeUnits: .all)`
+  - Wrap predictions with `os_signpost` for precise timing
+  - Minimal UI: text field, voice selector, Run button, metrics table
+  - Provide a shell script to `xctrace` the app for automated ANE verification
 
-### Memory Issues
-- Use smaller models (4-bit, 6-bit) for devices with limited memory
-- Clear MLX cache between runs if needed
+> Future work: add the project skeleton; current harness already covers E2E timing on macOS.
 
-### Audio Issues
-- Verify `sounddevice` is installed for playback
-- Check system audio settings if no sound
+## 🧰 Makefile Target
 
-## 📝 Notes
+Add to `Makefile`:
 
-- All timing measurements use `time.perf_counter()` for accuracy
-- Memory measurements require MLX Metal backend
+```make
+coreml_e2e:
+	python scripts/run_coreml_e2e.py
+```
+
+## 🧪 CI Note
+
+- In CI, run the harness with `--no-ane-check` to avoid sudo. Still prints functional timings and saves the WAV.
+- Reserve ANE verification for local bench scripts or release validation.
