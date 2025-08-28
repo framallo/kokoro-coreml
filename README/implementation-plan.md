@@ -88,12 +88,15 @@ Goal: Create a high-performance Swift TTS package. This will be achieved by vali
 - Built and executed the Swift CLI end-to-end. Outputs written to `outputs/local/phase2_*` with `output.wav` and `metadata.json` (latency breakdowns).
 - Added `tools/compare_phase2_to_golden.py` and compared Phase 2 output to latest HAR golden. Current waveform metrics (example run): `mse≈0.00588`, `mae≈0.04344`, `corr≈0.0189`, `dBFS≈-25.1` vs golden `-25.4`.
 - Observation: audio quality is slightly off (mild reverb/artifact) for the decoder-only export; likely due to the CoreML-friendly `m_source` used during export vs. the exact HN-NSF used by HAR (see `kokoro-generator-rebuild.md`).
+- Formal numerical parity check completed (Step 9): Swift-side `asr/f0/n/s` tensors dumped and matched Python reference via `KOKORO_DUMP_INPUTS=1` + `tools/compare_inputs_parity.py` (all MAE=0.0).
+- Exported Decoder_HAR bucket models (5s/15s/30s) and integrated them into the Python pipeline; warmed latency and behavior are documented in `README/learnings.md`.
 
 Next up (Phase 2):
-- Implement the formal numerical parity check (Step 9): dump Swift-side `asr/f0/n/s` tensors to disk and compare to the Python reference (target MAE ≤ 1e-5). ✅ Completed via `KOKORO_DUMP_INPUTS=1` + `tools/compare_inputs_parity.py` (all MAE=0.0)
-- HAR path: Added optional HAR inputs (`har_spec`, `har_phase`) to the fixture and CLI. Implemented Accelerate-based inverse STFT in Swift to reconstruct audio from HAR outputs. Wire-up completed; parameter tuning in progress.
-- Added env-controlled compute units override to the Swift runner (`KOKORO_COMPUTE_UNITS` or `KOKORO_CPU_ONLY`) to enable CPU-only diagnostics and isolate ANE/GPU differences.
-- If input parity holds but quality gap remains, try diagnostic exports (FP32 CPU-only variant, or mlprogram re-export without CoreML-friendly source) to isolate the source module as the cause. Decoder-only artifact confirmed not to be from feature prep.
+- Expand training data using `README/*.md` as the primary text corpus; generate runs across multiple voices to improve generalization; scale 5s and add 15s/30s buckets.
+- Train bucket‑specific post‑filters; update training to support per‑bucket fixed lengths (5s=120000, 15s=360000, 30s=720000 samples at 24 kHz).
+- Enable dynamic fixture export per input text and/or add `KOKORO_INPUT_TEXT` to the Swift CLI; update `tools/generate_phase2_runs.py` to pass text and auto‑select the correct bucket.
+- Increase post‑filter capacity modestly (e.g., 64 channels, 12 blocks) and add multi‑band STFT plus a small perceptual loss.
+- Integrate the best post‑filter as the default in Swift; verify ANE/GPU execution paths and confirm latency budget.
 
 #### Phase 2 milestones achieved (correlation-focused)
 - Matched Hann windowing and inverse DFT twiddles in Swift HAR iSTFT; base corr ≈ 0.663.
@@ -102,7 +105,7 @@ Next up (Phase 2):
 - Automated harvesting of training text from `README/*.md`, mass generation of runs, and retraining/export loop.
 
 #### Phase 2 next steps (to reach ≥ 0.90 corr)
-- Expand dataset (more sentences/voices) and include 15s/30s buckets; train bucket‑specific post‑filters.
+- Expand dataset using `README/*.md` texts (more sentences/voices) and include 15s/30s buckets; train bucket‑specific post‑filters.
 - Increase post‑filter capacity modestly (e.g., 64 channels, 12 blocks); add multi‑band STFT loss and small perceptual term.
 - Integrate best post‑filter as default in Swift, verify ANE/GPU execution and latency budget.
 
@@ -115,4 +118,4 @@ Next up (Phase 2):
 - Training pipeline artifacts:
   - `tools/postfilter_model.py`, `tools/train_postfilter.py` — train/export Core ML post-filter
   - `tools/generate_phase2_runs.py`, `tools/postfilter_texts.json` — generate runs and mine training text from README
-  - Goal: correlation ≥ 0.90; iterate with multi-band STFT/perceptual losses and bucket-specific models
+  - Goal: correlation ≥ 0.95; iterate with multi-band STFT/perceptual losses and bucket-specific models
