@@ -11,6 +11,7 @@ Exports Core ML via coremltools if available; otherwise writes TorchScript for l
 """
 from __future__ import annotations
 import argparse
+import os
 from pathlib import Path
 import numpy as np
 import soundfile as sf
