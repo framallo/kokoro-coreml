@@ -308,3 +308,16 @@ Implications:
 - Using README/*.md text as prompts to generate diverse training pairs and training the post-filter for 30 epochs improved correlation to ~0.848 on-device (5s). Next: auto-generate fixtures per text (dynamic fixture export), scale dataset, and add multi-band STFT loss to surpass 0.9.
 
 - Plan update: correlation target set to ≥0.90; Phase 2 now explicitly optimized around correlation with a learned post-filter. Roadmap: broaden dataset (README-derived prompts + voices), add 15s/30s buckets, increase model capacity and add multi-band STFT/perceptual losses, then bake the best model into the Swift path by default.
+
+## 14. Post‑Filter Training Pivot to MLX — 2025‑08‑28
+
+- Motivation: PyTorch/MPS hit a practical conv1d limit at long 1D sequence lengths (~120k samples @ 24 kHz), repeatedly throwing device errors and stalling training. Env fallbacks were unreliable.
+- Pivot: Moved post‑filter training to MLX (Apple‑native). Implemented an MLX model and trainer with data pre‑loaded in RAM.
+- Stability fixes:
+  - Channels‑last tensors (B, T, C) for MLX `Conv1d` path end‑to‑end.
+  - Added `tanh` clamp on output to bound amplitudes and avoid gradient blow‑ups.
+  - Disabled multi‑band STFT loss (weight=0) temporarily; naïve framed STFT caused NaNs/Metal errors. Kept L1 + correlation active.
+  - Correct MLX grad usage: `mlx.core.value_and_grad` with a closure to ensure proper evaluation.
+- Result: Stable learning with loss trending down (e.g., ~0.178 → ~0.110 over ~200 epochs; hidden=128, blocks=12, batch=2). Per‑epoch ≈ 44 s with 103 pairs.
+- Export bridge: Added `tools/export_mlx_to_coreml.py` to load MLX weights into the PyTorch model and convert to Core ML, keeping the Swift runtime unchanged.
+- Next: Reintroduce a vectorized, memory‑safe STFT/perceptual term (no Python framing) to push correlation beyond the L1+corr baseline.
