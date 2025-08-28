@@ -304,3 +304,5 @@ Implications:
 - On-device post-filter (Core ML) now runs in Swift path; 5s fixture correlation improved from ~0.675 to ~0.778. Next: expand training data (multi-sentence, 15s/30s buckets) and increase model capacity/epochs to target >0.9.
 
 - After expanding training pairs and epochs, the on-device post-filter lifted correlation to ~0.816 on the 5s fixture. Action items: add multi-sentence/bucket data, modestly increase capacity (e.g., 64 channels, 12 blocks), and add a multi-band STFT loss to target >0.9. Verify performance on-device (ANE/GPU vs CPU) and latency impact.
+
+- Using README/*.md text as prompts to generate diverse training pairs and training the post-filter for 30 epochs improved correlation to ~0.848 on-device (5s). Next: auto-generate fixtures per text (dynamic fixture export), scale dataset, and add multi-band STFT loss to surpass 0.9.
