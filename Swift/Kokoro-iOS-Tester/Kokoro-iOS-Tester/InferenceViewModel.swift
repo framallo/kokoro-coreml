@@ -1,4 +1,5 @@
 import Foundation
+import Darwin
 import Combine
 import CoreML
 import AVFoundation
@@ -74,6 +75,8 @@ final class InferenceViewModel: ObservableObject {
         guard let modelURL else {
             throw NSError(domain: "Inference", code: 10, userInfo: [NSLocalizedDescriptionKey: "kokoro_decoder_only_5s.mlpackage not found in app bundle. Add it to the target."])
         }
+        // Force ANE usage for speed testing
+        setenv("KOKORO_COMPUTE_UNITS", "all", 1)
         runner = try DecoderOnly5sRunner(mlpackageURL: modelURL)
     }
 

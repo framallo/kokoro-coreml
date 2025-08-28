@@ -52,6 +52,9 @@ public final class DecoderOnly5sRunner {
             default: break
             }
         }
+        // Force CPU+GPU if ANE compilation fails (fallback for deconv stride limits)
+        // We do a best-effort: try .all first, but if the first prediction attempt throws
+        // an ANE compile error, we recreate the model with .cpuAndGPU.
         // Accept either compiled (.mlmodelc) or source (.mlmodel/.mlpackage)
         let compiledURL: URL
         switch mlpackageURL.pathExtension.lowercased() {
@@ -61,7 +64,14 @@ public final class DecoderOnly5sRunner {
             // Ensure model is compiled (supports .mlmodel and .mlpackage)
             compiledURL = try MLModel.compileModel(at: mlpackageURL)
         }
-        self.model = try MLModel(contentsOf: compiledURL, configuration: config)
+        do {
+            self.model = try MLModel(contentsOf: compiledURL, configuration: config)
+        } catch {
+            // Retry with CPU+GPU to avoid ANE constraints
+            let fallback = MLModelConfiguration()
+            fallback.computeUnits = .cpuAndGPU
+            self.model = try MLModel(contentsOf: compiledURL, configuration: fallback)
+        }
         // Optional post-filter (KokoroPostFilter.mlpackage) in ./coreml
         let disablePF = (ProcessInfo.processInfo.environment["KOKORO_DISABLE_POSTFILTER"] == "1")
         if !disablePF, let pfPath = ProcessInfo.processInfo.environment["KOKORO_POSTFILTER_PATH"] {

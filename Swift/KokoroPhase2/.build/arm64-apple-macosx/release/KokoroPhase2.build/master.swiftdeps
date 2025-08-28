@@ -1,7 +1,7 @@
 version: "Apple Swift version 6.1.2 (swiftlang-6.1.2.1.2 clang-1700.0.13.5)"
 options: "6ef449ebf531a60ded4b9dcb905a9877621dfc41a0dece0876460bb2f4ba7056"
-build_start_time: [1756327463, 137549000]
-build_end_time: [1756327463, 727822000]
+build_start_time: [1756340980, 852866000]
+build_end_time: [1756340982, 441056000]
 inputs:
-  "/Users/mattmireles/Documents/GitHub/talktome/kokoro-coreml/Swift/KokoroPhase2/Sources/KokoroPhase2/CoreMLDecoderOnly.swift": [1756322838, 784401527]
-  "/Users/mattmireles/Documents/GitHub/talktome/kokoro-coreml/Swift/KokoroPhase2/Sources/KokoroPhase2/HarPost.swift": [1756327457, 219213941]
+  "/Users/mattmireles/Documents/GitHub/talktome/kokoro-coreml/Swift/KokoroPhase2/Sources/KokoroPhase2/CoreMLDecoderOnly.swift": [1756340973, 998115457]
+  "/Users/mattmireles/Documents/GitHub/talktome/kokoro-coreml/Swift/KokoroPhase2/Sources/KokoroPhase2/HarPost.swift": [1756333085, 231121524]

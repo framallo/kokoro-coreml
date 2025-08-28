@@ -37,7 +37,7 @@ class TinyPostFilter(nn.Module):
         super().__init__()
         self.inp = nn.Conv1d(1, hidden_channels, kernel_size=3, padding=1)
         blocks = []
-        dilations = [1, 2, 4, 8, 1, 2, 4, 8]
+        dilations = [1, 2, 4, 8, 16, 1, 2, 4, 8, 16, 1, 2, 4, 8]
         for d in dilations[:num_blocks]:
             blocks.append(ResidualBlock1D(hidden_channels, kernel_size=9, dilation=d))
         self.blocks = nn.Sequential(*blocks)
@@ -61,7 +61,30 @@ def correlation_loss(y_pred: torch.Tensor, y_true: torch.Tensor, eps: float = 1e
     return 1.0 - corr.mean()
 
 
-def loss_fn(y_pred: torch.Tensor, y_true: torch.Tensor, l1_weight: float = 0.5, corr_weight: float = 0.5) -> torch.Tensor:
+def stft(x: torch.Tensor, n_fft: int, hop: int) -> torch.Tensor:
+    # x: (B,1,T) -> complex STFT (B, F, frames)
+    x = x.squeeze(1)
+    window = torch.hann_window(n_fft, periodic=True, dtype=x.dtype, device=x.device)
+    X = torch.stft(x, n_fft=n_fft, hop_length=hop, win_length=n_fft, window=window, return_complex=True, center=True)
+    return X
+
+
+def multiband_stft_loss(y_pred: torch.Tensor, y_true: torch.Tensor) -> torch.Tensor:
+    # Use a few bands typical for 24 kHz
+    cfg = [(256, 64), (512, 128), (1024, 256)]
+    total = 0.0
+    for n_fft, hop in cfg:
+        Yp = stft(y_pred, n_fft, hop)
+        Yt = stft(y_true, n_fft, hop)
+        mag_p = (Yp.abs() + 1e-6).log()
+        mag_t = (Yt.abs() + 1e-6).log()
+        total = total + F.l1_loss(mag_p, mag_t)
+    return total / len(cfg)
+
+
+def loss_fn(y_pred: torch.Tensor, y_true: torch.Tensor,
+            l1_weight: float = 0.2, corr_weight: float = 0.4, stft_weight: float = 0.4) -> torch.Tensor:
     l1 = F.l1_loss(y_pred, y_true)
     corr = correlation_loss(y_pred, y_true)
-    return l1_weight * l1 + corr_weight * corr
+    stft_l = multiband_stft_loss(y_pred, y_true)
+    return l1_weight * l1 + corr_weight * corr + stft_weight * stft_l
