@@ -79,6 +79,9 @@ except Exception:
 
 
 BASE_DIR = Path(__file__).resolve().parent.parent
+# Ensure local repo modules (e.g., kokoro) are importable without pip install
+if str(BASE_DIR) not in sys.path:
+    sys.path.insert(0, str(BASE_DIR))
 COREML_DIR = (BASE_DIR / "coreml").resolve()
 DEFAULT_TEXT = "This is Kokoro running on Apple Neural Engine."
 DEFAULT_VOICE = "zeros"  # special value meaning use zeroed ref_s (1, 256)
@@ -184,7 +187,7 @@ def _make_duration_inputs(
     trace_length: int,
     use_zero_ref_s: bool,
     voice: Optional[str],
-) -> Tuple[Dict[str, np.ndarray], np.ndarray]:
+) -> Tuple[Dict[str, np.ndarray], np.ndarray, int]:
     # Map phoneme string to token IDs
     ids = [vocab.get(ch) for ch in phonemes]
     ids = [i for i in ids if i is not None]
@@ -192,15 +195,15 @@ def _make_duration_inputs(
     ids = ids[:trace_length]
     input_len = len(ids)
     # Left-align pad with zeros (token id 0 also serves as BOS/EOS in training)
-    input_ids = np.zeros((trace_length,), dtype=np.int32)
-    attention_mask = np.zeros((trace_length,), dtype=np.int32)
+    input_ids = np.zeros((1, trace_length), dtype=np.int32)
+    attention_mask = np.zeros((1, trace_length), dtype=np.int32)
     if input_len > 0:
-        input_ids[:input_len] = np.array(ids, dtype=np.int32)
-        attention_mask[:input_len] = 1
+        input_ids[0, :input_len] = np.array(ids, dtype=np.int32)
+        attention_mask[0, :input_len] = 1
 
-    # ref_s: (256,)
+    # ref_s: (1, 256)
     if use_zero_ref_s:
-        ref_s = np.zeros((256,), dtype=np.float32)
+        ref_s = np.zeros((1, 256), dtype=np.float32)
     else:
         from huggingface_hub import hf_hub_download
         import torch
@@ -210,9 +213,10 @@ def _make_duration_inputs(
         vpath = hf_hub_download(repo_id="hexgrad/Kokoro-82M", filename=f"voices/{voice}.pt")
         pack = torch.load(vpath, weights_only=True)
         # Select by phoneme length index as in pipeline (len(ps)-1)
-        ref_s = pack[input_len - 1].detach().cpu().numpy().astype(np.float32)
-        if ref_s.shape[-1] != 256:
-            raise RuntimeError(f"Voice pack dim mismatch: {ref_s.shape}")
+        vec = pack[max(0, input_len - 1)].detach().cpu().numpy().astype(np.float32)
+        if vec.shape[-1] != 256:
+            raise RuntimeError(f"Voice pack dim mismatch: {vec.shape}")
+        ref_s = vec.reshape(1, 256)
 
     inputs = {
         "input_ids": input_ids,
@@ -220,8 +224,8 @@ def _make_duration_inputs(
         "speed": np.array([1.0], dtype=np.float32),
         "attention_mask": attention_mask,
     }
-    # Return also the (1,256) ref_s expected by synthesizer (we will add batch later)
-    return inputs, ref_s.reshape(1, 256).astype(np.float32)
+    # Return also the (1,256) ref_s expected by synthesizer
+    return inputs, ref_s.astype(np.float32), input_len
 
 
 class AneVerifier:
@@ -239,11 +243,11 @@ class AneVerifier:
             cmd = [
                 "sudo",
                 "-n",
-                "powermetrics",
+                "/usr/bin/powermetrics",
                 "-i",
                 str(self.sample_ms),
                 "--samplers",
-                "ane",
+                "all",
             ]
             self.proc = subprocess.Popen(
                 cmd,
@@ -280,7 +284,7 @@ class AneVerifier:
         return True
 
     def _parse_line(self, line: str) -> None:
-        # Expect lines like: "ANE Power: 1.23 W" or "ANE Power: 230 mW"
+        # Example within --samplers all output: "ANE Power: 0 mW"
         m = re.search(r"ANE Power:\s*([0-9]+\.?[0-9]*)\s*(m?W)", line)
         if m:
             try:
@@ -497,7 +501,7 @@ def main() -> int:
         print("FATAL: Failed to phonemize input text")
         return 2
     vocab = _load_vocab_mapping()
-    duration_inputs, ref_s_batched = _make_duration_inputs(
+    duration_inputs, ref_s_batched, input_len = _make_duration_inputs(
         phonemes, vocab, shapes.trace_length, use_zero_ref_s, None if use_zero_ref_s else args.voice
     )
 
@@ -509,6 +513,117 @@ def main() -> int:
     verifier = AneVerifier(enabled=not args.no_ane_check, min_samples_positive=args.ane_min_samples)
     verifier.start()
 
+    # Helper: try to extract duration outputs; otherwise CPU fallback to compute features
+    def _extract_or_compute_features(phonemes: str, dur_out: Dict[str, Any]):
+        # 1) Try to map Core ML outputs by shape/dtype
+        pred_dur = None
+        d_feat = None
+        t_en_feat = None
+        s_feat = None
+        # pick integer output as pred_dur
+        for k, v in dur_out.items():
+            a = np.array(v)
+            if np.issubdtype(a.dtype, np.integer):
+                pred_dur = a.reshape(-1)
+                break
+        # gather candidate feature blobs
+        cand_feat_time_last = []   # (1, C, T)
+        cand_feat_time_first = []  # (1, T, C)
+        for k, v in dur_out.items():
+            a = np.array(v)
+            if a.ndim == 3 and a.shape[0] == 1:
+                if a.shape[-1] == shapes.trace_length:
+                    cand_feat_time_last.append(a.astype(np.float32))
+                elif a.shape[1] == shapes.trace_length:
+                    cand_feat_time_first.append(a.astype(np.float32))
+        # s may be (1,128)
+        for k, v in dur_out.items():
+            a = np.array(v)
+            if a.ndim == 2 and a.shape[0] == 1 and a.shape[1] in (128, 256):
+                # prefer exact 128
+                if a.shape[1] == 128:
+                    s_feat = a.astype(np.float32)
+                    break
+        if s_feat is None:
+            # derive from ref_s if not found
+            s_feat = ref_s_batched[:, 128:].astype(np.float32)
+        # Determine t_en: prefer (1,512,T). If only (1,T,512) exists, transpose
+        for a in cand_feat_time_last:
+            if a.shape[-2] == 512:
+                t_en_feat = a
+                break
+        if t_en_feat is None:
+            for a in cand_feat_time_first:
+                if a.shape[-1] == 512:
+                    t_en_feat = np.transpose(a, (0, 2, 1))  # (1,512,T)
+                    break
+        # Determine d: prefer direct (1,640,T). Else, build by concat(t_base(512), s_repeat(128))
+        for a in cand_feat_time_last:
+            if a.shape[-2] == 640:
+                d_feat = a
+                break
+        if d_feat is None:
+            base = None
+            for a in cand_feat_time_last:
+                if a.shape[-2] == 512:
+                    base = a
+                    break
+            if base is None and t_en_feat is not None:
+                base = t_en_feat
+            if base is not None:
+                s_rep = np.repeat(s_feat[:, :, None], shapes.trace_length, axis=2)  # (1,128,T)
+                d_feat = np.concatenate([base, s_rep], axis=1)
+        # If d missing or wrong hidden size, compute via CPU
+        if d_feat is None or d_feat.shape[-2] != 640 or t_en_feat is None or t_en_feat.shape[-2] != 512:
+            # CPU fallback using KModel
+            try:
+                import torch  # type: ignore
+                from kokoro.model import KModel  # type: ignore
+            except Exception as e:
+                raise RuntimeError(f"CPU fallback requires kokoro; import failed: {e}")
+            nonlocal_cpu_model = getattr(main, "_cpu_kmodel", None)
+            if nonlocal_cpu_model is None:
+                main._cpu_kmodel = KModel(disable_complex=True).to('cpu').eval()
+                nonlocal_cpu_model = main._cpu_kmodel
+            k = nonlocal_cpu_model
+            # Build ids with BOS/EOS
+            ids = [k.vocab.get(ch) for ch in phonemes]
+            ids = [i for i in ids if i is not None]
+            ids = [0] + ids[: shapes.trace_length - 2] + [0]
+            input_ids = torch.LongTensor([ids])
+            input_lengths = torch.full((1,), input_ids.shape[-1], dtype=torch.long)
+            text_mask = torch.arange(input_lengths.max()).unsqueeze(0).expand(1, -1).type_as(input_lengths)
+            text_mask = torch.gt(text_mask + 1, input_lengths.unsqueeze(1))
+            ref_s_t = torch.from_numpy(ref_s_batched)
+            speed_t = torch.tensor([1.0], dtype=torch.float32)
+            with torch.no_grad():
+                bert_dur = k.bert(input_ids, attention_mask=(~text_mask).int())
+                d_en = k.bert_encoder(bert_dur).transpose(-1, -2)
+                s_t = ref_s_t[:, 128:]
+                d_t = k.predictor.text_encoder(d_en, s_t, input_lengths, text_mask)
+                # LSTM for durations
+                x, _ = k.predictor.lstm(d_t)
+                duration = k.predictor.duration_proj(x)
+                duration = torch.sigmoid(duration).sum(axis=-1) / speed_t
+                pred_dur_t = torch.round(duration).clamp(min=1).long().squeeze()
+                t_en_t = k.text_encoder(input_ids, input_lengths, text_mask)
+            # Convert + pad/truncate time to trace_length
+            def pad_time_np(x: np.ndarray, T: int) -> np.ndarray:
+                h = x.shape[1]
+                out = np.zeros((1, h, T), dtype=np.float32)
+                t = min(T, x.shape[-1])
+                out[:, :, :t] = x[:, :, :t]
+                return out
+            d_feat = pad_time_np(d_t.cpu().numpy().astype(np.float32), shapes.trace_length)
+            # Concatenate style into d_feat to reach hidden=hidden+128 (640)
+            s_rep = ref_s_batched[:, 128:].astype(np.float32)
+            s_rep = np.repeat(s_rep[:, :, None], shapes.trace_length, axis=2)
+            d_feat = np.concatenate([d_feat, s_rep], axis=1)
+            t_en_feat = pad_time_np(t_en_t.cpu().numpy().astype(np.float32), shapes.trace_length)
+            s_feat = ref_s_batched[:, 128:].astype(np.float32)
+            pred_dur = pred_dur_t.cpu().numpy().astype(np.int64).reshape(-1)
+        return pred_dur, d_feat, t_en_feat, s_feat
+
     # Run repeats
     all_timings: List[Dict[str, float]] = []
     out_path = Path(args.out)
@@ -516,14 +631,39 @@ def main() -> int:
 
     for r in range(args.repeat):
         save_path = out_path if r == 0 else None
-        timings = run_once(
-            duration_model,
-            synthesizer_model,
-            shapes,
-            duration_inputs,
-            ref_s_batched,
-            save_path=save_path,
-        )
+        # First call duration stage; then stitch inputs and run synth stage so that
+        # we can override duration outputs if needed via CPU fallback.
+        t0 = time.perf_counter()
+        dur_out = duration_model.predict(duration_inputs)
+        t1 = time.perf_counter()
+        # Extract or compute features
+        pred_dur_vec, d_feat, t_en_feat, s_feat = _extract_or_compute_features(phonemes, dur_out)
+        # Align matrix
+        t2 = time.perf_counter()
+        pred_aln_trg = _build_alignment_matrix(pred_dur_vec.astype(np.int64), shapes.trace_length, shapes.frame_count)
+        t3 = time.perf_counter()
+        syn_inputs = {
+            'd': d_feat.astype(np.float32),
+            't_en': t_en_feat.astype(np.float32),
+            's': s_feat.astype(np.float32),
+            'ref_s': ref_s_batched.astype(np.float32),
+            'pred_aln_trg': pred_aln_trg.astype(np.float32),
+        }
+        t4 = time.perf_counter()
+        syn_out = synthesizer_model.predict(syn_inputs)
+        t5 = time.perf_counter()
+        wave_key = list(syn_out.keys())[0]
+        audio = syn_out[wave_key].astype(np.float32).reshape(-1)
+        timings = {
+            'duration_ms': (t1 - t0) * 1000.0,
+            'align_ms': (t3 - t2) * 1000.0,
+            'synth_ms': (t5 - t4) * 1000.0,
+        }
+        timings['total_ms'] = (t5 - t0) * 1000.0
+        timings['audio_sec'] = len(audio) / float(AudioOutputConstants.DEFAULT_SAMPLE_RATE)
+        timings['rtf'] = (timings['total_ms'] / 1000.0) / max(1e-6, timings['audio_sec'])
+        if save_path is not None:
+            save_wav(str(save_path), audio, AudioOutputConstants.DEFAULT_SAMPLE_RATE)
         all_timings.append(timings)
         verifier.read_powermetrics_streaming()
         print(
