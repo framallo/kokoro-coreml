@@ -52,9 +52,16 @@ public final class DecoderOnly5sRunner {
             default: break
             }
         }
-        // Ensure model is compiled (supports .mlmodel and .mlpackage)
-        let compiled = try MLModel.compileModel(at: mlpackageURL)
-        self.model = try MLModel(contentsOf: compiled, configuration: config)
+        // Accept either compiled (.mlmodelc) or source (.mlmodel/.mlpackage)
+        let compiledURL: URL
+        switch mlpackageURL.pathExtension.lowercased() {
+        case "mlmodelc":
+            compiledURL = mlpackageURL
+        default:
+            // Ensure model is compiled (supports .mlmodel and .mlpackage)
+            compiledURL = try MLModel.compileModel(at: mlpackageURL)
+        }
+        self.model = try MLModel(contentsOf: compiledURL, configuration: config)
         // Optional post-filter (KokoroPostFilter.mlpackage) in ./coreml
         let disablePF = (ProcessInfo.processInfo.environment["KOKORO_DISABLE_POSTFILTER"] == "1")
         if !disablePF, let pfPath = ProcessInfo.processInfo.environment["KOKORO_POSTFILTER_PATH"] {
