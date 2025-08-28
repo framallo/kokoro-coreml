@@ -103,6 +103,7 @@ Next up (Phase 2):
 - Introduced `KOKORO_PHASE_SCALE` (default 0.3) and sin/linear phase options; corr improved to ≈ 0.675.
 - Built a tiny learned post‑filter (Core ML) to bridge latent HAR → golden; on‑device corr improved to ≈ 0.778 (initial) and ≈ 0.816, then ≈ 0.848 after more data/epochs.
 - Automated harvesting of training text from `README/*.md`, mass generation of runs, and retraining/export loop.
+- Optimized training pipeline: data is now pre-loaded into memory, reducing disk I/O and cutting training time from hours to minutes.
 
 #### Phase 2 next steps (to reach ≥ 0.90 corr)
 - Expand dataset using `README/*.md` texts (more sentences/voices) and include 15s/30s buckets; train bucket‑specific post‑filters.
