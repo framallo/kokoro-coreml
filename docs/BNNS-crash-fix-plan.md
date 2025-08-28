@@ -1,111 +1,286 @@
-# BNNS crash fix plan — Dynamic alloc purge and prosody restoration
+# Engineering Plan: Fix CoreML BNNS Crash in Kokoro TTS Export
 
-Summary
+## Executive Summary
+Fix a critical CoreML runtime crash (`EXC_BAD_ACCESS` in BNNS LSTM kernel) caused by improper tensor initialization during model export. The root cause is tensors being created dynamically in `forward()` methods instead of being registered in `__init__()`, causing torch.jit.trace to produce malformed graphs.
 
-- Root cause: forward-time tensor allocations (zeros_like/new_zeros/randn) in hot paths created dynamic shapes and BNNS runtime buffer churn, leading to intermittent Core ML CPU BNNS crashes on long sequences.
-- Fix: move all zero/one/random allocations into __init__ as registered buffers; expand in forward. Restore F0/N prosody path for quality; add CI guard to prevent regressions.
+## Problem Statement
+- **Error**: `EXC_BAD_ACCESS (code=2, address=0x16bc43ff8)` in `libBNNS.dylib`
+- **Location**: LSTM operations in synthesizer model during CoreML inference
+- **Root Cause**: Tensors created in `forward()` methods aren't properly registered with PyTorch's module system, causing CoreML's converter to generate incorrect memory layouts
 
-Key diffs
+## Implementation Plan
 
-- export_synthesizers.SynthesizerModel
-  - Registered buffers: zeros_1d_int, zeros_1d_f32, zeros_3d_f32, zeros_chan_f32
-  - Prosody: use k.predictor.F0Ntrain(en, s) if present; fallback manual branch
-  - Channel padding uses pre-allocated buffers + expand/contiguous
-- export_duration.DurationModel
-  - token_type_ids from zeros_1d_int.expand_as(input_ids)
-  - ref_s_out uses ref_s.clone() to avoid aliasing without zeros_like
-- kokoro/modules.py
-  - TextEncoder/ProsodyPredictor/DurationEncoder: pad via zeros_3d_f32.expand
-  - LayerNorm parameters use torch.full to avoid CI false positives
-- kokoro/istftnet.py
-  - AdaIN1d: channel pad via preallocated zeros_3d_f32
-  - SineGen: deterministic phase init; noise via zeros_like (export determinism)
-  - Removed rand/randn from forward paths used by export
+### Phase 1: Setup (30 minutes)
+1. **Create Fix Branch** (Complete)
+   ```bash
+   git checkout <commit-with-export-script>
+   git checkout -b fix/coreml-bnns-crash
+   ```
 
-CI guard
+2. **Verify Baseline**
+   - Run existing export script to confirm it still produces the crash
+   - Save the crashing .mlpackage for comparison
 
-```bash
-bash scripts/ci_dynamic_alloc_check.sh
+### Phase 2: Code Changes (2-3 hours)
+
+#### Fix 1: DurationModel Tensor Registration
+**File**: `export_synthesizers.py` (or separate module file if refactored)
+
+**Current Problem Code**:
+```python
+def forward(self, input_ids, ref_s, speed, attention_mask):
+    token_type_ids = torch.zeros_like(input_ids)  # BAD: Created in forward
+    # ...
+    ref_s_out = ref_s + torch.zeros_like(ref_s)   # BAD: Dynamic creation
 ```
 
-Fails build on any new_zeros|zeros_like|ones_like|torch.zeros|torch.ones|torch.randn|torch.rand found outside __init__/register_buffer/nn.Parameter.
+**Fixed Code**:
+```python
+class DurationModel(nn.Module):
+    def __init__(self, kmodel: KModel):
+        super().__init__()
+        
+        # Register all buffers FIRST
+        self.register_buffer('token_type_template', torch.zeros(1, 1, dtype=torch.long))
+        self.register_buffer('zeros_template', torch.zeros(1, 1))
+        
+        # Then do ALL model surgery
+        kmodel.text_encoder = CoreMLFriendlyTextEncoder(kmodel.text_encoder)
+        kmodel.predictor.text_encoder = CoreMLFriendlyDurationEncoder(kmodel.predictor.text_encoder)
+        if hasattr(kmodel.bert.embeddings, 'token_type_ids'):
+            delattr(kmodel.bert.embeddings, 'token_type_ids')
+        
+        # Finally assign the modified model
+        self.kmodel = kmodel
+    
+    def forward(self, input_ids, ref_s, speed, attention_mask):
+        k = self.kmodel
+        
+        # Use registered buffers, expand as needed
+        token_type_ids = self.token_type_template.expand_as(input_ids).contiguous()
+        
+        input_lengths = attention_mask.sum(dim=-1).to(torch.long)
+        text_mask = attention_mask == 0
+        
+        bert_dur = k.bert(input_ids, attention_mask=attention_mask, token_type_ids=token_type_ids)
+        d_en = k.bert_encoder(bert_dur).transpose(-1, -2)
+        s = ref_s[:, CoreMLExportConstants.VOICE_STYLE_DIM:]
+        
+        d = k.predictor.text_encoder(d_en, s, input_lengths, text_mask)
+        x, _ = k.predictor.lstm(d)
+        duration = k.predictor.duration_proj(x)
+        
+        duration = torch.sigmoid(duration).sum(axis=-1) / speed
+        pred_dur = torch.round(duration).clamp(min=1).long()
+        
+        t_en = k.text_encoder(input_ids, input_lengths, text_mask)
+        
+        # Use registered buffer for ref_s copy
+        ref_s_out = ref_s + self.zeros_template.expand_as(ref_s).contiguous()
+        
+        return pred_dur, d, t_en, s, ref_s_out
+```
 
-Validation
+#### Fix 2: SynthesizerModel Tensor Registration
+**Current Problem Code**:
+```python
+def forward(self, d, t_en, s, ref_s, pred_aln_trg):
+    # ...
+    F0_pred = en.new_zeros((B, F * 2))  # BAD: Created in forward
+    N_pred = en.new_zeros((B, F * 2))    # BAD: Created in forward
+    # ...
+    if t_en.shape[1] != expected_in:
+        pad_ch = expected_in - t_en.shape[1]
+        # BAD: Dynamic tensor creation for padding
+        t_en = torch.cat([t_en, t_en.new_zeros((t_en.shape[0], pad_ch, t_en.shape[2]))], dim=1)
+```
 
-- Long-sentence tests (>=150 phonemes) run end-to-end without BNNS crash.
-- Synthesizer buckets exported at PRODUCTION_TRACE_LENGTH=256; fixed I/O per bucket.
-- Instruments shows ANE activity during Core ML inference; CPU BNNS track idle.
+**Fixed Code**:
+```python
+class SynthesizerModel(nn.Module):
+    def __init__(self, kmodel: KModel):
+        super().__init__()
+        
+        # Calculate expected channels FIRST
+        expected_in = kmodel.decoder.encode.conv1.in_channels - 2
+        
+        # Register ALL buffers
+        self.register_buffer('zeros_F0', torch.zeros(1, 1))
+        self.register_buffer('zeros_N', torch.zeros(1, 1))
+        self.register_buffer('pad_template', torch.zeros(1, 1, 1))
+        
+        # Store expected channels as constant
+        self.expected_in = expected_in
+        
+        # Do ALL model surgery
+        kmodel.text_encoder = CoreMLFriendlyTextEncoder(kmodel.text_encoder)
+        
+        # Finally assign
+        self.kmodel = kmodel
+    
+    def forward(self, d, t_en, s, ref_s, pred_aln_trg):
+        k = self.kmodel
+        
+        # Align temporal lengths
+        if t_en.shape[-1] != d.shape[-1]:
+            t_en = torch.nn.functional.interpolate(t_en, size=d.shape[-1], mode='nearest')
+        
+        # Matrix multiplication without einsum
+        B = d.shape[0]
+        pred_bt = pred_aln_trg.transpose(0, 1).unsqueeze(0).expand(B, -1, -1)
+        d_bt = d.transpose(1, 2)
+        en = torch.bmm(pred_bt, d_bt)
+        
+        B, F, H = en.shape
+        
+        # Use registered buffers for F0/N predictions
+        F0_pred = self.zeros_F0.expand(B, F * 2).contiguous()
+        N_pred = self.zeros_N.expand(B, F * 2).contiguous()
+        
+        # Handle channel alignment with registered buffer
+        if t_en.shape[1] != self.expected_in:
+            if t_en.shape[1] > self.expected_in:
+                t_en = t_en[:, :self.expected_in, :]
+            else:
+                pad_ch = self.expected_in - t_en.shape[1]
+                pad = self.pad_template.expand(t_en.shape[0], pad_ch, t_en.shape[2]).contiguous()
+                t_en = torch.cat([t_en, pad], dim=1)
+        
+        # Align text features to frames
+        pred_btf = pred_aln_trg.unsqueeze(0).expand(B, -1, -1)
+        asr = torch.bmm(t_en, pred_btf)
+        
+        audio = k.decoder(asr, F0_pred, N_pred, ref_s[:, :CoreMLExportConstants.VOICE_BASELINE_DIM]).squeeze(0)
+        return audio
+```
 
-Notes
+#### Fix 3: Add Validation Function
+Add this before export to verify all tensors are registered:
 
-- Ensure token_type_ids dtype=int32.
-- Confirm ref_s alias fix via clone().
-- Manual F0/N path mirrors predictor internals; parity validated against PyTorch within perceptual tolerance.
+```python
+def validate_module_buffers(module, module_name=""):
+    """Validate that a module has no dynamic tensor creation in forward()"""
+    issues = []
+    
+    # Check for common problematic patterns in source code
+    import inspect
+    try:
+        source = inspect.getsource(module.forward)
+        problematic_patterns = [
+            'torch.zeros(',
+            'torch.ones(',
+            'torch.randn(',
+            '.new_zeros(',
+            '.new_ones(',
+            'zeros_like(',
+            'ones_like(',
+            'torch.tensor(',
+        ]
+        
+        for pattern in problematic_patterns:
+            if pattern in source and 'self.' not in source.split(pattern)[0][-20:]:
+                issues.append(f"{module_name}: Found '{pattern}' in forward() - should be registered buffer")
+    except:
+        pass  # Some modules might not have accessible source
+    
+    # Recursively check submodules
+    for name, submodule in module.named_children():
+        child_name = f"{module_name}.{name}" if module_name else name
+        issues.extend(validate_module_buffers(submodule, child_name))
+    
+    return issues
+```
+
+### Phase 3: Testing Protocol (2 hours)
+
+#### Step 1: Pre-Export Validation
+```python
+# In export_synthesizers() function, add before tracing:
+print("Validating tensor registration...")
+issues = validate_module_buffers(synthesizer_model_base, "SynthesizerModel")
+if issues:
+    print("WARNING: Found potential tensor registration issues:")
+    for issue in issues:
+        print(f"  - {issue}")
+```
+
+#### Step 2: Export Test
+```bash
+# Run with minimal configuration first
+python export_synthesizers.py --buckets="3s" --debug
+```
+
+#### Step 3: CoreML Inference Test
+```python
+import coremltools as ct
+import numpy as np
+
+# Load the fixed model
+model = ct.models.MLModel("coreml/kokoro_synthesizer_3s.mlpackage")
+
+# Create test inputs matching the expected shapes
+inputs = {
+    "d": np.random.randn(1, 512, 256).astype(np.float32),
+    "t_en": np.random.randn(1, 768, 256).astype(np.float32),
+    "s": np.random.randn(1, 128).astype(np.float32),
+    "ref_s": np.random.randn(1, 256).astype(np.float32),
+    "pred_aln_trg": np.random.randn(256, 1280).astype(np.float32)
+}
+
+# This should NOT crash with BNNS error
+try:
+    output = model.predict(inputs)
+    print("✅ Model inference successful!")
+except Exception as e:
+    print(f"❌ Model inference failed: {e}")
+```
+
+#### Step 4: Swift Integration Test
+Test with the actual Swift app to ensure the fix works in production.
+
+### Phase 4: Verification Checklist
+
+- [ ] No `torch.zeros()`, `torch.ones()`, or `.new_*()` calls in any `forward()` method
+- [ ] All model surgery happens in `__init__()` methods
+- [ ] All buffers are registered using `register_buffer()`
+- [ ] Export completes without TracerWarnings about tensor creation
+- [ ] CoreML model loads successfully
+- [ ] Inference runs without BNNS crashes
+- [ ] Output audio quality matches baseline (if previously working)
+
+## Rollback Criteria
+
+If any of the following occur, revert changes:
+1. Export fails with new errors
+2. Model size increases by >10%
+3. Inference becomes >2x slower
+4. Audio quality degrades noticeably
+
+## Success Criteria
+
+1. **Primary**: CoreML inference runs without `EXC_BAD_ACCESS` crashes
+2. **Secondary**: No TracerWarnings during export
+3. **Bonus**: Can re-enable LSTM paths that were previously bypassed
+
+## Timeline Estimate
+
+- **Setup**: 30 minutes
+- **Implementation**: 2-3 hours
+- **Testing**: 2 hours
+- **Total**: 4-6 hours
+
+## Notes for Engineer
+
+1. The key insight is that PyTorch's `torch.jit.trace` cannot properly handle tensors created dynamically in `forward()`. They must be registered as buffers in `__init__()`.
+
+2. The current workaround (bypassing LSTM with zero F0/N predictions) confirms this diagnosis - they're avoiding the exact code paths that crash.
+
+3. After fixing, you may be able to remove the "bypass LSTM" workaround and use the full model, which should improve audio quality.
+
+4. Use `contiguous()` on expanded buffers to ensure proper memory layout for CoreML.
+
+5. If you encounter new issues, check the MIL graph dump for operations expecting constant shapes but receiving dynamic tensors.
+
 
 ## Implementation Progress
 
-### 2025-08-28 — E2E harness, ANE verification, and bucket mismatch
-
-- End-to-end harness: Added `scripts/run_coreml_e2e.py` that runs Duration → Synthesizer, prints per-stage timings, saves `outputs/coreml_e2e.wav`, and verifies ANE activity.
-- ANE verifier change: On macOS 14.6+, the dedicated `ane` sampler may be unavailable. The harness now runs `powermetrics --samplers all` and parses lines containing "ANE Power:".
-- Observed behavior: With Python Core ML (`ct.models.MLModel.predict()`), ANE power readings are 0 mW during Synth predictions on our setup, implying CPU/GPU fallback for Python. Treat ANE usage from Python as non-definitive; rely on Instruments.
-- Audio bucket mismatch: Current `coreml/kokoro_synthesizer_3s.mlpackage` produces a waveform much longer than 3 s (~64 s). The harness trims the audio to the predicted content length using `sum(pred_dur) * 600` samples at 24 kHz (600 samples per frame).
-
-Repro commands:
-
-```bash
-# Makefile shortcut
-make coreml_e2e
-
-# Direct run (no sudo, skips ANE check)
-python scripts/run_coreml_e2e.py --no-ane-check --repeat 2
-
-# With voice download (af_heart) and ANE check enabled (requires sudoers entry below)
-python scripts/run_coreml_e2e.py --text "This is Kokoro running on Apple Neural Engine." --voice af_heart --repeat 3
-
-# Fallback ANE verification via Xcode Instruments (no sudo required)
-xcrun xctrace record --template "Core ML" --time-limit 6s --output outputs/coreml_e2e.trace &
-python scripts/run_coreml_e2e.py --no-ane-check --repeat 1
-xcrun xctrace export --input outputs/coreml_e2e.trace --output outputs/coreml_e2e.json --format json
-```
-
-Powermetrics sudoers (for passwordless sampling):
-
-```bash
-# /etc/sudoers.d/powermetrics  (edit via: sudo visudo -f /etc/sudoers.d/powermetrics)
-%admin ALL=(root) NOPASSWD: /usr/bin/powermetrics
-```
-
-Current harness outputs (captured locally; M2 Ultra, macOS 15.6):
-
-```
-Synthesizer bucket reported: frames=2560, hidden=640, trace_length=256  # 2560*600/24000 = 64s bucket
-
-Run 1/1: duration=840.8ms, align=0.1ms, synth=34797.0ms, total=35638.5ms, rtf=3.853
-
-Summary: audio_sec=9.250s, duration_ms=840.8, align_ms=0.1, synth_ms=34797.0, total_ms=35638.5, rtf=3.853
-ANE Power (Python): ~0 mW typically observed → likely CPU/GPU fallback in Python; use Instruments for definitive check
-```
-
-Definitive ANE proof:
-
-- Prefer `xcrun xctrace` Core ML template. Export JSON and verify "Neural Engine" activity during the Synth phase.
-- For product-level verification, build a minimal macOS Swift app that loads both `.mlpackage` files with `MLModelConfiguration(computeUnits: .all)` and profile with Instruments.
-
-Audio bucket detail:
-
-- Mis-exported `kokoro_synthesizer_3s.mlpackage` currently yields ~64 s output. The harness trims to predicted content length (`sum(pred_dur) * 600` samples) so the saved WAV reflects the text content rather than the full padded buffer.
-- Recommendation: Re-export the proper 3 s bucket so the waveform output length is 72,000 samples at 24 kHz; re-run the harness to confirm.
-
-Next actions and owners:
-
-- Re-export synthesizer buckets at correct durations (3s first). Owner: Matt.
-- Re-run harness with `--voice af_heart` and capture timings + WAV. Owner: Matt.
-- Capture `xctrace` during a single Synth run; export JSON and archive in `outputs/`. Owner: Matt.
-- Add a minimal Swift app skeleton (`examples/swift/macos-synth/`) for definitive ANE verification. Owner: Matt.
-
-Cross-links:
-
-- Harness script: `scripts/run_coreml_e2e.py`
-- Benchmarking guide: `docs/benchmarking-tool.md`
-- Make target: `make coreml_e2e`
