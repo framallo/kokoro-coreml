@@ -790,7 +790,7 @@ def export_synthesizers(output_dir, buckets_str, debug=False, trace_length: int 
             if x.shape[-1] > T:
                 return x[..., :T]
             pad = T - x.shape[-1]
-            return torch.cat([x, x * 0.0][0:1] + [x[..., :0].expand(x.shape[0], x.shape[1], pad)], dim=-1)
+            return torch.cat([x, x.new_zeros(x.shape[0], x.shape[1], pad)], dim=-1)
         d = _align_time(d, trace_length)
         t_en = _align_time(t_en, trace_length)
     

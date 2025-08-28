@@ -265,6 +265,10 @@ class SineGen(nn.Module):
         self.upsample_scale = upsample_scale
         # Deterministic buffer for phase init
         self.register_buffer('zeros_2d_f32', torch.zeros(1, 1, dtype=torch.float32))
+        # Deterministic noise template for export-time reproducibility
+        gen = torch.Generator()
+        gen.manual_seed(12345)
+        self.register_buffer('noise_template', torch.randn(1, 1, 1024, generator=gen, dtype=torch.float32))
 
     def _f02uv(self, f0):
         # generate uv signal
@@ -339,8 +343,17 @@ class SineGen(nn.Module):
         #        std = self.sine_amp/3 -> max value ~ self.sine_amp
         #        for voiced regions is self.noise_std
         noise_amp = uv * self.noise_std + (1 - uv) * self.sine_amp / 3
-        # Keep determinism in export flows by avoiding torch.randn_like; use zero noise
-        noise = noise_amp * (sine_waves * 0.0)
+        # Deterministic "noise": tile fixed template to target length
+        B, T, D = sine_waves.shape
+        templ = self.noise_template  # (1,1,K)
+        K = int(templ.shape[-1])
+        if K < T:
+            rep = (T + K - 1) // K
+            tiled = templ.repeat(1, 1, rep)[..., :T]
+        else:
+            tiled = templ[..., :T]
+        noise_base = tiled.expand(B, D, T).transpose(1, 2)  # (B,T,D)
+        noise = noise_amp * noise_base
         # first: set the unvoiced part to 0 by uv
         # then: additive noise
         sine_waves = sine_waves * uv + noise
@@ -375,6 +388,10 @@ class SourceModuleHnNSF(nn.Module):
         # to merge source harmonics into a single excitation
         self.l_linear = nn.Linear(harmonic_num + 1, 1)
         self.l_tanh = nn.Tanh()
+        # Deterministic noise template for uv-shaped noise
+        gen = torch.Generator()
+        gen.manual_seed(54321)
+        self.register_buffer('noise_uv_template', torch.randn(1, 1, 1024, generator=gen, dtype=torch.float32))
 
     def forward(self, x):
         """
@@ -387,8 +404,17 @@ class SourceModuleHnNSF(nn.Module):
         with torch.no_grad():
             sine_wavs, uv, _ = self.l_sin_gen(x)
         sine_merge = self.l_tanh(self.l_linear(sine_wavs))
-        # source for noise branch, in the same shape as uv
-        noise = uv * 0.0  # deterministic noise placeholder for export
+        # source for noise branch, deterministic template expanded to uv shape
+        B, T, _ = uv.shape
+        templ = self.noise_uv_template  # (1,1,K)
+        K = int(templ.shape[-1])
+        if K < T:
+            rep = (T + K - 1) // K
+            tiled = templ.repeat(1, 1, rep)[..., :T]
+        else:
+            tiled = templ[..., :T]
+        noise = tiled.expand(B, 1, T)  # (B,1,T) then transpose if needed
+        noise = noise.transpose(1, 2)  # (B,T,1), same as uv
         return sine_merge, noise, uv
 
 
