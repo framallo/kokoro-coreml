@@ -84,9 +84,15 @@ def main():
     ds = PairDataset(pairs)
     dl = DataLoader(ds, batch_size=args.batch, shuffle=True, drop_last=True)
 
-    device = torch.device('cpu')
+    if torch.backends.mps.is_available():
+        device = torch.device('mps')
+    else:
+        device = torch.device('cpu')
+    print(f'Using device: {device}')
+
     model = TinyPostFilter(hidden_channels=args.hidden, num_blocks=args.blocks).to(device)
     opt = optim.AdamW(model.parameters(), lr=args.lr)
+    scheduler = optim.lr_scheduler.ReduceLROnPlateau(opt, 'min', factor=0.5, patience=10, verbose=True)
 
     for epoch in range(1, args.epochs + 1):
         model.train()
@@ -100,7 +106,9 @@ def main():
             loss.backward()
             opt.step()
             tot += float(loss.item())
-        print(f'Epoch {epoch}: loss={tot/len(dl):.6f}')
+        avg_loss = tot / len(dl)
+        print(f'Epoch {epoch}: loss={avg_loss:.6f}')
+        scheduler.step(avg_loss)
 
     outdir = Path(args.outdir)
     outdir.mkdir(parents=True, exist_ok=True)
