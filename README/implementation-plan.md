@@ -83,33 +83,32 @@ Goal: Create a high-performance Swift TTS package. This will be achieved by vali
 
 ### Phase 2: In Progress
 
-- Created Swift package at `Swift/KokoroPhase2` with a CoreML runner (`DecoderOnly5sRunner`) and CLI (`kokoro-phase2-cli`). The runner compiles `.mlpackage` via `MLModel.compileModel(at:)` and uses `computeUnits = .all`.
-- Added Python helper `tools/export_fixture.py` to export a fixed-shape 5s JSON fixture (`asr`, `f0_curve`, `n`, `s`) from the Phase 1 pipeline.
-- Built and executed the Swift CLI end-to-end. Outputs written to `outputs/local/phase2_*` with `output.wav` and `metadata.json` (latency breakdowns).
-- Added `tools/compare_phase2_to_golden.py` and compared Phase 2 output to latest HAR golden. Current waveform metrics (example run): `mse≈0.00588`, `mae≈0.04344`, `corr≈0.0189`, `dBFS≈-25.1` vs golden `-25.4`.
-- Observation: audio quality is slightly off (mild reverb/artifact) for the decoder-only export; likely due to the CoreML-friendly `m_source` used during export vs. the exact HN-NSF used by HAR (see `kokoro-generator-rebuild.md`).
-- Formal numerical parity check completed (Step 9): Swift-side `asr/f0/n/s` tensors dumped and matched Python reference via `KOKORO_DUMP_INPUTS=1` + `tools/compare_inputs_parity.py` (all MAE=0.0).
-- Exported Decoder_HAR bucket models (5s/15s/30s) and integrated them into the Python pipeline; warmed latency and behavior are documented in `README/learnings.md`.
+- **Swift Package & CLI**: Created `Swift/KokoroPhase2` with a `DecoderOnly5sRunner` and `kokoro-phase2-cli`.
+- **Numerical Parity**: Achieved perfect numerical parity (MAE=0.0) for pre-decoder features between Python and Swift.
+- **HAR Path & iSTFT**: Implemented HAR path in Swift with an Accelerate-based iSTFT. Tuned parameters (`KOKORO_PHASE_SCALE`) to reach a baseline correlation of ≈0.675 vs. golden.
+- **Post-Filter Training Pipeline**:
+  - Built a learned post-filter to bridge the HAR-to-golden gap.
+  - Automated training data generation from `README/*.md` files.
+  - **Pivoted to MLX**: Migrated the training pipeline from PyTorch/MPS to MLX for stability and performance on Apple Silicon.
+  - **Completed Initial Training**: Trained a 5s-bucket post-filter (`h=128, b=12`) with L1+correlation loss; weights saved.
+- **Export Bridge**: Created `tools/export_mlx_to_coreml.py` to convert trained MLX weights into a Core ML model for Swift integration.
 
-Next up (Phase 2):
-- Expand training data using `README/*.md` as the primary text corpus; generate runs across multiple voices to improve generalization; scale 5s and add 15s/30s buckets.
-- Train bucket‑specific post‑filters; update training to support per‑bucket fixed lengths (5s=120000, 15s=360000, 30s=720000 samples at 24 kHz).
-- Enable dynamic fixture export per input text and/or add `KOKORO_INPUT_TEXT` to the Swift CLI; update `tools/generate_phase2_runs.py` to pass text and auto‑select the correct bucket.
-- Increase post‑filter capacity modestly (e.g., 64 channels, 12 blocks) and add multi‑band STFT plus a small perceptual loss.
-- Integrate the best post‑filter as the default in Swift; verify ANE/GPU execution paths and confirm latency budget.
+#### Phase 2: Next Steps (Validate & Iterate to ≥ 0.95 Corr)
 
-#### Phase 2 milestones achieved (correlation-focused)
-- Matched Hann windowing and inverse DFT twiddles in Swift HAR iSTFT; base corr ≈ 0.663.
-- Introduced `KOKORO_PHASE_SCALE` (default 0.3) and sin/linear phase options; corr improved to ≈ 0.675.
-- Built a tiny learned post‑filter (Core ML) to bridge latent HAR → golden; on‑device corr improved to ≈ 0.778 (initial) and ≈ 0.816, then ≈ 0.848 after more data/epochs.
-- Automated harvesting of training text from `README/*.md`, mass generation of runs, and retraining/export loop.
-- Optimized PyTorch training pipeline: data is pre-loaded in memory to reduce I/O.
-- Pivoted post‑filter training to MLX for Apple Silicon: added MLX model/trainer, `tanh` output clamp, and temporarily disabled STFT loss for stability (L1 + correlation only). Loss now decreases steadily; weights are bridged back to PyTorch for Core ML export via `tools/export_mlx_to_coreml.py`.
-
-#### Phase 2 next steps (to reach ≥ 0.90 corr)
-- Expand dataset using `README/*.md` texts (more sentences/voices) and include 15s/30s buckets; train bucket‑specific post‑filters.
-- Increase post‑filter capacity modestly (e.g., 64 channels, 12 blocks); add multi‑band STFT loss and small perceptual term.
-- Integrate best post‑filter as default in Swift, verify ANE/GPU execution and latency budget.
+1.  **Validate the Current Post-Filter**:
+    - Use the export script to convert the latest MLX weights to a Core ML model.
+    - Run the Swift CLI with the new post-filter and the 5s fixture.
+    - Compare the output against the golden reference and confirm the correlation is high (target: ≥ 0.90).
+2.  **Expand Dataset & Train Larger Models**:
+    - Generate more training data using diverse texts from `README/*.md` across multiple voices.
+    - Add support for 15s and 30s buckets to the MLX training pipeline.
+    - Train larger, bucket-specific post-filters.
+3.  **Improve Loss Function**:
+    - Re-introduce a multi-band STFT loss using a memory-safe, vectorized implementation in MLX.
+    - Experiment with a small perceptual loss term to further refine audio quality.
+4.  **Integrate & Finalize**:
+    - Integrate the best-performing post-filter into the Swift app as the default.
+    - Verify ANE/GPU execution and ensure the final pipeline meets the latency budget.
 
 ### Phase 3: Not Started
 
