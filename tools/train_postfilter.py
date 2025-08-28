@@ -27,25 +27,27 @@ T_FIXED = 120000  # 5s
 
 class PairDataset(Dataset):
     def __init__(self, pairs: list[tuple[Path, Path]]):
-        self.pairs = pairs
+        self.data = []
+        print(f'Loading {len(pairs)} pairs into memory...')
+        for x_path, y_path in pairs:
+            x, sr1 = sf.read(str(x_path))
+            y, sr2 = sf.read(str(y_path))
+            assert sr1 == sr2 == SR
+            n = min(len(x), len(y), T_FIXED)
+            x = x[:n].astype(np.float32)
+            y = y[:n].astype(np.float32)
+            if n < T_FIXED:
+                x = np.pad(x, (0, T_FIXED - n))
+                y = np.pad(y, (0, T_FIXED - n))
+            x = torch.from_numpy(x).unsqueeze(0)  # (1,T)
+            y = torch.from_numpy(y).unsqueeze(0)
+            self.data.append((x, y))
 
     def __len__(self):
-        return len(self.pairs)
+        return len(self.data)
 
     def __getitem__(self, idx: int):
-        x_path, y_path = self.pairs[idx]
-        x, sr1 = sf.read(str(x_path))
-        y, sr2 = sf.read(str(y_path))
-        assert sr1 == sr2 == SR
-        n = min(len(x), len(y), T_FIXED)
-        x = x[:n].astype(np.float32)
-        y = y[:n].astype(np.float32)
-        if n < T_FIXED:
-            x = np.pad(x, (0, T_FIXED - n))
-            y = np.pad(y, (0, T_FIXED - n))
-        x = torch.from_numpy(x).unsqueeze(0)  # (1,T)
-        y = torch.from_numpy(y).unsqueeze(0)
-        return x, y
+        return self.data[idx]
 
 
 def find_pairs(local_root: Path, golden_root: Path) -> list[tuple[Path, Path]]:
@@ -68,9 +70,11 @@ def find_pairs(local_root: Path, golden_root: Path) -> list[tuple[Path, Path]]:
 
 def main():
     ap = argparse.ArgumentParser()
-    ap.add_argument('--epochs', type=int, default=5)
+    ap.add_argument('--epochs', type=int, default=20)
     ap.add_argument('--batch', type=int, default=8)
     ap.add_argument('--lr', type=float, default=1e-3)
+    ap.add_argument('--hidden', type=int, default=64)
+    ap.add_argument('--blocks', type=int, default=16)
     ap.add_argument('--local_root', default='outputs/local')
     ap.add_argument('--golden_root', default='outputs/golden')
     ap.add_argument('--outdir', default='coreml')
@@ -81,7 +85,7 @@ def main():
     dl = DataLoader(ds, batch_size=args.batch, shuffle=True, drop_last=True)
 
     device = torch.device('cpu')
-    model = TinyPostFilter(hidden_channels=32, num_blocks=8).to(device)
+    model = TinyPostFilter(hidden_channels=args.hidden, num_blocks=args.blocks).to(device)
     opt = optim.AdamW(model.parameters(), lr=args.lr)
 
     for epoch in range(1, args.epochs + 1):

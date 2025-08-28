@@ -26,7 +26,8 @@ from kokoro import KModel
 
 # ANE-optimized conversion settings
 COMPUTE_PRECISION = ct.precision.FLOAT16  # ANE native precision
-MINIMUM_DEPLOYMENT_TARGET = ct.target.macOS13  # Match repo macOS 15+, allows FP16 inputs
+# Target iOS for on-device ANE testing
+MINIMUM_DEPLOYMENT_TARGET = ct.target.iOS15
 COMPUTE_UNITS = ct.ComputeUnit.ALL  # Allow ANE + GPU + CPU as needed
 
 # Model architecture constants
@@ -34,8 +35,8 @@ class ExportConstants:
     """Constants for vocoder export and CoreML conversion."""
     
     # Sample input dimensions (typical 2-3 second phrase)
-    SEQUENCE_LENGTH_INPUT = 400      # Original F0 curve length
-    SEQUENCE_LENGTH_ASR = 200        # ASR features after F0/N convolution (half of input)
+    SEQUENCE_LENGTH_INPUT = 400      # F0 curve length (5s @ 80fps)
+    SEQUENCE_LENGTH_ASR = 200        # ASR features after F0/N convolution (half)
     
     # Audio parameters
     SAMPLE_RATE = 24000              # Kokoro model sample rate in Hz
@@ -52,7 +53,7 @@ class ExportConstants:
     MAX_LENGTH = 1024                # Maximum sequence length for variable input
     
     # CoreML optimization
-    FALLBACK_TARGET = ct.target.macOS12  # Fallback deployment target for compatibility
+    FALLBACK_TARGET = ct.target.iOS15  # Fallback deployment target for compatibility
     FALLBACK_PRECISION = ct.precision.FLOAT32  # Fallback precision for CPU-only
 
 class VocoderWrapper(torch.nn.Module):
@@ -513,19 +514,19 @@ def extract_and_convert_vocoder(model):
     
     return output_path
 
-def export_decoder_only_5s(model):
+def export_decoder_only_bucket(model, seconds: float = 5.0):
     """
-    Export a fixed-shape, decoder-only CoreML model for the 5s bucket.
+    Export a fixed-shape, decoder-only CoreML model for a given seconds bucket.
 
-    This variant matches the Phase 1 requirement exactly:
-    - Inputs: asr (1,512,1,200), f0_curve (1,1,1,400), n (1,1,1,400), s (1,128)
-    - Backend: Prefer 'neuralnetwork' for stability; fall back to 'mlprogram' if needed
+    This variant matches the Phase 1 decoder-only pathway with fixed shapes.
+    - Inputs for 5.0s: asr (1,512,1,200), f0_curve (1,1,1,400), n (1,1,1,400), s (1,128)
+    - For other durations, we scale linearly (80 fps; asr_len=f0_len/2)
     - Precision: FP16; Compute Units: ALL (enables ANE)
 
     Returns:
         str: Path to the saved .mlpackage
     """
-    print("\n🚀 Exporting decoder-only CoreML model for 5s bucket…")
+    print(f"\n🚀 Exporting decoder-only CoreML model for {seconds:g}s bucket…")
     decoder = model.decoder
     # Monkey-patch hn-nsf source to a CoreML-friendly implementation to avoid
     # unsupported ops (e.g., multiply) while preserving overall behavior.
@@ -543,9 +544,9 @@ def export_decoder_only_5s(model):
         print(f"⚠️ Could not install CoreMLFriendlySource: {e}. Proceeding anyway.")
     wrapper = VocoderWrapper(decoder).eval()
 
-    # Fixed 5s shapes (fps=80 → f0_len=400; asr_len=f0_len/2)
-    asr_len = ExportConstants.SEQUENCE_LENGTH_ASR  # 200
-    f0_len = ExportConstants.SEQUENCE_LENGTH_INPUT  # 400
+    # Fixed shapes from seconds (fps=80 → f0_len = 80*seconds; asr_len = f0_len/2)
+    f0_len = int(round(ExportConstants.FRAMES_PER_SECOND * seconds))
+    asr_len = f0_len // 2
 
     # Create representative sample inputs for tracing
     sample_inputs = (
@@ -577,7 +578,7 @@ def export_decoder_only_5s(model):
             inputs=inputs,
             convert_to="neuralnetwork",
             compute_precision=ct.precision.FLOAT16,
-            minimum_deployment_target=ct.target.macOS13,
+            minimum_deployment_target=MINIMUM_DEPLOYMENT_TARGET,
             compute_units=ct.ComputeUnit.ALL,
         )
         print("✅ Conversion successful (neuralnetwork)")
@@ -589,7 +590,7 @@ def export_decoder_only_5s(model):
             inputs=inputs,
             convert_to="mlprogram",
             compute_precision=ct.precision.FLOAT16,
-            minimum_deployment_target=ct.target.macOS13,
+            minimum_deployment_target=MINIMUM_DEPLOYMENT_TARGET,
             compute_units=ct.ComputeUnit.ALL,
         )
         print("✅ Conversion successful (mlprogram fallback)")
@@ -606,9 +607,11 @@ def export_decoder_only_5s(model):
     # Save
     import os
     os.makedirs("coreml", exist_ok=True)
-    out_path = "coreml/kokoro_decoder_only_5s.mlpackage"
+    # Save with seconds in filename for clarity
+    suffix = ("%gs" % seconds).replace(".", "p").replace("g", "")
+    out_path = f"coreml/kokoro_decoder_only_{suffix}.mlpackage"
     mlmodel.save(out_path)
-    print(f"✅ Saved decoder-only 5s model to: {out_path}")
+    print(f"✅ Saved decoder-only model to: {out_path}")
     return out_path
 
 def export_decoder_with_har_input(model):
