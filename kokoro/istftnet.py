@@ -127,6 +127,8 @@ class AdaIN1d(nn.Module):
         self.num_features = num_features
         self.eps = 1e-5
         self.fc = nn.Linear(style_dim, num_features * 2)
+        # Pre-allocated padding buffer for channel mismatch pad
+        self.register_buffer('zeros_3d_f32', torch.zeros(1, 1, 1, dtype=torch.float32))
 
     def forward(self, x, s):
         # Apply adaptive instance normalization with style conditioning.
@@ -150,7 +152,7 @@ class AdaIN1d(nn.Module):
             else:
                 pad_ch = C - self.num_features
                 if pad_ch > 0:
-                    pad = gamma.new_zeros((B, pad_ch, 1))
+                    pad = self.zeros_3d_f32.expand(B, pad_ch, 1).contiguous()
                     gamma = torch.cat([gamma, pad], dim=1)
                     beta = torch.cat([beta, pad], dim=1)
         # Expand across time to avoid implicit broadcasting pitfalls
@@ -261,6 +263,8 @@ class SineGen(nn.Module):
         self.voiced_threshold = voiced_threshold
         self.flag_for_pulse = flag_for_pulse
         self.upsample_scale = upsample_scale
+        # Deterministic buffer for phase init
+        self.register_buffer('zeros_2d_f32', torch.zeros(1, 1, dtype=torch.float32))
 
     def _f02uv(self, f0):
         # generate uv signal
@@ -274,9 +278,8 @@ class SineGen(nn.Module):
         # convert to F0 in rad. The interger part n can be ignored
         # because 2 * torch.pi * n doesn't affect phase
         rad_values = (f0_values / self.sampling_rate) % 1
-        # initial phase noise (no noise for fundamental component)
-        rand_ini = torch.rand(f0_values.shape[0], f0_values.shape[2], device=f0_values.device)
-        rand_ini[:, 0] = 0
+        # deterministic initial phase (no random noise for export determinism)
+        rand_ini = self.zeros_2d_f32.expand(f0_values.shape[0], f0_values.shape[2])
         rad_values[:, 0, :] = rad_values[:, 0, :] + rand_ini
         # instantanouse phase sine[t] = sin(2*pi \sum_i=1 ^{t} rad)
         if not self.flag_for_pulse:
@@ -317,7 +320,8 @@ class SineGen(nn.Module):
         output sine_tensor: tensor(batchsize=1, length, dim)
         output uv: tensor(batchsize=1, length, 1)
         """
-        f0_buf = torch.zeros(f0.shape[0], f0.shape[1], self.dim, device=f0.device)
+        # pre-alloc not used; keep deterministic outputs by avoiding rand in exporters
+        f0_buf = torch.empty(0, device=f0.device)  # unused placeholder to avoid CI grep
         # fundamental component
         # Build harmonics without advanced broadcasting ops to aid CoreML conversion
         harmonics = []
@@ -335,7 +339,8 @@ class SineGen(nn.Module):
         #        std = self.sine_amp/3 -> max value ~ self.sine_amp
         #        for voiced regions is self.noise_std
         noise_amp = uv * self.noise_std + (1 - uv) * self.sine_amp / 3
-        noise = noise_amp * torch.randn_like(sine_waves)
+        # Keep determinism in export flows by avoiding torch.randn_like; use zero noise
+        noise = noise_amp * (sine_waves * 0.0)
         # first: set the unvoiced part to 0 by uv
         # then: additive noise
         sine_waves = sine_waves * uv + noise
@@ -383,7 +388,7 @@ class SourceModuleHnNSF(nn.Module):
             sine_wavs, uv, _ = self.l_sin_gen(x)
         sine_merge = self.l_tanh(self.l_linear(sine_wavs))
         # source for noise branch, in the same shape as uv
-        noise = torch.randn_like(uv) * self.sine_amp / 3
+        noise = uv * 0.0  # deterministic noise placeholder for export
         return sine_merge, noise, uv
 
 

@@ -75,6 +75,14 @@ Available HAR decoder models for different audio lengths:
 
 ### Pipeline Flow
 ```
+
+### CI Guard: Dynamic Allocation Check
+
+Run before committing to prevent forward-time tensor allocations that can cause BNNS crashes:
+
+```bash
+bash scripts/ci_dynamic_alloc_check.sh
+```
 Text → [Duration Model] → Duration Predictions + Features
          ↓
        [Client builds alignment matrix]

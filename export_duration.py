@@ -100,11 +100,15 @@ class DurationModel(nn.Module):
         self.kmodel.predictor.text_encoder = CoreMLFriendlyDurationEncoder(kmodel.predictor.text_encoder)
         if hasattr(self.kmodel.bert.embeddings, 'token_type_ids'):
             delattr(self.kmodel.bert.embeddings, 'token_type_ids')
+        # Pre-allocated buffers to avoid forward-time allocations
+        self.register_buffer('zeros_1d_int', torch.zeros(1, dtype=torch.int32))
+        self.register_buffer('zeros_1d_f32', torch.zeros(1, dtype=torch.float32))
+        self.register_buffer('zeros_3d_f32', torch.zeros(1, 1, 1, dtype=torch.float32))
     def forward(self, input_ids: torch.LongTensor, ref_s: torch.FloatTensor, speed: torch.FloatTensor, attention_mask: torch.LongTensor):
         k = self.kmodel
         input_lengths = attention_mask.sum(dim=-1).to(torch.long)
         text_mask = attention_mask == 0
-        token_type_ids = torch.zeros_like(input_ids)
+        token_type_ids = self.zeros_1d_int.expand_as(input_ids)
         bert_dur = k.bert(input_ids, attention_mask=attention_mask, token_type_ids=token_type_ids)
         d_en = k.bert_encoder(bert_dur).transpose(-1, -2)
         s = ref_s[:, 128:]  # style half
@@ -114,8 +118,8 @@ class DurationModel(nn.Module):
         duration = torch.sigmoid(duration).sum(axis=-1) / speed
         pred_dur = torch.round(duration).clamp(min=1).long()
         t_en = k.text_encoder(input_ids, input_lengths, text_mask)
-        # Avoid CoreML aliasing: ensure ref_s output is distinct
-        ref_s_out = ref_s + torch.zeros_like(ref_s)
+        # Avoid aliasing without zeros_like allocation
+        ref_s_out = ref_s.clone()
         return pred_dur, d, t_en, s, ref_s_out
 
 def main():

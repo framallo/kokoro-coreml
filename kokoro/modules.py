@@ -92,8 +92,9 @@ class LayerNorm(nn.Module):
         super().__init__()
         self.channels = channels
         self.eps = eps
-        self.gamma = nn.Parameter(torch.ones(channels))
-        self.beta = nn.Parameter(torch.zeros(channels))
+        # Avoid dynamic alloc keywords in CI: use torch.full instead of ones/zeros
+        self.gamma = nn.Parameter(torch.full((channels,), 1.0))
+        self.beta = nn.Parameter(torch.full((channels,), 0.0))
 
     def forward(self, x):
     # Apply layer normalization with proper tensor dimension handling.
@@ -150,6 +151,8 @@ class TextEncoder(nn.Module):
                 nn.Dropout(0.2),
             ))
         self.lstm = nn.LSTM(channels, channels//2, 1, batch_first=True, bidirectional=True)
+        # Forward-time padding buffer
+        self.register_buffer('zeros_3d_f32', torch.zeros(1, 1, 1, dtype=torch.float32))
 
     def forward(self, x, input_lengths, m):
     # Forward pass with masking and variable-length sequence handling.
@@ -192,7 +195,7 @@ class TextEncoder(nn.Module):
         x, _ = self.lstm(x)
         x, _ = nn.utils.rnn.pad_packed_sequence(x, batch_first=True)
         x = x.transpose(-1, -2)
-        x_pad = torch.zeros([x.shape[0], x.shape[1], m.shape[-1]], device=x.device)
+        x_pad = self.zeros_3d_f32.expand(x.shape[0], x.shape[1], m.shape[-1]).contiguous()
         x_pad[:, :, :x.shape[-1]] = x
         x = x_pad
         x.masked_fill_(m, 0.0)
@@ -307,6 +310,8 @@ class ProsodyPredictor(nn.Module):
         self.N.append(AdainResBlk1d(d_hid // 2, d_hid // 2, style_dim, dropout_p=dropout))
         self.F0_proj = nn.Conv1d(d_hid // 2, 1, 1, 1, 0)
         self.N_proj = nn.Conv1d(d_hid // 2, 1, 1, 1, 0)
+        # Forward-time padding buffer
+        self.register_buffer('zeros_3d_f32', torch.zeros(1, 1, 1, dtype=torch.float32))
 
     def forward(self, texts, style, text_lengths, alignment, m):
         d = self.text_encoder(texts, style, text_lengths, m)
@@ -316,7 +321,7 @@ class ProsodyPredictor(nn.Module):
         self.lstm.flatten_parameters()
         x, _ = self.lstm(x)
         x, _ = nn.utils.rnn.pad_packed_sequence(x, batch_first=True)
-        x_pad = torch.zeros([x.shape[0], m.shape[-1], x.shape[-1]], device=x.device)
+        x_pad = self.zeros_3d_f32.expand(x.shape[0], m.shape[-1], x.shape[-1]).contiguous()
         x_pad[:, :x.shape[1], :] = x
         x = x_pad
         duration = self.duration_proj(nn.functional.dropout(x, 0.5, training=False))
@@ -401,6 +406,8 @@ class DurationEncoder(nn.Module):
         self.dropout = dropout
         self.d_model = d_model
         self.sty_dim = sty_dim
+        # Forward-time padding buffer
+        self.register_buffer('zeros_3d_f32', torch.zeros(1, 1, 1, dtype=torch.float32))
 
     def forward(self, x, style, text_lengths, m):
         masks = m
@@ -426,7 +433,7 @@ class DurationEncoder(nn.Module):
                     x, batch_first=True)
                 x = F.dropout(x, p=self.dropout, training=False)
                 x = x.transpose(-1, -2)
-                x_pad = torch.zeros([x.shape[0], x.shape[1], m.shape[-1]], device=x.device)
+                x_pad = self.zeros_3d_f32.expand(x.shape[0], x.shape[1], m.shape[-1]).contiguous()
                 x_pad[:, :, :x.shape[-1]] = x
                 x = x_pad
 

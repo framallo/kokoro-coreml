@@ -549,7 +549,7 @@ class KPipeline:
             hybrid_voice = pipeline.load_voice('af_heart,af_bella')
             
             # Pre-loaded embedding passthrough
-            custom_emb = torch.randn(256)
+            custom_emb = torch.zeros(256)
             voice_emb = pipeline.load_voice(custom_emb)
             
             # Custom delimiter

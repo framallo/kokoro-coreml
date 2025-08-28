@@ -387,7 +387,7 @@ class DurationModel(nn.Module):
         text_mask = attention_mask == 0  # True for padding positions
         
         # BERT requires token_type_ids (all zeros for single sequence)
-        token_type_ids = torch.zeros_like(input_ids)
+        token_type_ids = input_ids.new_zeros(input_ids.shape)
         
         # BERT encoding for contextual text understanding
         bert_dur = k.bert(input_ids, attention_mask=attention_mask, token_type_ids=token_type_ids)
@@ -541,7 +541,7 @@ def export_models(kmodel, output_dir, duration_only=False, trace_length: int = 1
     # Typical debug value: 64. Production may use 256+ depending on memory.
     trace_length = int(trace_length)
     input_ids = torch.randint(0, 100, (trace_length,), dtype=torch.int32)
-    ref_s = torch.randn(256, dtype=torch.float32)
+    ref_s = torch.zeros(256, dtype=torch.float32)
     speed = torch.tensor([1.0], dtype=torch.float32)
     attention_mask = torch.ones(trace_length, dtype=torch.int32)
     
@@ -579,7 +579,7 @@ def export_models(kmodel, output_dir, duration_only=False, trace_length: int = 1
         t_en = t_en.unsqueeze(0) if t_en.dim() == 2 else t_en
         s = s.unsqueeze(0) if s.dim() == 1 else s
         ref_s_out = ref_s.unsqueeze(0) if ref_s.dim() == 1 else ref_s
-        ref_s_out = ref_s_out + torch.zeros_like(ref_s_out)  # Non-aliased copy
+        ref_s_out = ref_s_out.clone()  # Non-aliased copy
     
     buckets = {
         "5s": 5 * 24000,   # 120k frames - minimum app-compatible bucket

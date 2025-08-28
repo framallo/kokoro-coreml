@@ -291,12 +291,20 @@ class DurationModel(nn.Module):
         self.kmodel.predictor.text_encoder = CoreMLFriendlyDurationEncoder(kmodel.predictor.text_encoder)
         if hasattr(self.kmodel.bert.embeddings, 'token_type_ids'):
              delattr(self.kmodel.bert.embeddings, 'token_type_ids')
+        # Registered buffers to avoid dynamic allocations in forward()
+        # - zeros_1d_int: expand to any integer vector (e.g., token_type_ids)
+        # - zeros_1d_f32: general float vector zero
+        # - zeros_3d_f32: general float (1,1,1) used for safe expand/contiguous writes
+        self.register_buffer('zeros_1d_int', torch.zeros(1, dtype=torch.int32))
+        self.register_buffer('zeros_1d_f32', torch.zeros(1, dtype=torch.float32))
+        self.register_buffer('zeros_3d_f32', torch.zeros(1, 1, 1, dtype=torch.float32))
 
     def forward(self, input_ids: torch.LongTensor, ref_s: torch.FloatTensor, speed: torch.FloatTensor, attention_mask: torch.LongTensor):
         k = self.kmodel
         input_lengths = attention_mask.sum(dim=-1).to(torch.long)
         text_mask = attention_mask == 0
-        token_type_ids = torch.zeros_like(input_ids)
+        # Avoid forward-time allocation: expand registered buffer to shape
+        token_type_ids = self.zeros_1d_int.expand_as(input_ids)
         
         bert_dur = k.bert(input_ids, attention_mask=attention_mask, token_type_ids=token_type_ids)
         d_en = k.bert_encoder(bert_dur).transpose(-1, -2)
@@ -310,8 +318,8 @@ class DurationModel(nn.Module):
         pred_dur = torch.round(duration).clamp(min=1).long()
         
         t_en = k.text_encoder(input_ids, input_lengths, text_mask)
-        # Avoid CoreML aliasing: ensure ref_s output is not the exact same tensor as input
-        ref_s_out = ref_s + torch.zeros_like(ref_s)
+        # Avoid aliasing without allocation from zeros_like
+        ref_s_out = ref_s.clone()
         return pred_dur, d, t_en, s, ref_s_out
 
 class SynthesizerModel(nn.Module):
@@ -321,6 +329,14 @@ class SynthesizerModel(nn.Module):
         self.kmodel = kmodel
         self.kmodel.text_encoder = CoreMLFriendlyTextEncoder(kmodel.text_encoder)
         self._asr_align = None  # lazy-initialized 1x1 conv to match decoder expected channels
+        # Determine decoder's expected ASR channels (minus F0/N inputs)
+        self.expected_in = int(self.kmodel.decoder.encode.conv1.in_channels - 2)
+        # Forward-time allocation guards: shared zero buffers for expand/contiguous
+        self.register_buffer('zeros_1d_int', torch.zeros(1, dtype=torch.int32))
+        self.register_buffer('zeros_1d_f32', torch.zeros(1, dtype=torch.float32))
+        # Generic (1,1,1) and channel-shaped (1, expected_in, 1) zero tensors
+        self.register_buffer('zeros_3d_f32', torch.zeros(1, 1, 1, dtype=torch.float32))
+        self.register_buffer('zeros_chan_f32', torch.zeros(1, self.expected_in, 1, dtype=torch.float32))
 
     def forward(self, d: torch.FloatTensor, t_en: torch.FloatTensor, s: torch.FloatTensor, ref_s: torch.FloatTensor, pred_aln_trg: torch.FloatTensor):
         k = self.kmodel
@@ -334,24 +350,38 @@ class SynthesizerModel(nn.Module):
         pred_bt = pred_aln_trg.transpose(0, 1).unsqueeze(0).expand(B, -1, -1)
         d_bt = d.transpose(1, 2)  # (B, T, H)
         en = torch.bmm(pred_bt, d_bt)  # (B, F, H)
-        # Bypass shared LSTM and F0/N stacks to avoid BNNS LSTM kernels on device
-        # Directly use aligned features and provide neutral F0/N predictions
+        # Prosody: prefer true F0/N predictions if available; else manual branch
         B, F, H = en.shape
-        # Neutral (zero) F0/N predictions. Decoder's F0/N path uses stride-2 conv,
-        # so provide length 2*F to ensure time dims match ASR after downsampling.
-        F0_pred = en.new_zeros((B, F * 2))
-        N_pred = en.new_zeros((B, F * 2))
+        if hasattr(k.predictor, 'F0Ntrain') and callable(getattr(k.predictor, 'F0Ntrain')):
+            F0_pred, N_pred = k.predictor.F0Ntrain(en, s)  # shapes: (B, F), (B, F)
+        else:
+            x, _ = k.predictor.shared(en.transpose(-1, -2))
+            F0 = x.transpose(-1, -2)
+            for block in k.predictor.F0:
+                F0 = block(F0, s)
+            F0_pred = k.predictor.F0_proj(F0).squeeze(1)
+            N = x.transpose(-1, -2)
+            for block in k.predictor.N:
+                N = block(N, s)
+            N_pred = k.predictor.N_proj(N).squeeze(1)
+        # Ensure F0/N time dim is 2*F so after stride-2 conv it matches ASR time F
+        if F0_pred.shape[-1] != 2 * F:
+            # Nearest-neighbor upscale by factor 2
+            F0_pred = torch.nn.functional.interpolate(F0_pred.unsqueeze(1), size=2 * F, mode='nearest').squeeze(1)
+        if N_pred.shape[-1] != 2 * F:
+            N_pred = torch.nn.functional.interpolate(N_pred.unsqueeze(1), size=2 * F, mode='nearest').squeeze(1)
 
         # Ensure ASR channels match decoder expectation (hidden_dim) to avoid conv input mismatch
         # Decoder.encode first conv expects asr channels equal to its input minus F0/N channels
-        expected_in = k.decoder.encode.conv1.in_channels - 2  # minus F0/N
+        expected_in = self.expected_in
         # Force channel count deterministically for tracing: slice/pad t_en to expected_in
         if t_en.shape[1] != expected_in:
             if t_en.shape[1] > expected_in:
                 t_en = t_en[:, :expected_in, :]
             else:
                 pad_ch = expected_in - t_en.shape[1]
-                t_en = torch.cat([t_en, t_en.new_zeros((t_en.shape[0], pad_ch, t_en.shape[2]))], dim=1)
+                pad = self.zeros_chan_f32[:, :pad_ch, :].expand(t_en.shape[0], pad_ch, t_en.shape[2]).contiguous()
+                t_en = torch.cat([t_en, pad], dim=1)
         # Align text features to frames without einsum
         # (B, H, T) x (T, F) -> (B, H, F) via batched matmul
         pred_btf = pred_aln_trg.unsqueeze(0).expand(B, -1, -1)  # (B, T, F)
@@ -738,7 +768,7 @@ def export_synthesizers(output_dir, buckets_str, debug=False, trace_length: int 
         if debug:
             print(f"Debug mode: Using reduced trace_length of {trace_length}")
     input_ids = torch.randint(0, 100, (1, trace_length), dtype=torch.int32)
-    ref_s = torch.randn(1, CoreMLExportConstants.VOICE_EMBEDDING_DIM, dtype=torch.float32)
+    ref_s = torch.zeros(1, CoreMLExportConstants.VOICE_EMBEDDING_DIM, dtype=torch.float32)
     speed = torch.tensor([1.0], dtype=torch.float32)
     attention_mask = torch.ones(1, trace_length, dtype=torch.int32)
     
@@ -760,7 +790,7 @@ def export_synthesizers(output_dir, buckets_str, debug=False, trace_length: int 
             if x.shape[-1] > T:
                 return x[..., :T]
             pad = T - x.shape[-1]
-            return torch.cat([x, x.new_zeros(x.shape[0], x.shape[1], pad)], dim=-1)
+            return torch.cat([x, x * 0.0][0:1] + [x[..., :0].expand(x.shape[0], x.shape[1], pad)], dim=-1)
         d = _align_time(d, trace_length)
         t_en = _align_time(t_en, trace_length)
     
@@ -897,7 +927,8 @@ def export_synthesizers(output_dir, buckets_str, debug=False, trace_length: int 
                     outputs=[ct.TensorType(name="waveform")],
                     convert_to=convert_backend,
                     minimum_deployment_target=target,
-                    compute_precision=cp_arg
+                    compute_precision=cp_arg,
+                    compute_units=ct.ComputeUnit.ALL,
                 )
             else:
                 ml_synthesizer = ct.convert(
@@ -912,7 +943,8 @@ def export_synthesizers(output_dir, buckets_str, debug=False, trace_length: int 
                     outputs=[ct.TensorType(name="waveform")],
                     convert_to=convert_backend,
                     minimum_deployment_target=target,
-                    compute_precision=cp_arg
+                    compute_precision=cp_arg,
+                    compute_units=ct.ComputeUnit.ALL,
                 )
         except Exception as e:
             print("\n⚠️ Core ML conversion failed, applying MIL graph workaround for broadcast mul ...")
@@ -957,7 +989,8 @@ def export_synthesizers(output_dir, buckets_str, debug=False, trace_length: int 
                     outputs=[ct.TensorType(name="waveform")],
                     convert_to=convert_backend,
                     minimum_deployment_target=target,
-                    compute_precision=cp_arg
+                    compute_precision=cp_arg,
+                    compute_units=ct.ComputeUnit.ALL,
                 )
             else:
                 ml_synthesizer = ct.convert(
@@ -972,7 +1005,8 @@ def export_synthesizers(output_dir, buckets_str, debug=False, trace_length: int 
                     outputs=[ct.TensorType(name="waveform")],
                     convert_to=convert_backend,
                     minimum_deployment_target=target,
-                    compute_precision=cp_arg
+                    compute_precision=cp_arg,
+                    compute_units=ct.ComputeUnit.ALL,
                 )
             # restore mul
             ct.converters.mil.frontend.torch.ops.mul = orig_mul
