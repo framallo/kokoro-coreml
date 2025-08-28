@@ -306,3 +306,5 @@ Implications:
 - After expanding training pairs and epochs, the on-device post-filter lifted correlation to ~0.816 on the 5s fixture. Action items: add multi-sentence/bucket data, modestly increase capacity (e.g., 64 channels, 12 blocks), and add a multi-band STFT loss to target >0.9. Verify performance on-device (ANE/GPU vs CPU) and latency impact.
 
 - Using README/*.md text as prompts to generate diverse training pairs and training the post-filter for 30 epochs improved correlation to ~0.848 on-device (5s). Next: auto-generate fixtures per text (dynamic fixture export), scale dataset, and add multi-band STFT loss to surpass 0.9.
+
+- Plan update: correlation target set to ≥0.90; Phase 2 now explicitly optimized around correlation with a learned post-filter. Roadmap: broaden dataset (README-derived prompts + voices), add 15s/30s buckets, increase model capacity and add multi-band STFT/perceptual losses, then bake the best model into the Swift path by default.
