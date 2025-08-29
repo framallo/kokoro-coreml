@@ -1,0 +1,9 @@
+{
+  "timestamp": "20250828_153127",
+  "weights_path": "/Users/mattmireles/Documents/GitHub/talktome/kokoro-coreml/coreml/kokoro_postfilter.safetensors",
+  "hidden_channels": 192,
+  "num_blocks": 14,
+  "t_fixed": 120000,
+  "compute_precision": "FLOAT16",
+  "out_mlpackage": "/Users/mattmireles/Documents/GitHub/talktome/kokoro-coreml/coreml/KokoroPostFilter_20250828_153127_h192_b14.mlpackage"
+}

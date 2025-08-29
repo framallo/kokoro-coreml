@@ -61,21 +61,46 @@ func makeRunDir(base: URL) throws -> URL {
 }
 
 func main() throws {
-    let args = CommandLine.arguments
+    var args = CommandLine.arguments
     guard args.count >= 3 else {
-        print("usage: kokoro-phase2-cli <fixture.json> <mlpackage_path> [out_dir]")
+        print("usage: kokoro-phase2-cli <fixture.json> <mlpackage_path> [out_dir] [--postfilter <pf_mlpackage>] [--units all|cpuAndGPU|cpuOnly]")
         return
     }
     let fixtureURL = URL(fileURLWithPath: args[1])
     let modelURL = URL(fileURLWithPath: args[2])
-    let outBase = args.count >= 4 ? URL(fileURLWithPath: args[3]) : URL(fileURLWithPath: "outputs/local")
+    var outBase = args.count >= 4 ? URL(fileURLWithPath: args[3]) : URL(fileURLWithPath: "outputs/local")
+    var postFilterURL: URL? = nil
+    // simple flag scan
+    var i = 4
+    let validUnits = Set(["all","cpuAndGPU","cpuOnly","cpu","cpu+gpu","cpu_gpu"]) // normalized later
+    while i < args.count {
+        let tok = args[i]
+        if tok == "--postfilter", i+1 < args.count {
+            postFilterURL = URL(fileURLWithPath: args[i+1])
+            i += 2
+            continue
+        } else if tok == "--units", i+1 < args.count {
+            var val = args[i+1]
+            if validUnits.contains(val) {
+                setenv("KOKORO_COMPUTE_UNITS", val, 1)
+            }
+            i += 2
+            continue
+        } else if tok == "--out", i+1 < args.count { // optional alias
+            outBase = URL(fileURLWithPath: args[i+1])
+            i += 2
+            continue
+        } else {
+            i += 1
+        }
+    }
     let runDir = try makeRunDir(base: outBase)
     let outWav = runDir.appendingPathComponent("output.wav")
 
     let fixture = try loadFixture(url: fixtureURL)
 
     let t0 = now()
-    let runner = try DecoderOnly5sRunner(mlpackageURL: modelURL)
+    let runner = try DecoderOnly5sRunner(mlpackageURL: modelURL, postFilterURL: postFilterURL)
 
     let asr = try makeArray(fixture.asr, shape: fixture.shapes["asr"] ?? [1,512,1,200])
     let f0 = try makeArray(fixture.f0_curve, shape: fixture.shapes["f0_curve"] ?? [1,1,1,400])
@@ -237,8 +262,16 @@ func main() throws {
     }
     let t2 = now()
     // If a post-filter is loaded, apply it to audio
+    var t3 = t2
     if runner.hasPostFilter {
+        let pfStart = now()
         audio = runner.applyPostFilterIfAvailable(samples: audio)
+        t3 = now()
+        // Write post-filter timing file for quick read
+        let pfMeta: [String: Any] = ["postfilter_s": t3 - pfStart]
+        let pfMetaURL = runDir.appendingPathComponent("postfilter_timing.json")
+        let pfData = try JSONSerialization.data(withJSONObject: pfMeta, options: [.prettyPrinted, .sortedKeys])
+        try pfData.write(to: pfMetaURL)
     }
     try FileManager.default.createDirectory(at: outWav.deletingLastPathComponent(), withIntermediateDirectories: true)
     // Optional gain calibration to target dBFS
@@ -293,8 +326,11 @@ func main() throws {
         "latency": [
             "load_s": t1 - t0,
             "coreml_s": t2 - t1,
-            "total_s": t2 - t0,
+            "postfilter_s": max(0, t3 - t2),
+            "total_s": t3 - t0,
         ],
+        "compute_units": String(describing: runner.usedComputeUnits),
+        "postfilter_loaded": runner.hasPostFilter,
         "levels": [
             "dbfs_raw": rmsDBFS(audio),
             "dbfs_written": rmsDBFS(audioOut),

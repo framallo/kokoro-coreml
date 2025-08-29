@@ -1,6 +1,6 @@
 version: "Apple Swift version 6.1.2 (swiftlang-6.1.2.1.2 clang-1700.0.13.5)"
 options: "4081319ddc1eafdb09f8b65abb8ccc019ae1c88f034e5a6bec9b762d4d8169fc"
-build_start_time: [1756334885, 639432000]
-build_end_time: [1756334887, 174751000]
+build_start_time: [1756419176, 486742000]
+build_end_time: [1756419178, 221079000]
 inputs:
-  "/Users/mattmireles/Documents/GitHub/talktome/kokoro-coreml/Swift/KokoroPhase2/Sources/kokoro-phase2-cli/main.swift": [1756334880, 73924720]
+  "/Users/mattmireles/Documents/GitHub/talktome/kokoro-coreml/Swift/KokoroPhase2/Sources/kokoro-phase2-cli/main.swift": [1756418109, 337819927]
