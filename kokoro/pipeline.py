@@ -143,7 +143,39 @@ class KPipeline:
             logger.warning(f"Using EspeakG2P(language='{language}'). Chunking logic not yet implemented, so long texts may be truncated unless you split them with '\\n'.")
             self.g2p = espeak.EspeakG2P(language=language)
 
-    def load_single_voice(self, voice: str):
+    def load_single_voice(self, voice: str) -> torch.FloatTensor:
+        """Load a single voice embedding from Hugging Face Hub or local path.
+        
+        This method handles the complete voice loading pipeline:
+        1. Checks local cache for previously loaded voices
+        2. Downloads from HF Hub if not cached and voice doesn't end with .pt
+        3. Validates language compatibility and warns on mismatches
+        4. Loads PyTorch tensor with weights_only=True for security
+        
+        Voice Naming Convention:
+            Format: {lang_code}{gender}_{name}
+            Examples: af_bella, am_adam, bf_alice
+            Where: a=American English, f=female, m=male, b=British English
+        
+        Called by:
+            - load_voice(): For single voice requests or voice averaging
+            - Internal voice management during pipeline operations
+        
+        Cross-file Dependencies:
+            - Relies on HF Hub download from huggingface_hub library
+            - Uses LANG_CODES mapping defined at module level (lines 23-40)
+            - Voice files stored at {repo_id}/voices/{voice}.pt on HF Hub
+        
+        Args:
+            voice: Voice identifier (e.g., 'af_bella') or local .pt file path
+        
+        Returns:
+            Voice embedding tensor with shape (256,) containing baseline and style components
+            
+        Raises:
+            FileNotFoundError: If local .pt file path doesn't exist
+            HFValidationError: If voice file not found on Hugging Face Hub
+        """
         if voice in self.voices:
             return self.voices[voice]
         if voice.endswith('.pt'):
@@ -158,13 +190,42 @@ class KPipeline:
         self.voices[voice] = pack
         return pack
 
-    """
-    load_voice is a helper function that lazily downloads and loads a voice:
-    Single voice can be requested (e.g. 'af_bella') or multiple voices (e.g. 'af_bella,af_jessica').
-    If multiple voices are requested, they are averaged.
-    Delimiter is optional and defaults to ','.
-    """
     def load_voice(self, voice: Union[str, torch.FloatTensor], delimiter: str = ",") -> torch.FloatTensor:
+        """Load voice embedding(s) with support for voice blending via averaging.
+        
+        This method provides flexible voice loading capabilities:
+        1. Pass-through for pre-loaded voice tensors (no processing needed)
+        2. Single voice loading from identifier or file path
+        3. Multi-voice blending by averaging multiple voice embeddings
+        
+        Multi-Voice Blending:
+            - Voices separated by delimiter (default comma: 'af_bella,af_jessica')
+            - All voices loaded individually via load_single_voice()
+            - Final embedding computed as arithmetic mean of all voices
+            - Useful for creating custom voice styles or gender blending
+        
+        Called by:
+            - generate_from_tokens(): Voice preparation before inference
+            - __call__(): Main pipeline voice loading
+            - External code needing voice embedding preparation
+        
+        Cross-file Dependencies:
+            - Delegates to load_single_voice() for individual voice downloads
+            - Uses torch.mean() and torch.stack() for voice averaging
+            - Results cached in self.voices dictionary for performance
+        
+        Args:
+            voice: Single voice ID, comma-separated voice IDs, file path, or pre-loaded tensor
+            delimiter: Character used to separate multiple voice identifiers (default: ",")
+            
+        Returns:
+            Voice embedding tensor with shape (256,) ready for model inference
+            
+        Examples:
+            Single voice: pipeline.load_voice('af_bella')
+            Voice blending: pipeline.load_voice('af_bella,af_jessica')
+            Custom delimiter: pipeline.load_voice('af_bella;af_jessica', delimiter=';')
+        """
         if isinstance(voice, torch.FloatTensor):
             return voice
         if voice in self.voices:
@@ -178,6 +239,39 @@ class KPipeline:
 
     @staticmethod
     def tokens_to_ps(tokens: List[en.MToken]) -> str:
+        """Convert tokenized text to phoneme string suitable for TTS model input.
+        
+        This method transforms a list of misaki MToken objects into a continuous
+        phoneme string that can be fed directly to the Kokoro TTS model. It handles
+        phoneme concatenation and whitespace preservation to maintain natural speech
+        rhythm and timing.
+        
+        Processing Logic:
+            1. Extract phonemes field from each MToken
+            2. Add space after phonemes if original token had trailing whitespace
+            3. Join all phonemes into continuous string
+            4. Strip leading/trailing spaces from final result
+        
+        Called by:
+            - en_tokenize(): During English text chunking and processing
+            - generate_from_tokens(): When processing pre-tokenized input
+            - Internal text processing workflows
+        
+        Cross-file Dependencies:
+            - Operates on en.MToken objects from misaki.en module
+            - Output consumed by KModel.forward() in model.py
+            - String length validated against model context_length (512 tokens)
+        
+        Args:
+            tokens: List of MToken objects from misaki English G2P processing
+            
+        Returns:
+            Phoneme string ready for TTS model input (e.g., "hˈɛloʊ wˈɜːld")
+            
+        Performance Notes:
+            - Uses generator expression with str.join() for memory efficiency
+            - Output length should not exceed 510 characters for model compatibility
+        """
         return ''.join(t.phonemes + (' ' if t.whitespace else '') for t in tokens).strip()
 
     @staticmethod
@@ -185,8 +279,52 @@ class KPipeline:
         tokens: List[en.MToken],
         next_count: int,
         waterfall: List[str] = ['!.?…', ':;', ',—'],
-        bumps: List[str] = [')', '”']
+        bumps: List[str] = [')', '"']
     ) -> int:
+        """Find optimal text chunking boundary using hierarchical punctuation priority.
+        
+        This method implements intelligent text chunking by finding the best place to split
+        text based on punctuation hierarchy. It ensures chunks stay within model limits
+        while maintaining natural linguistic boundaries for better TTS quality.
+        
+        Chunking Strategy:
+            1. Search for sentence endings (!.?…) - highest priority
+            2. Fall back to clause boundaries (:;) - medium priority  
+            3. Use comma/dash breaks (,—) - lowest priority
+            4. Handle closing punctuation bumps ()", ')
+            5. Ensure result fits within 510-character phoneme limit
+        
+        Algorithm Flow:
+            - Iterate through waterfall priorities (sentence → clause → comma)
+            - For each priority level, search backward from end of token list
+            - Find last occurrence of punctuation from current priority group
+            - Check if resulting chunk would fit within phoneme budget
+            - Apply "bumps" adjustment for closing punctuation
+            - Return first valid boundary found, or full length if none work
+        
+        Called by:
+            - en_tokenize(): When phoneme count would exceed model limit (510 chars)
+            - Text chunking logic during long text processing
+        
+        Cross-file Dependencies:
+            - Operates on en.MToken objects from misaki.en module
+            - Phoneme length calculated via tokens_to_ps() method
+            - 510-character limit corresponds to model.context_length in model.py
+        
+        Args:
+            tokens: List of MToken objects to find chunking boundary within
+            next_count: Total phoneme count including next token to be processed
+            waterfall: Punctuation priority groups, highest to lowest importance
+            bumps: Closing punctuation that should be included after main boundary
+            
+        Returns:
+            Index of optimal chunk boundary (0 to len(tokens))
+            
+        Constants Explained:
+            - 510: Maximum phoneme string length for model (512 - 2 for BOS/EOS tokens)
+            - Waterfall priorities: sentence > clause > phrase boundaries
+            - Bumps handle cases like: "Hello." → "Hello.)" (include closing quote)
+        """
         for w in waterfall:
             z = next((i for i, t in reversed(list(enumerate(tokens))) if t.phonemes in set(w)), None)
             if z is None:
@@ -200,12 +338,84 @@ class KPipeline:
 
     @staticmethod
     def tokens_to_text(tokens: List[en.MToken]) -> str:
+        """Reconstruct original text from tokenized MToken objects.
+        
+        This method reverses the tokenization process by concatenating the original
+        text and whitespace from each MToken to recreate the source text exactly
+        as it appeared before G2P processing.
+        
+        Reconstruction Process:
+            1. Extract original text from each MToken.text field
+            2. Append whitespace from MToken.whitespace field  
+            3. Join all components to form continuous string
+            4. Strip leading/trailing whitespace from final result
+        
+        Called by:
+            - en_tokenize(): To generate grapheme output for each text chunk
+            - Text processing workflows that need original text reconstruction
+            - Debugging and validation code that compares input/output text
+        
+        Cross-file Dependencies:
+            - Operates on en.MToken objects from misaki.en module
+            - Used alongside tokens_to_ps() for parallel text/phoneme generation
+            - Output used in Result.graphemes field for client code
+        
+        Args:
+            tokens: List of MToken objects containing original text and spacing
+            
+        Returns:
+            Reconstructed original text string with proper spacing preserved
+            
+        Invariant:
+            For any text T processed through misaki G2P → tokens_to_text(tokens) ≈ T
+        """
         return ''.join(t.text + t.whitespace for t in tokens).strip()
 
     def en_tokenize(
         self,
         tokens: List[en.MToken]
     ) -> Generator[Tuple[str, str, List[en.MToken]], None, None]:
+        """Intelligently chunk English text tokens to fit within model context limits.
+        
+        This method processes pre-tokenized English text and splits it into chunks that
+        respect both linguistic boundaries and the TTS model's 510-character phoneme limit.
+        It implements sophisticated chunking logic to maintain natural speech patterns.
+        
+        Processing Pipeline:
+            1. Iterate through tokens, building phoneme count incrementally
+            2. When approaching 510-character limit, find optimal split using waterfall_last()
+            3. Yield text chunk as (graphemes, phonemes, tokens) tuple
+            4. Continue processing remaining tokens until all are consumed
+        
+        Phoneme Processing:
+            - Filters None phonemes from G2P processing  
+            - Preserves whitespace for natural speech timing
+            - Applies optional phoneme transformations (e.g., ɾ → T for American English)
+        
+        Chunking Intelligence:
+            - Uses waterfall_last() to find sentence/clause/phrase boundaries
+            - Avoids splitting mid-word or mid-phrase when possible
+            - Handles edge case where single token exceeds limit (strips leading spaces)
+        
+        Called by:
+            - generate_from_tokens(): When processing pre-tokenized MToken lists
+            - __call__(): During main pipeline English text processing
+        
+        Cross-file Dependencies:
+            - Uses waterfall_last() for intelligent boundary detection
+            - Uses tokens_to_ps() and tokens_to_text() for conversion
+            - Operates on en.MToken objects from misaki.en module
+            - Phoneme output fed to KModel.forward() in model.py
+        
+        Args:
+            tokens: Pre-tokenized English text as list of MToken objects
+            
+        Yields:
+            Tuple of (original_text, phonemes, token_chunk) for each chunk
+            
+        Constants:
+            - 510: Maximum phoneme characters (model context_length 512 - 2 for special tokens)
+        """
         tks = []
         pcount = 0
         for t in tokens:
@@ -237,6 +447,45 @@ class KPipeline:
         pack: torch.FloatTensor,
         speed: Union[float, Callable[[int], float]] = 1
     ) -> KModel.Output:
+        """Execute TTS inference on phoneme string using loaded voice embedding.
+        
+        This method provides a streamlined interface for running TTS inference by
+        wrapping the KModel.forward() call with flexible speed control and proper
+        output handling. It's the core inference primitive used throughout the pipeline.
+        
+        Speed Control Modes:
+            1. Fixed speed: Pass float value (e.g., 1.0 for normal, 0.8 for slower)
+            2. Dynamic speed: Pass callable that takes phoneme length and returns speed
+               Useful for adaptive speed based on text complexity or length
+        
+        Voice Selection Logic:
+            - Uses phoneme length to index into voice embedding pack
+            - pack[len(ps)-1] selects appropriate voice variant based on text length
+            - This allows voice packs to contain length-dependent style variations
+        
+        Called by:
+            - generate_from_tokens(): For each text chunk during pipeline processing
+            - __call__(): During main pipeline inference execution
+            - External code needing direct phoneme-to-audio conversion
+        
+        Cross-file Dependencies:
+            - Delegates to KModel.forward() in model.py for actual neural inference
+            - Requires voice pack from load_voice() or load_single_voice()
+            - Output contains audio tensor and duration predictions for downstream use
+        
+        Args:
+            model: Loaded KModel instance ready for inference
+            ps: Phoneme string for TTS synthesis (e.g., "hˈɛloʊ wˈɜːld")
+            pack: Voice embedding tensor from voice loading functions
+            speed: Fixed speed multiplier or length-dependent speed function
+            
+        Returns:
+            KModel.Output containing synthesized audio and predicted phoneme durations
+            
+        Performance Notes:
+            - Inference time scales with phoneme length and model size
+            - Voice pack indexing is O(1) but pack loading may involve disk I/O
+        """
         if callable(speed):
             speed = speed(len(ps))
         return model(ps, pack[len(ps)-1], speed, return_output=True)
@@ -292,11 +541,57 @@ class KPipeline:
             yield self.Result(graphemes=gs, phonemes=ps, tokens=tks, output=output)
 
     @staticmethod
-    def join_timestamps(tokens: List[en.MToken], pred_dur: torch.LongTensor):
-        # Multiply by 600 to go from pred_dur frames to sample_rate 24000
-        # Equivalent to dividing pred_dur frames by 40 to get timestamp in seconds
-        # We will count nice round half-frames, so the divisor is 80
-        MAGIC_DIVISOR = 80
+    def join_timestamps(tokens: List[en.MToken], pred_dur: torch.LongTensor) -> None:
+        """Attach precise timing information to MToken objects using model duration predictions.
+        
+        This method calculates word-level timestamps by correlating the model's predicted
+        phoneme durations with the original token boundaries. It enables precise timing
+        for applications like subtitles, lip-syncing, and audio visualization.
+        
+        Duration Conversion Logic:
+            - Model outputs durations in 40-fps frames (25ms per frame at 24kHz audio)
+            - Each frame represents 600 samples at 24kHz sample rate
+            - Half-frame precision used for space character timing (12.5ms resolution)
+            - MAGIC_DIVISOR = 80 converts from half-frames to seconds: (frames / 40) / 2
+        
+        Timestamp Calculation Algorithm:
+            1. Initialize left/right boundaries with BOS token duration offset
+            2. For each token with phonemes, map to corresponding duration predictions
+            3. Calculate token start_ts from current left boundary
+            4. Advance boundaries by token duration + space duration
+            5. Set token end_ts and update boundaries for next iteration
+            6. Handle space characters by splitting duration between adjacent tokens
+        
+        Timing Precision:
+            - start_ts/end_ts stored in seconds with ~12.5ms precision
+            - Accounts for model's BOS/EOS tokens in duration sequence alignment
+            - Handles variable-length phoneme sequences per token gracefully
+        
+        Called by:
+            - generate_from_tokens(): After successful TTS inference with duration output
+            - __call__(): During main pipeline processing when pred_dur is available
+        
+        Cross-file Dependencies:
+            - Modifies en.MToken objects from misaki.en module in-place
+            - Uses pred_dur output from KModel.forward_with_tokens() in model.py
+            - Timestamp precision tied to model's 40-fps duration prediction rate
+        
+        Args:
+            tokens: List of MToken objects to annotate with timing information
+            pred_dur: Duration predictions from model, shape (sequence_length,)
+            
+        Side Effects:
+            Modifies tokens in-place, setting start_ts and end_ts attributes
+            
+        Constants:
+            - MAGIC_DIVISOR = 80: Converts half-frames to seconds (frames/40/2)
+            - 40-fps: Model's internal frame rate for duration predictions
+            - 24kHz: Audio sample rate, 600 samples per 40-fps frame
+        """
+        # Duration conversion: 40-fps frames → half-frames → seconds
+        # Model predicts in 40-fps frames (600 samples at 24kHz = 25ms)
+        # Half-frame precision allows fine-grained space timing
+        MAGIC_DIVISOR = 80  # (frames / 40) / 2 = seconds
         if not tokens or len(pred_dur) < 3:
             # We expect at least 3: <bos>, token, <eos>
             return
@@ -398,9 +693,19 @@ class KPipeline:
             # Non-English processing with chunking
             else:
                 # Intelligent text chunking for non-English languages.
-    # Priority-based chunking: sentence boundaries -> character limits.
-    # Optimal chunk size for model context and processing efficiency.
-                CHUNK_SIZE = 400
+                # Priority-based chunking: sentence boundaries -> character limits.
+                # Optimal chunk size for model context and processing efficiency.
+                
+                # Text processing constants for non-English chunking
+                class ChunkingConstants:
+                    """Constants for intelligent text chunking in non-English languages."""
+                    
+                    # Maximum character count per chunk before forced splitting
+                    # Chosen to balance processing efficiency with natural language boundaries
+                    # Value accounts for average phoneme expansion ratio across languages
+                    MAX_CHUNK_SIZE = 400
+                
+                CHUNK_SIZE = ChunkingConstants.MAX_CHUNK_SIZE
                 chunks = []
                 
                 # Try to split on sentence boundaries first

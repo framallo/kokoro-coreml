@@ -116,7 +116,39 @@ class SynthesizerModel(nn.Module):
 # --- Main Export Logic ---
 
 def prepare_pytorch_models(config_path, checkpoint_path):
-    """Ensures PyTorch models are available, converting from safetensors if needed."""
+    """Prepare PyTorch models for Core ML conversion, handling safetensors conversion.
+    
+    This function ensures that PyTorch checkpoint files are available for the export
+    process, automatically converting from safetensors format if necessary. It handles
+    the complete model preparation pipeline including weight organization and file
+    management.
+    
+    Conversion Process:
+        1. Check if PyTorch checkpoint exists at target path
+        2. If missing, locate safetensors source file  
+        3. Load and reorganize weights by module (bert, predictor, etc.)
+        4. Save as PyTorch checkpoint in expected format
+        5. Initialize KModel with prepared weights
+    
+    Called by:
+        - Main export workflow to ensure models are ready for conversion
+        - Development scripts needing consistent model loading
+    
+    Cross-file Dependencies:
+        - Relies on safetensors library for weight loading
+        - Uses KModel from model.py for final model initialization  
+        - Expects specific directory structure for MLX resources
+        
+    Args:
+        config_path: Path to model configuration JSON file
+        checkpoint_path: Target path for PyTorch checkpoint file
+        
+    Returns:
+        Initialized KModel instance ready for Core ML conversion
+        
+    Raises:
+        FileNotFoundError: If neither checkpoint nor safetensors file exists
+    """
     if not os.path.exists(checkpoint_path):
         print("PyTorch checkpoint not found. Attempting to convert from safetensors...")
         mlx_resources = "/Users/mattmireles/Documents/GitHub/kokoro-mlx-swift/kokoro-ios/mlxtest/mlxtest/Resources"
@@ -138,14 +170,62 @@ def prepare_pytorch_models(config_path, checkpoint_path):
     return KModel(config=config_path, model=checkpoint_path, disable_complex=True)
 
 def export_models(kmodel, output_dir):
-    """Exports the two-stage model to Core ML using a bucketing strategy."""
+    """Export two-stage Kokoro TTS model to Core ML using bucketing strategy.
+    
+    This function implements the sophisticated two-stage Core ML export strategy
+    that separates duration prediction from audio synthesis. This approach enables
+    dynamic sequence lengths while maintaining optimal ANE performance through
+    fixed-size synthesis buckets.
+    
+    Two-Stage Architecture:
+        1. Duration Model: Handles variable-length text → predicts phoneme durations
+        2. Synthesizer Models: Fixed-size models for different audio lengths (buckets)
+    
+    Bucketing Strategy:
+        - Multiple synthesizer models for different output lengths (3s, 5s, 10s, 30s)
+        - Client code selects appropriate bucket based on predicted total duration
+        - Enables ANE optimization while supporting arbitrary input lengths
+    
+    Export Process:
+        1. Prepare duration model with dynamic input shapes
+        2. Trace duration model with representative input sizes
+        3. Convert duration model with RangeDim for variable sequences
+        4. For each bucket, create fixed-size synthesizer model
+        5. Generate alignment matrices and trace synthesizer models
+        6. Convert all models to Core ML with ANE optimization
+    
+    Called by:
+        - Main export script for production model generation
+        - Development workflows needing optimized Core ML models
+    
+    Cross-file Dependencies:
+        - Uses DurationModel and SynthesizerModel wrappers from this file
+        - Delegates to Core ML Tools for final conversion
+        - Output consumed by iOS/macOS applications via Core ML
+        
+    Args:
+        kmodel: Prepared KModel instance with loaded weights
+        output_dir: Directory for Core ML package output files
+    """
+    # Model tracing constants
+    class TracingConstants:
+        """Constants for model tracing and Core ML conversion."""
+        
+        # Representative sequence length for model tracing
+        # Chosen to exercise typical sentence lengths while staying within limits
+        # Must be ≤ model.context_length (512) and cover common text processing
+        TRACE_SEQUENCE_LENGTH = 256
+        
+        # Core ML input constraints
+        MAX_SEQUENCE_LENGTH = 512  # Model's maximum context length
+        MIN_SEQUENCE_LENGTH = 1    # Minimum meaningful input
     
     # --- 1. Export the (dynamic) DurationModel ---
     print("\n--- Exporting Duration Model ---")
     duration_model = DurationModel(kmodel).eval()
     duration_file = os.path.join(output_dir, "kokoro_duration.mlpackage")
     
-    trace_length = 256
+    trace_length = TracingConstants.TRACE_SEQUENCE_LENGTH
     input_ids = torch.randint(0, 100, (1, trace_length), dtype=torch.int32)
     ref_s = torch.randn(1, 256, dtype=torch.float32)
     speed = torch.tensor([1.0], dtype=torch.float32)
@@ -175,12 +255,27 @@ def export_models(kmodel, output_dir):
     with torch.no_grad():
         _, d, t_en, s, ref_s_out = duration_model(input_ids, ref_s, speed, attention_mask)
     
-    buckets = {
-        "3s": 3 * 24000,
-        # "5s": 5 * 24000,
-        # "10s": 10 * 24000,
-        # "30s": 30 * 24000
-    }
+    # Audio length buckets for fixed-size synthesizer models
+    class BucketConstants:
+        """Constants defining audio length buckets for synthesizer model export."""
+        
+        # Standard audio sample rate across Kokoro TTS system
+        SAMPLE_RATE_HZ = 24000
+        
+        # Duration bucket definitions (duration → sample count)
+        # Each bucket represents a fixed-size synthesizer optimized for that length
+        # Calculation: duration_seconds × SAMPLE_RATE_HZ = total_samples
+        BUCKET_DURATIONS = {
+            "3s": 3 * SAMPLE_RATE_HZ,    # 72,000 samples - short phrases/sentences
+            # "5s": 5 * SAMPLE_RATE_HZ,    # 120,000 samples - medium paragraphs  
+            # "10s": 10 * SAMPLE_RATE_HZ,  # 240,000 samples - long paragraphs
+            # "30s": 30 * SAMPLE_RATE_HZ   # 720,000 samples - full document sections
+        }
+        
+        # Note: Additional buckets commented out to reduce model size during development
+        # Uncomment based on deployment requirements and storage constraints
+
+    buckets = BucketConstants.BUCKET_DURATIONS
 
     synthesizer_model_base = SynthesizerModel(kmodel).eval()
 
