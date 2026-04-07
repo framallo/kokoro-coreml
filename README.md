@@ -111,7 +111,7 @@ Symptoms and fixes:
 - Synthesizer buckets from `export_synth/convert.py` (under `coreml/` by default):
   - **`mode=full` (default):** `kokoro_synthesizer_<bucket>.mlpackage` (e.g. `kokoro_synthesizer_3s.mlpackage`, `kokoro_synthesizer_5s.mlpackage`)
   - **`mode=decoder`:** `kokoro_decoder_only_<bucket>.mlpackage` (e.g. `kokoro_decoder_only_3s.mlpackage`)
-- Runtime also loads `coreml/KokoroDecoder_HAR_*s.mlpackage` buckets and `KokoroVocoder.mlpackage` / `KokoroDecoder_HAR.mlpackage` when present (see `kokoro/coreml_pipeline.py`).
+- Optional runtime models (not produced by `export_synth/convert.py`; legacy or hand-built): `KokoroVocoder.mlpackage`, `KokoroDecoder_HAR.mlpackage`, and bucket packages matching `KokoroDecoder_HAR_*s.mlpackage` if you add them under `coreml/` (see `kokoro/coreml_pipeline.py`).
 - `dev_tokenize.py` – Python tokenizer bridge (now prints pure JSON ids)
 - `README/learnings.md` – running log of issues and mitigations (E5RT, BNNS, shapes)
 
@@ -168,13 +168,13 @@ python export_synthesizers.py --buckets="3s,10s,45s" --output_dir coreml
 ### Verification
 
 ```bash
-# Quick test of exported models
+# Quick test of exported models (canonical names from export_synth/convert.py)
 python -c "
 import coremltools as ct
 duration_model = ct.models.MLModel('coreml/kokoro_duration.mlpackage')
-decoder_model = ct.models.MLModel('coreml/KokoroDecoder_HAR_3s.mlpackage')
+synth_model = ct.models.MLModel('coreml/kokoro_synthesizer_3s.mlpackage')
 print(f'✅ Duration model: {duration_model}')
-print(f'✅ Decoder model: {decoder_model}')
+print(f'✅ Synthesizer model: {synth_model}')
 print('Models loaded successfully!')
 "
 ```

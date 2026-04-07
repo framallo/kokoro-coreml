@@ -13,7 +13,7 @@ def main() -> None:
     parser.add_argument(
         "--buckets",
         type=str,
-        default=f"{CoreMLExportConstants.BUCKET_3S}s",
+        default=f"{CoreMLExportConstants.DEFAULT_BUCKETS[0]}s",
         help="Comma-separated list of bucket sizes in seconds (e.g., '3s,5s,10s').",
     )
     parser.add_argument("--debug", action="store_true", help="Use smaller trace_length for debugging to avoid memory issues.")

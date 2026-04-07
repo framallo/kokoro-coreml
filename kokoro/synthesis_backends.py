@@ -22,7 +22,7 @@ import torch
 if TYPE_CHECKING:
     from kokoro.coreml_pipeline import HybridTTSPipeline
 
-# 5 s @ 24 kHz per vocoder window chunk (matches export bucket seconds; see export_synth.wrappers.CoreMLExportConstants.BUCKET_5S)
+# 5 s @ 24 kHz per vocoder window chunk (matches 5s export bucket duration; see export_synth.wrappers.CoreMLExportConstants)
 VOCODER_CHUNK_SAMPLES = 5 * 24000
 
 TextBackend = Callable[[Any, str, str, float], np.ndarray | None]

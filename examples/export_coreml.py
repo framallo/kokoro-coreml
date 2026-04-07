@@ -36,6 +36,13 @@ Integration:
     Used by TalkToMe's CoreMLTTSService.swift for production TTS synthesis.
     Models bundled in macOS app for offline operation.
 
+Relationship to ``export_synth/convert.py``:
+    Canonical multi-bucket export is ``export_synth.convert.export_synthesizers`` (CLI: ``export_synth``
+    / ``export_synthesizers.py``). This file duplicates Duration/Synthesizer wrappers and tracing
+    for the historical ``examples/`` entrypoint and TalkToMe bring-up; keep behavior aligned with
+    ``convert.py`` (frame_count vs ``trace_length * FRAMES_PER_TOKEN``, F0/N length via
+    ``kokoro.conv_length``). Prefer calling ``export_synthesizers`` for new automation.
+
 Tested Configurations:
     - macOS 13+ with Apple Silicon (M1/M2/M3)
     - iOS 16+ for optimal CoreML support
@@ -579,18 +586,27 @@ def export_models(kmodel, output_dir, duration_only=False, trace_length: int = 1
         ref_s_out = ref_s.unsqueeze(0) if ref_s.dim() == 1 else ref_s
         ref_s_out = ref_s_out + torch.zeros_like(ref_s_out)  # Non-aliased copy
     
-    # Single source of truth: export_synth.wrappers.CoreMLExportConstants
-    buckets = CoreMLExportConstants.bucket_dict_from_seconds(
-        [CoreMLExportConstants.BUCKET_5S]
-    )
+    # Single source of truth: export_synth.wrappers.CoreMLExportConstants (match export_synth/convert.py)
+    buckets = CoreMLExportConstants.bucket_dict_from_seconds([5])
+    frames_per_token = CoreMLExportConstants.FRAMES_PER_TOKEN
+    full_f0_len = trace_length * frames_per_token
+    # Full synthesizer mode: alignment width must match neural frame count, not raw audio samples.
+    effective_t = full_f0_len
 
     synthesizer_model_base = SynthesizerModel(kmodel).eval()
 
     for name, frame_count in buckets.items():
-        print(f"Exporting synthesizer for bucket: {name} ({frame_count} frames)")
+        fc = frame_count
+        if effective_t != fc:
+            print(
+                f"Adjusting frame_count from {fc} to {effective_t} to match "
+                f"trace_length * FRAMES_PER_TOKEN (same as export_synth.convert full mode)"
+            )
+            fc = effective_t
+        print(f"Exporting synthesizer for bucket: {name} ({fc} frames)")
         synthesizer_file = os.path.join(output_dir, f"kokoro_synthesizer_{name}.mlpackage")
 
-        pred_aln_trg = torch.zeros((trace_length, frame_count), dtype=torch.float32)
+        pred_aln_trg = torch.zeros((trace_length, fc), dtype=torch.float32)
 
         with torch.no_grad():
             traced_synthesizer_model = torch.jit.trace(synthesizer_model_base, (d, t_en, s, ref_s_out, pred_aln_trg))
@@ -599,7 +615,7 @@ def export_models(kmodel, output_dir, duration_only=False, trace_length: int = 1
         t_en_shape = (1, kmodel.bert.config.hidden_size, trace_length)
         s_shape = (1, 128)
         ref_s_shape = (1, 256)
-        pred_aln_trg_shape = (trace_length, frame_count)
+        pred_aln_trg_shape = (trace_length, fc)
         
         with capture_ane_logs() as synth_convert_buf:
             ml_synthesizer_model = ct.convert(

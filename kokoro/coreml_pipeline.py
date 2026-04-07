@@ -104,6 +104,7 @@ class HybridTTSPipeline:
         # Initialize CoreML models if available
         if COREML_AVAILABLE and (force_engine is None or force_engine == "coreml"):
             print("🍎 Loading CoreML models...")
+            # Optional single-file models: omitting files is OK; pipeline falls back to buckets / PyTorch.
             if os.path.exists(COREML_MODEL_PATH):
                 self.coreml_vocoder = ct.models.MLModel(COREML_MODEL_PATH)
                 print("✅ CoreML vocoder loaded successfully")

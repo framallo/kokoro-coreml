@@ -8,23 +8,13 @@ from __future__ import annotations
 import torch
 import torch.nn as nn
 
+from kokoro.conv_length import conv1d_min_input_length_for_output_length
+
 class CoreMLExportConstants:
-    """Constants for CoreML export pipeline configuration and bucket management.
-    
-    These constants define the export pipeline configuration including bucket
-    durations, model dimensions, and performance parameters for consistent
-    CoreML model generation across different deployment targets.
-    """
-    
-    # Bucket duration specifications (in seconds)
-    BUCKET_3S = 3      # Immediate response synthesis (TTFB optimization)  
-    BUCKET_5S = 5      # Short phrases and commands
-    BUCKET_10S = 10    # Balanced performance for medium content
-    BUCKET_30S = 30    # Paragraph-level synthesis
-    BUCKET_45S = 45    # Long-form content processing
-    
-    # Default bucket set for production deployment
-    DEFAULT_BUCKETS = [BUCKET_3S, BUCKET_10S, BUCKET_45S]
+    """Constants for CoreML export pipeline configuration and bucket management."""
+
+    # Default bucket set for production deployment (seconds)
+    DEFAULT_BUCKETS = [3, 10, 45]
     
     # Audio format constants (matching AudioConstants from pipeline)
     SAMPLE_RATE = 24000  # Hz - Audio output sample rate
@@ -175,10 +165,11 @@ class SynthesizerModel(nn.Module):
         # Bypass shared LSTM and F0/N stacks to avoid BNNS LSTM kernels on device
         # Directly use aligned features and provide neutral F0/N predictions
         B, F, H = en.shape
-        # Neutral (zero) F0/N predictions. Decoder's F0/N path uses stride-2 conv,
-        # so provide length 2*F to ensure time dims match ASR after downsampling.
-        F0_pred = en.new_zeros((B, F * 2))
-        N_pred = en.new_zeros((B, F * 2))
+        # Neutral F0/N curves: length must satisfy F0_conv/N_conv output time == F (ASR time).
+        # Do not use 2*F; use the same conv-length contract as export_synth/convert.py (see conv_length).
+        f0_n_len = conv1d_min_input_length_for_output_length(F, k.decoder.F0_conv)
+        F0_pred = en.new_zeros((B, f0_n_len))
+        N_pred = en.new_zeros((B, f0_n_len))
 
         # Ensure ASR channels match decoder expectation (hidden_dim) to avoid conv input mismatch
         # Decoder.encode first conv expects asr channels equal to its input minus F0/N channels
