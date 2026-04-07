@@ -2,6 +2,16 @@
 """
 Kokoro Vocoder Extraction and CoreML Conversion Script
 
+**Location:** Legacy exporter; see ``archive/README.md`` in this directory.
+Not part of the README canonical flow: production uses decoder-only bucket exports
+(``export_synthesizers.py`` / ``export_synth/``) plus ``export_duration.py``.
+This script targets legacy ``coreml/KokoroVocoder.mlpackage`` (full ``VocoderWrapper`` path).
+Decoder_HAR bucket exports in this file remain useful for hn-nsf parity experiments.
+
+Run from repo root: ``python archive/export_vocoder.py --help``
+
+---
+
 This script extracts the iSTFTNet vocoder (Decoder) from the full Kokoro model
 and converts it to a CoreML package optimized for Apple Neural Engine (ANE).
 
@@ -23,6 +33,12 @@ import torch
 import coremltools as ct
 import numpy as np
 from kokoro import KModel
+from kokoro.conv_length import conv1d_output_length_from_module
+from kokoro.coreml_export_verify import (
+    assert_no_cpu_fallback_in_logs,
+    capture_ane_logs,
+    smoke_predict_assert_no_cpu_fallback,
+)
 
 # ANE-optimized conversion settings
 COMPUTE_PRECISION = ct.precision.FLOAT16  # ANE native precision
@@ -34,8 +50,9 @@ class ExportConstants:
     """Constants for vocoder export and CoreML conversion."""
     
     # Sample input dimensions (typical 2-3 second phrase)
-    SEQUENCE_LENGTH_INPUT = 400      # Original F0 curve length
-    SEQUENCE_LENGTH_ASR = 200        # ASR features after F0/N convolution (half of input)
+    SEQUENCE_LENGTH_INPUT = 400      # Original F0 curve length (before decoder F0_conv)
+    # ASR time length = conv1d_output_length_from_module(SEQUENCE_LENGTH_INPUT, F0_conv); often 200 for k=3,s=2,p=1
+    SEQUENCE_LENGTH_ASR = 200
     
     # Audio parameters
     SAMPLE_RATE = 24000              # Kokoro model sample rate in Hz
@@ -54,6 +71,33 @@ class ExportConstants:
     # CoreML optimization
     FALLBACK_TARGET = ct.target.macOS12  # Fallback deployment target for compatibility
     FALLBACK_PRECISION = ct.precision.FLOAT32  # Fallback precision for CPU-only
+
+
+def _log_torch_trace_diagnostics(
+    module: torch.nn.Module,
+    trace_inputs: tuple,
+    exc: BaseException,
+    *,
+    label: str = "module",
+) -> None:
+    """Print training/device/shape context when ``torch.jit.trace(..., strict=True)`` fails.
+
+    Called by:
+        ``extract_and_convert_vocoder``, ``export_decoder_with_har_input``, and
+        ``export_decoder_har_bucket`` before re-raising the trace exception.
+    """
+    print(f"\n--- {label} trace diagnostics (strict=True failed) ---")
+    print(f"  Exception: {type(exc).__name__}: {exc}")
+    print(f"  module.training: {getattr(module, 'training', '?')}")
+    p = next(module.parameters(), None)
+    if p is not None:
+        print(f"  first param device: {p.device}, dtype: {p.dtype}")
+    for i, t in enumerate(trace_inputs):
+        print(
+            f"  trace_input[{i}]: shape={tuple(t.shape)}, dtype={t.dtype}, device={t.device}"
+        )
+    print(f"--- end {label} diagnostics ---\n")
+
 
 class VocoderWrapper(torch.nn.Module):
     """
@@ -321,39 +365,44 @@ def inspect_model_structure(model):
         
     return decoder
 
-def create_sample_inputs():
+def create_sample_inputs(decoder):
     """Create realistic sample inputs that match the decoder's expected format.
-    
+
     These inputs are based on the actual data flow from the full model:
     - asr: Aligned acoustic features from text encoder
-    - f0_curve: F0/pitch predictions from prosody predictor  
+    - f0_curve: F0/pitch predictions from prosody predictor
     - noise: Noise parameters for vocoder
     - style: Voice style embedding (first 128 dims of ref_s)
-    
+
+    Args:
+        decoder: Kokoro ``Decoder`` module; ASR length is derived from ``decoder.F0_conv``.
+
     Returns:
         dict: Sample inputs for tracing with proper tensor shapes
-        
+
     Called by:
         extract_and_convert_vocoder(): To create dummy inputs for torch.jit.trace
         export_decoder_with_har_input(): For HAR variant tracing
-        
+
     Shape Rationale:
-        - F0 and N use full temporal resolution
-        - ASR features are downsampled 2x due to decoder stride-2 convolutions
+        - F0 and N use full temporal resolution (``SEQUENCE_LENGTH_INPUT``)
+        - ASR time length matches ``F0_conv`` output for that F0 length (not ``L//2``)
         - 4D tensor layout (B,C,1,S) optimizes ANE memory access patterns
     """
+    f0_len = ExportConstants.SEQUENCE_LENGTH_INPUT
+    asr_len = conv1d_output_length_from_module(f0_len, decoder.F0_conv)
     # Sample inputs matching decoder expectations
     sample_inputs = {
-        "asr": torch.randn(1, ExportConstants.ASR_FEATURE_DIM, 1, ExportConstants.SEQUENCE_LENGTH_ASR),
-        "f0_curve": torch.randn(1, 1, 1, ExportConstants.SEQUENCE_LENGTH_INPUT),
-        "n": torch.randn(1, 1, 1, ExportConstants.SEQUENCE_LENGTH_INPUT),
+        "asr": torch.randn(1, ExportConstants.ASR_FEATURE_DIM, 1, asr_len),
+        "f0_curve": torch.randn(1, 1, 1, f0_len),
+        "n": torch.randn(1, 1, 1, f0_len),
         "s": torch.randn(1, ExportConstants.STYLE_EMBEDDING_DIM)
     }
-    
+
     print("\n📝 Sample Input Shapes:")
     for name, tensor in sample_inputs.items():
         print(f"  - {name}: {tensor.shape}")
-        
+
     return sample_inputs
 
 def extract_and_convert_vocoder(model):
@@ -377,7 +426,7 @@ def extract_and_convert_vocoder(model):
     Process Flow:
         1. Extract decoder from KModel.decoder
         2. Wrap in VocoderWrapper for CoreML-compatible I/O
-        3. Generate representative sample inputs via create_sample_inputs()
+        3. Generate representative sample inputs via create_sample_inputs(decoder)
         4. Trace with torch.jit.trace for graph capture
         5. Convert to CoreML mlprogram with FP16 precision
         6. Apply ANE optimizations and fallback handling
@@ -390,7 +439,8 @@ def extract_and_convert_vocoder(model):
     """
     print("\n🔧 Extracting decoder module...")
     decoder = model.decoder
-    
+    decoder.eval()
+
     # Force full decoder conversion for correct tensor alignment
     print("🔄 Forcing full decoder conversion (generator-only path mismatched shapes)...")
     wrapper = VocoderWrapper(decoder)
@@ -403,7 +453,7 @@ def extract_and_convert_vocoder(model):
     print("🎯 Using exact hn-nsf source from PyTorch model (no replacement)")
     
     # Create sample inputs for tracing
-    sample_inputs = create_sample_inputs()
+    sample_inputs = create_sample_inputs(decoder)
     
     # Convert to tuple for tracing (matches forward signature)
     if conversion_mode == "full_decoder":
@@ -416,27 +466,23 @@ def extract_and_convert_vocoder(model):
     else:  # generator_only (unused in forced mode)
         raise RuntimeError("generator_only mode disabled due to shape mismatches")
     
-    print("\n⚡ Tracing model with torch.jit.trace...")
-    try:
-        # Use torch.jit.trace with warnings suppressed
-        import warnings
-        with warnings.catch_warnings():
-            warnings.simplefilter("ignore")  # Suppress tracing warnings
-            # Disable problematic source noise path by freezing uv/noise to zeros during trace
-            # to avoid unsupported multiply op in converter.
-            traced_vocoder = torch.jit.trace(wrapper, trace_inputs, strict=False)
-        print("✅ Model traced successfully")
-    except Exception as e:
-        print(f"❌ Tracing failed: {e}")
-        print("This may indicate incompatible operations for CoreML conversion")
-        raise
+    print("\n⚡ Tracing model with torch.jit.trace (strict=True)...")
+    import warnings
+
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore")  # noisy tracer warnings only
+        try:
+            traced_vocoder = torch.jit.trace(wrapper, trace_inputs, strict=True)
+        except Exception as e:
+            _log_torch_trace_diagnostics(wrapper, trace_inputs, e, label="VocoderWrapper")
+            raise
+    print("✅ Model traced successfully")
     
     print("\n🍎 Converting to CoreML...")
     
-    # Define CoreML input specifications with proper types and shapes
-    # Ensure generator input alignment: f0 length must be 2x asr temporal dim due to upsampling in Generator
-    sequence_length_asr = ExportConstants.SEQUENCE_LENGTH_ASR
-    sequence_length_input = ExportConstants.SEQUENCE_LENGTH_INPUT
+    # Define CoreML input specifications with proper types and shapes (match trace tensors / F0_conv)
+    sequence_length_asr = int(sample_inputs["asr"].shape[-1])
+    sequence_length_input = int(sample_inputs["f0_curve"].shape[-1])
     
     if conversion_mode == "full_decoder":
         inputs = [
@@ -452,29 +498,36 @@ def extract_and_convert_vocoder(model):
             ct.TensorType(name="f0_curve", shape=(1, 1, 1, sequence_length_input), dtype=np.float16)
         ]
     
-    # Convert with ANE optimization settings
-    try:
-        coreml_model = ct.convert(
-            traced_vocoder,
-            inputs=inputs,
-            convert_to="mlprogram",
-            compute_precision=COMPUTE_PRECISION,
-            minimum_deployment_target=MINIMUM_DEPLOYMENT_TARGET,
-            compute_units=COMPUTE_UNITS
+    # Convert with ANE optimization settings (capture logs for CPU-fallback heuristics)
+    used_cpu_only_convert = False
+    with capture_ane_logs() as convert_buf:
+        try:
+            coreml_model = ct.convert(
+                traced_vocoder,
+                inputs=inputs,
+                convert_to="mlprogram",
+                compute_precision=COMPUTE_PRECISION,
+                minimum_deployment_target=MINIMUM_DEPLOYMENT_TARGET,
+                compute_units=COMPUTE_UNITS,
+            )
+            print("✅ CoreML conversion successful with ANE optimization")
+        except Exception as e:
+            print(f"⚠️ ANE conversion failed: {e}")
+            print("🔄 Trying fallback conversion with CPU-only...")
+            used_cpu_only_convert = True
+            coreml_model = ct.convert(
+                traced_vocoder,
+                inputs=inputs,
+                convert_to="mlprogram",
+                compute_precision=ExportConstants.FALLBACK_PRECISION,
+                minimum_deployment_target=ExportConstants.FALLBACK_TARGET,
+                compute_units=ct.ComputeUnit.CPU_ONLY,
+            )
+            print("✅ CoreML conversion successful with CPU fallback")
+    if not used_cpu_only_convert:
+        assert_no_cpu_fallback_in_logs(
+            convert_buf.getvalue(), phase="vocoder ct.convert (ALL)"
         )
-        print("✅ CoreML conversion successful with ANE optimization")
-    except Exception as e:
-        print(f"⚠️ ANE conversion failed: {e}")
-        print("🔄 Trying fallback conversion with CPU-only...")
-        coreml_model = ct.convert(
-            traced_vocoder,
-            inputs=inputs,
-            convert_to="mlprogram",
-            compute_precision=ExportConstants.FALLBACK_PRECISION,
-            minimum_deployment_target=ExportConstants.FALLBACK_TARGET,
-            compute_units=ct.ComputeUnit.CPU_ONLY
-        )
-        print("✅ CoreML conversion successful with CPU fallback")
     
     # Add model metadata
     coreml_model.author = "Kokoro TTS - Vocoder Module"
@@ -503,21 +556,35 @@ def extract_and_convert_vocoder(model):
     
     # Verify the conversion
     print("\n🧪 Verifying CoreML model...")
-    # Simple load check
     try:
-        _ = ct.models.MLModel(output_path)
+        loaded = ct.models.MLModel(output_path, compute_units=COMPUTE_UNITS)
         print("✅ CoreML model load verification successful")
+        if not used_cpu_only_convert:
+            np_sample = {
+                "asr": sample_inputs["asr"].detach().cpu().numpy().astype(np.float32),
+                "f0_curve": sample_inputs["f0_curve"].detach().cpu().numpy().astype(
+                    np.float32
+                ),
+                "n": sample_inputs["n"].detach().cpu().numpy().astype(np.float32),
+                "s": sample_inputs["s"].detach().cpu().numpy().astype(np.float32),
+            }
+            smoke_predict_assert_no_cpu_fallback(
+                ct, loaded, np_sample, phase="vocoder predict"
+            )
+            print("✅ predict() smoke + ANE log check complete")
     except Exception as e:
-        print(f"⚠️  Load verification failed: {e}")
+        print(f"⚠️  Load or smoke verification failed: {e}")
         print("Model was saved but may have issues")
+        raise
     
     return output_path
 
 def export_decoder_with_har_input(model):
     print("\n🚀 Exporting Decoder variant that accepts hn-nsf source as input (exact parity)")
     decoder = model.decoder
+    decoder.eval()
     wrapper = DecoderNoSourceWrapper(decoder).eval()
-    sample_inputs = create_sample_inputs()
+    sample_inputs = create_sample_inputs(decoder)
     # Create dummy har from PyTorch path to trace shapes
     with torch.no_grad():
         gen = decoder.generator
@@ -535,19 +602,25 @@ def export_decoder_with_har_input(model):
         har_spec.unsqueeze(2),  # add 4th dim back: (B, C, 1, T)
         har_phase.unsqueeze(2),
     )
-    print("⚡ Tracing DecoderNoSourceWrapper...")
+    print("⚡ Tracing DecoderNoSourceWrapper (strict=True)...")
     with torch.no_grad():
-        traced = torch.jit.trace(wrapper, trace_inputs, strict=False)
-    import coremltools as ct
-    import numpy as np
+        try:
+            traced = torch.jit.trace(wrapper, trace_inputs, strict=True)
+        except Exception as e:
+            _log_torch_trace_diagnostics(
+                wrapper, trace_inputs, e, label="DecoderNoSourceWrapper"
+            )
+            raise
     n_fft = decoder.generator.post_n_fft
-    asr_shape = (1, 512, 1, 200)
-    f0_shape = (1, 1, 1, 400)
-    n_shape = (1, 1, 1, 400)
+    asr_len = int(sample_inputs["asr"].shape[-1])
+    f0_len = int(sample_inputs["f0_curve"].shape[-1])
+    asr_shape = (1, 512, 1, asr_len)
+    f0_shape = (1, 1, 1, f0_len)
+    n_shape = (1, 1, 1, f0_len)
     s_shape = (1, 128)
     har_c = (n_fft // 2 + 1)
-    # Match exact PyTorch hn-nsf STFT time length for f0_win=400
-    har_t = 24001
+    # Match exact PyTorch hn-nsf STFT time length for this f0_len (trace-derived har_t)
+    har_t = int(har_spec.shape[-1])
     inputs = [
         ct.TensorType(name="asr", shape=asr_shape, dtype=np.float32),
         ct.TensorType(name="f0_curve", shape=f0_shape, dtype=np.float32),
@@ -557,13 +630,17 @@ def export_decoder_with_har_input(model):
         ct.TensorType(name="har_phase", shape=(1, har_c, 1, har_t), dtype=np.float32),
     ]
     print("🍎 Converting DecoderNoSourceWrapper to CoreML (mlprogram, FP16)...")
-    ml = ct.convert(
-        traced,
-        inputs=inputs,
-        convert_to="mlprogram",
-        minimum_deployment_target=ct.target.macOS13,
-        compute_precision=ct.precision.FLOAT16,
-        compute_units=ct.ComputeUnit.ALL,
+    with capture_ane_logs() as convert_buf:
+        ml = ct.convert(
+            traced,
+            inputs=inputs,
+            convert_to="mlprogram",
+            minimum_deployment_target=ct.target.macOS13,
+            compute_precision=ct.precision.FLOAT16,
+            compute_units=ct.ComputeUnit.ALL,
+        )
+    assert_no_cpu_fallback_in_logs(
+        convert_buf.getvalue(), phase="DecoderNoSourceWrapper ct.convert"
     )
     # Output is raw x (spec+phase pre-nonlinearity); we keep it as generic output name
     out_path = "coreml/KokoroDecoder_HAR.mlpackage"
@@ -571,6 +648,18 @@ def export_decoder_with_har_input(model):
     os.makedirs("coreml", exist_ok=True)
     ml.save(out_path)
     print(f"✅ Saved Decoder_HAR CoreML model to: {out_path}")
+    loaded_har = ct.models.MLModel(out_path, compute_units=COMPUTE_UNITS)
+    smoke_har = {
+        "asr": np.zeros(asr_shape, dtype=np.float32),
+        "f0_curve": np.zeros(f0_shape, dtype=np.float32),
+        "n": np.zeros(n_shape, dtype=np.float32),
+        "s": np.zeros(s_shape, dtype=np.float32),
+        "har_spec": np.zeros((1, har_c, 1, har_t), dtype=np.float32),
+        "har_phase": np.zeros((1, har_c, 1, har_t), dtype=np.float32),
+    }
+    smoke_predict_assert_no_cpu_fallback(
+        ct, loaded_har, smoke_har, phase="Decoder_HAR window predict"
+    )
     return out_path
 
 def _compute_har_shapes_for_f0_len(decoder, f0_len: int):
@@ -595,13 +684,13 @@ def export_decoder_har_bucket(decoder, seconds: int, output_dir: str = "coreml")
     - seconds: bucket duration in seconds (e.g., 5, 15, 30)
     """
     print(f"\n🚀 Exporting Decoder_HAR bucket: {seconds}s")
+    decoder.eval()
     wrapper = DecoderNoSourceWrapper(decoder).eval()
 
-    # Determine target temporal sizes
-    # Empirical mapping from earlier 5s window: f0_len=400 → asr_len=200
+    # Determine target temporal sizes (ASR length follows decoder.F0_conv, not f0_len//2)
     f0_per_sec = 80  # 24kHz / 300 samples per f0 frame ≈ 80 Hz
     f0_len = int(seconds * f0_per_sec)
-    asr_len = f0_len // 2
+    asr_len = conv1d_output_length_from_module(f0_len, decoder.F0_conv)
 
     # Build realistic dummy inputs and compute exact har shapes
     sample_inputs = {
@@ -621,25 +710,35 @@ def export_decoder_har_bucket(decoder, seconds: int, output_dir: str = "coreml")
         torch.zeros(1, har_c, 1, har_t, dtype=torch.float32),
     )
 
-    print("⚡ Tracing DecoderNoSourceWrapper for bucket...")
+    print("⚡ Tracing DecoderNoSourceWrapper for bucket (strict=True)...")
     with torch.no_grad():
-        traced = torch.jit.trace(wrapper, trace_inputs, strict=False)
+        try:
+            traced = torch.jit.trace(wrapper, trace_inputs, strict=True)
+        except Exception as e:
+            _log_torch_trace_diagnostics(
+                wrapper, trace_inputs, e, label="DecoderNoSourceWrapper(bucket)"
+            )
+            raise
 
     print("🍎 Converting to CoreML (mlprogram, FP16)...")
-    ml = ct.convert(
-        traced,
-        inputs=[
-            ct.TensorType(name="asr", shape=(1, 512, 1, asr_len), dtype=np.float32),
-            ct.TensorType(name="f0_curve", shape=(1, 1, 1, f0_len), dtype=np.float32),
-            ct.TensorType(name="n", shape=(1, 1, 1, f0_len), dtype=np.float32),
-            ct.TensorType(name="s", shape=(1, 128), dtype=np.float32),
-            ct.TensorType(name="har_spec", shape=(1, har_c, 1, har_t), dtype=np.float32),
-            ct.TensorType(name="har_phase", shape=(1, har_c, 1, har_t), dtype=np.float32),
-        ],
-        convert_to="mlprogram",
-        minimum_deployment_target=ct.target.macOS13,
-        compute_precision=ct.precision.FLOAT16,
-        compute_units=ct.ComputeUnit.ALL,
+    with capture_ane_logs() as convert_buf:
+        ml = ct.convert(
+            traced,
+            inputs=[
+                ct.TensorType(name="asr", shape=(1, 512, 1, asr_len), dtype=np.float32),
+                ct.TensorType(name="f0_curve", shape=(1, 1, 1, f0_len), dtype=np.float32),
+                ct.TensorType(name="n", shape=(1, 1, 1, f0_len), dtype=np.float32),
+                ct.TensorType(name="s", shape=(1, 128), dtype=np.float32),
+                ct.TensorType(name="har_spec", shape=(1, har_c, 1, har_t), dtype=np.float32),
+                ct.TensorType(name="har_phase", shape=(1, har_c, 1, har_t), dtype=np.float32),
+            ],
+            convert_to="mlprogram",
+            minimum_deployment_target=ct.target.macOS13,
+            compute_precision=ct.precision.FLOAT16,
+            compute_units=ct.ComputeUnit.ALL,
+        )
+    assert_no_cpu_fallback_in_logs(
+        convert_buf.getvalue(), phase=f"Decoder_HAR {seconds}s ct.convert"
     )
 
     import os
@@ -647,6 +746,18 @@ def export_decoder_har_bucket(decoder, seconds: int, output_dir: str = "coreml")
     out_path = os.path.join(output_dir, f"KokoroDecoder_HAR_{seconds}s.mlpackage")
     ml.save(out_path)
     print(f"✅ Saved Decoder_HAR bucket to: {out_path}")
+    loaded_b = ct.models.MLModel(out_path, compute_units=COMPUTE_UNITS)
+    smoke_b = {
+        "asr": np.zeros((1, 512, 1, asr_len), dtype=np.float32),
+        "f0_curve": np.zeros((1, 1, 1, f0_len), dtype=np.float32),
+        "n": np.zeros((1, 1, 1, f0_len), dtype=np.float32),
+        "s": np.zeros((1, 128), dtype=np.float32),
+        "har_spec": np.zeros((1, har_c, 1, har_t), dtype=np.float32),
+        "har_phase": np.zeros((1, har_c, 1, har_t), dtype=np.float32),
+    }
+    smoke_predict_assert_no_cpu_fallback(
+        ct, loaded_b, smoke_b, phase=f"Decoder_HAR {seconds}s predict"
+    )
     return out_path
 
 

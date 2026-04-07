@@ -39,7 +39,7 @@ We will use CoreML's [Composite Operator](https://coremltools.readme.io/docs/com
 ### Phase 3: Integration and Verification
 **Goal:** Export a new vocoder model and verify its quality and performance.
 
-1.  **Modify `export_vocoder.py`:**
+1.  **Modify `archive/export_vocoder.py`** (legacy full vocoder export; canonical flow uses `export_synth` / decoder-only buckets):
     -   Import the new `TalkToMeSource` module.
     -   Ensure the `@register_torch_op` decorator is correctly pointing to the original `SourceModuleHnSinc` class.
     -   Remove the old `DummySource` monkey-patching logic.
