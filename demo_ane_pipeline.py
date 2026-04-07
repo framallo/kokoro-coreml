@@ -4,7 +4,7 @@ Hybrid ANE-Accelerated TTS pipeline demo (CLI).
 
 Renamed from ``test_ane_pipeline.py`` so repo tooling does not treat it as a
 pytest module. Production orchestration lives in ``kokoro.coreml_pipeline.HybridTTSPipeline``.
-``run_single.py`` imports only that package—not this file.
+``examples/example_synthesis.py`` / ``run_single.py`` import only that package—not this file.
 """
 
 import argparse

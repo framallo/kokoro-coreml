@@ -29,7 +29,7 @@
 # - Imports from: model.py (KModel for neural synthesis)
 # - Imports from: misaki package (G2P processors for different languages)
 # - Used by: demo/app.py (Gradio interface), examples/* (demo scripts)
-# - Used by: run_single.py (command-line TTS), test scripts
+# - Used by: examples/example_synthesis.py (command-line TTS), test scripts
 # - Calls: huggingface_hub (voice loading), torch (tensor operations)
 #
 # Voice Architecture:
@@ -291,7 +291,7 @@ class KPipeline:
     - Voice Loading: HF Hub retry logic with informative error messages
 
     Cross-File Integration:
-    - Called by: demo/app.py (Gradio interface), run_single.py (CLI)
+    - Called by: demo/app.py (Gradio interface), examples/example_synthesis.py (CLI)
     - Calls: model.py (KModel synthesis), misaki.* (G2P processing)
     - Voice Loading: huggingface_hub.hf_hub_download for .pt files
     - Device Management: torch.cuda/mps availability detection
@@ -387,7 +387,7 @@ class KPipeline:
 
         Called by:
             - demo/app.py: Gradio interface initialization
-            - run_single.py: Command-line TTS setup
+            - examples/example_synthesis.py: Command-line TTS setup
             - examples/*.py: Demo script pipeline creation
             - test scripts: Pipeline testing and validation
 
@@ -890,7 +890,7 @@ class KPipeline:
         Cross-File Integration:
             Called by:
             - demo/app.py: Gradio interface text processing
-            - run_single.py: Command-line TTS execution  
+            - examples/example_synthesis.py: Command-line TTS execution  
             - examples/*.py: Demo applications
             - User applications: Direct API usage
             

@@ -62,8 +62,7 @@ class ExportConstants:
     # Model dimensions
     ASR_FEATURE_DIM = 512            # Acoustic feature dimension
     STYLE_EMBEDDING_DIM = 128        # Voice style embedding size
-    MEL_CHANNELS = 80                # Mel-spectrogram channels (unused but standard)
-    
+
     # Conversion targets
     MIN_LENGTH = 64                  # Minimum sequence length for variable input
     MAX_LENGTH = 1024                # Maximum sequence length for variable input
@@ -100,42 +99,13 @@ def _log_torch_trace_diagnostics(
 
 
 class VocoderWrapper(torch.nn.Module):
-    """
-    CoreML-compatible wrapper around the Kokoro decoder (vocoder).
-    
-    The original decoder expects multiple input tensors with specific shapes.
-    This wrapper provides a clean interface that matches CoreML conversion
-    requirements and handles proper tensor formatting.
-    
-    Key Considerations:
-    - ANE memory layout: Last dimension should be largest for efficiency
-    - Fixed input shapes for better ANE optimization
-    - Proper handling of F0 curve and noise parameters
-    """
-    
+    """Decoder with 4D CoreML-shaped inputs; squeezes to (B,512,T), (B,T), (B,T), (B,128)."""
+
     def __init__(self, decoder):
-        """
-        Initialize vocoder wrapper.
-        
-        Args:
-            decoder: The extracted decoder module from KModel
-        """
         super().__init__()
         self.decoder = decoder
-        
+
     def forward(self, asr_4d, f0_curve_4d, n_4d, s):
-        """
-        Forward pass through the vocoder.
-        
-        Args:
-            asr_4d: Aligned acoustic features, shape (1, 512, 1, T)
-            f0_curve_4d: F0/pitch curve, shape (1, 1, 1, T) 
-            n_4d: Noise parameters, shape (1, 1, 1, T)
-            s: Voice style embedding, shape (1, 128)
-            
-        Returns:
-            audio: Generated waveform, shape (1, 1, audio_length)
-        """
         # Squeeze 4D (B,C,1,S)/(B,1,1,S) to decoder's expected shapes
         asr = asr_4d.squeeze(2)               # (1, 512, T)
         f0_curve = f0_curve_4d.squeeze(2).squeeze(1)  # (1, T)
@@ -149,41 +119,19 @@ class VocoderWrapper(torch.nn.Module):
         return audio
 
 class SimpleGeneratorWrapper(torch.nn.Module):
-    """
-    Simplified wrapper that extracts just the Generator component.
-    
-    This is a fallback approach that focuses on the core synthesis
-    part which should be more ANE-compatible.
-    """
-    
+    """``decoder.generator`` only; forward matches ``Generator``."""
+
     def __init__(self, decoder):
-        """
-        Initialize with just the generator from the decoder.
-        
-        Args:
-            decoder: The decoder module containing the generator
-        """
         super().__init__()
         self.generator = decoder.generator
-        
+
     def forward(self, x, s, f0_curve):
-        """
-        Direct generator forward pass.
-        
-        Args:
-            x: Processed features, shape (1, 512, T) 
-            s: Style embedding, shape (1, 128)
-            f0_curve: F0 curve, shape (1, T*2) (upsampled)
-            
-        Returns:
-            audio: Generated waveform
-        """
         return self.generator(x, s, f0_curve)
 
+
 class GeneratorWrapper(torch.nn.Module):
-    """
-    CoreML-friendly wrapper for generator-only path, accepting ANE-friendly 4D inputs.
-    """
+    """Generator with 4D x/ f0; squeeze to 3D."""
+
     def __init__(self, decoder):
         super().__init__()
         self.generator = decoder.generator
@@ -810,7 +758,7 @@ def main():
             print(f"\n🎉 Conversion Complete!")
             print(f"📁 CoreML vocoder saved to: {output_path}")
             print("\nNext steps:")
-            print("1. Test the vocoder with demo_ane_pipeline.py (or run_single.py)")
+            print("1. Test the vocoder with demo_ane_pipeline.py or examples/example_synthesis.py")
             print("2. Verify ANE usage with Instruments or powermetrics")
             print("3. Compare performance vs CPU-only pipeline")
 
