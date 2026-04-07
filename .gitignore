@@ -174,5 +174,8 @@ cython_debug/
 outputs/
 outputs/**
 
+# Local FP32 Core ML export tree (large; regenerate from export_synth)
+coreml_fp32/
+
 # Local scratch notes (not for version control)
 scratchpad.md

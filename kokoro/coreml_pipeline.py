@@ -20,6 +20,7 @@ import numpy as np
 import torch
 
 from kokoro import KModel, KPipeline
+from kokoro.pipeline import voice_embedding_for_phoneme_string
 from kokoro.synthesis_backends import (
     VOCODER_CHUNK_SAMPLES,
     TextBackend,
@@ -236,7 +237,7 @@ class HybridTTSPipeline:
             print(f"🔊 Phonemes: {phonemes}")
             
             # Get voice reference style
-            ref_s = voice_pack[len(phonemes)-1]  # Reference style for this length
+            ref_s = voice_embedding_for_phoneme_string(voice_pack, phonemes)
             
             # Run through the PyTorch model up to the vocoder stage
             # We need to extract the inputs that would normally go to the decoder

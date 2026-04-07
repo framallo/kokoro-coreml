@@ -14,6 +14,7 @@ _ROOT = Path(__file__).resolve().parents[1]
 _DURATION_PKG = _ROOT / "coreml" / "kokoro_duration.mlpackage"
 _DECODER_3S_PKG = _ROOT / "coreml" / "kokoro_decoder_only_3s.mlpackage"
 _DECODER_HAR_POST_3S_PKG = _ROOT / "coreml" / "kokoro_decoder_har_post_3s.mlpackage"
+_DECODER_HAR_POST_10S_PKG = _ROOT / "coreml" / "kokoro_decoder_har_post_10s.mlpackage"
 _SYNTH_3S_PKG = _ROOT / "coreml" / "kokoro_synthesizer_3s.mlpackage"
 
 ct = pytest.importorskip("coremltools", reason="coremltools not installed")
@@ -108,6 +109,31 @@ def test_kokoro_decoder_only_3s_mlpackage_loads_and_predict_shapes():
 def test_kokoro_decoder_har_post_3s_mlpackage_loads_and_predict_shapes():
     """Post-hn-nsf tail: x_pre + ref_s + har -> waveform."""
     model = ct.models.MLModel(str(_DECODER_HAR_POST_3S_PKG))
+    spec = model.get_spec()
+    inputs = {i.name: i for i in spec.description.input}
+    assert set(inputs) >= {"x_pre", "ref_s", "har"}
+
+    test_inputs = {}
+    for name in ("x_pre", "ref_s", "har"):
+        shape = _multiarray_shape(inputs[name])
+        assert shape, f"missing static shape for {name}"
+        test_inputs[name] = np.zeros(shape, dtype=np.float32)
+
+    out = model.predict(test_inputs)
+    assert isinstance(out, dict)
+    assert "waveform" in out
+    waveform = np.asarray(out["waveform"])
+    assert hasattr(waveform, "shape")
+    out_specs = {o.name: o for o in spec.description.output}
+    expected = _multiarray_shape(out_specs["waveform"])
+    if expected:
+        assert tuple(waveform.shape) == expected
+
+
+@pytest.mark.skipif(not _DECODER_HAR_POST_10S_PKG.is_dir(), reason="coreml/kokoro_decoder_har_post_10s.mlpackage not in tree")
+def test_kokoro_decoder_har_post_10s_mlpackage_loads_and_predict_shapes():
+    """Same contract as 3s bucket; larger static shapes for long-form synthesis."""
+    model = ct.models.MLModel(str(_DECODER_HAR_POST_10S_PKG))
     spec = model.get_spec()
     inputs = {i.name: i for i in spec.description.input}
     assert set(inputs) >= {"x_pre", "ref_s", "har"}

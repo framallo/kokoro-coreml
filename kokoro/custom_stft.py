@@ -336,10 +336,14 @@ class CustomSTFT(nn.Module):
                     waveform = waveform[..., pad_len:-pad_len]
                 # else: too short to strip symmetric padding; leave waveform unchanged
 
-        # Trim to exact target length if specified.
-        # Essential for maintaining input/output length consistency.
+        # Trim or pad to exact target length if specified.
+        # conv_transpose can return slightly fewer samples than the analysis path; pad with zeros.
         if length is not None:
-            waveform = waveform[..., :length]
+            cur = int(waveform.shape[-1])
+            if cur < length:
+                waveform = F.pad(waveform, (0, length - cur))
+            else:
+                waveform = waveform[..., :length]
 
         # shape => (B, T)
         return waveform

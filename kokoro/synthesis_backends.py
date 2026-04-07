@@ -20,6 +20,7 @@ import numpy as np
 import torch
 
 from kokoro.conv_length import conv1d_output_length_from_module
+from kokoro.pipeline import voice_embedding_for_phoneme_string
 
 if TYPE_CHECKING:
     from kokoro.coreml_pipeline import HybridTTSPipeline
@@ -546,7 +547,7 @@ def pytorch_fallback_impl(pipe: HybridTTSPipeline, text: str, voice: str = "af_h
         start_time = time.time()
         for _, phonemes, _ in pipe.pipeline(text, voice, speed):
             voice_pack = pipe.pipeline.load_voice(voice)
-            ref_s = voice_pack[len(phonemes) - 1]
+            ref_s = voice_embedding_for_phoneme_string(voice_pack, phonemes)
             audio = pipe.pytorch_model(phonemes, ref_s, speed)
             end_time = time.time()
             print(f"✅ PyTorch fallback completed in {end_time - start_time:.3f}s")

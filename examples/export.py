@@ -7,6 +7,7 @@ import sounddevice as sd
 
 from kokoro import KModel, KPipeline
 from kokoro.model import KModelForONNX
+from kokoro.pipeline import voice_embedding_for_phoneme_string
 
 def export_onnx(model, output):
     onnx_file = output + "/" + "kokoro.onnx"
@@ -57,7 +58,7 @@ def load_input_ids(pipeline, text):
 
 def load_voice(pipeline, voice, phonemes):
     pack = pipeline.load_voice(voice).to('cpu')
-    return pack[len(phonemes) - 1]
+    return voice_embedding_for_phoneme_string(pack, phonemes)
 
 def load_sample(model):
     pipeline = KPipeline(lang_code='a', model=model.kmodel, device='cpu')

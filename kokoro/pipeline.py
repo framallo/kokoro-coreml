@@ -128,6 +128,20 @@ class ModelConstants:
     DEFAULT_REPO_ID = 'hexgrad/Kokoro-82M'
 
 
+def voice_embedding_for_phoneme_string(pack: torch.FloatTensor, phonemes: str) -> torch.FloatTensor:
+    """Return the (256,) style row for phoneme string length; clamp to voice pack rows.
+
+    Hub ``voices/*.pt`` tensors are often shape ``(N, 256)`` with row index ``len(phonemes)-1``.
+    Long texts can exceed ``N``; clamp instead of indexing out of range.
+    A 1-D ``(256,)`` pack is returned as-is.
+    """
+    if pack.dim() == 1:
+        return pack
+    idx = len(phonemes) - 1
+    idx = max(0, min(idx, pack.shape[0] - 1))
+    return pack[idx]
+
+
 # ==============================================================================
 # TEXT PROCESSING CONSTANTS
 # ==============================================================================
@@ -647,7 +661,7 @@ class KPipeline:
     ) -> KModel.Output:
         if callable(speed):
             speed = speed(len(ps))
-        return model(ps, pack[len(ps)-1], speed, return_output=True)
+        return model(ps, voice_embedding_for_phoneme_string(pack, ps), speed, return_output=True)
 
     def generate_from_tokens(
         self,

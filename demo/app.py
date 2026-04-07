@@ -5,6 +5,8 @@ import os
 import random
 import torch
 
+from kokoro.pipeline import voice_embedding_for_phoneme_string
+
 # Get the directory of the current script
 script_dir = os.path.dirname(os.path.abspath(__file__))
 
@@ -23,7 +25,7 @@ def generate_first(text, voice='af_heart', speed=1, use_gpu=CUDA_AVAILABLE):
     pack = pipeline.load_voice(voice)
     use_gpu = use_gpu and CUDA_AVAILABLE
     for _, ps, _ in pipeline(text, voice, speed):
-        ref_s = pack[len(ps)-1]
+        ref_s = voice_embedding_for_phoneme_string(pack, ps)
         try:
             if use_gpu:
                 audio = forward_gpu(ps, ref_s, speed)
@@ -55,7 +57,7 @@ def generate_all(text, voice='af_heart', speed=1, use_gpu=CUDA_AVAILABLE):
     use_gpu = use_gpu and CUDA_AVAILABLE
     first = True
     for _, ps, _ in pipeline(text, voice, speed):
-        ref_s = pack[len(ps)-1]
+        ref_s = voice_embedding_for_phoneme_string(pack, ps)
         try:
             if use_gpu:
                 audio = forward_gpu(ps, ref_s, speed)
