@@ -19,6 +19,8 @@ from typing import TYPE_CHECKING, Any, Callable, Sequence
 import numpy as np
 import torch
 
+from kokoro.conv_length import conv1d_output_length_from_module
+
 if TYPE_CHECKING:
     from kokoro.coreml_pipeline import HybridTTSPipeline
 
@@ -76,6 +78,112 @@ def synth_bucket_impl(pipe: HybridTTSPipeline, text: str, voice: str = "af_heart
     audio = res[key].squeeze().astype(np.float32)
     target_len = int(sec * 24000)
     return audio[:target_len]
+
+
+def decoder_har_post_bucket_impl(
+    pipe: HybridTTSPipeline, text: str, voice: str = "af_heart", speed: float = 1.0
+) -> np.ndarray | None:
+    """PyTorch decoder stack + CPU hn-nsf ``har``; Core ML ``kokoro_decoder_har_post_*s`` → waveform.
+
+    Matches ``export_synth.convert`` ``decoder-har`` geometry for each bucket (seconds).
+    Tries before full Decoder_HAR so hn-nsf stays on CPU while conv/iSTFT use Core ML.
+    """
+    if not getattr(pipe, "coreml_decoder_har_post_buckets", None):
+        return None
+    vi = pipe.extract_vocoder_inputs(text, voice, speed)
+    if vi is None:
+        return None
+    T_f0 = int(vi["f0_curve"].shape[-1])
+    total_seconds = T_f0 / 80.0
+    sec = pipe._select_bucket_seconds(total_seconds)
+    if sec is None or sec not in pipe.coreml_decoder_har_post_buckets:
+        return None
+    model = pipe.coreml_decoder_har_post_buckets[sec]
+    spec = model.get_spec()
+    shapes = {i.name: list(i.type.multiArrayType.shape) for i in spec.description.input}
+    x_pre_shape = shapes["x_pre"]
+    har_shape = shapes["har"]
+    asr_len = int(x_pre_shape[-1])
+    har_t = int(har_shape[-1])
+
+    dec = pipe.pytorch_model.decoder
+    gen = dec.generator
+    f0_samples_per_step = int(round(float(gen.f0_upsamp.scale_factor)))
+    bucket_samples = sec * 24000
+    full_f0_len = int(round(bucket_samples / float(f0_samples_per_step)))
+    frame_count = conv1d_output_length_from_module(full_f0_len, dec.F0_conv)
+    if frame_count != asr_len:
+        print(
+            f"⚠️ decoder_har_post: bucket geometry frame_count {frame_count} != Core ML x_pre length {asr_len}"
+        )
+
+    asr = vi["asr"].astype(np.float32)
+    f0 = vi["f0_curve"].astype(np.float32)
+    n = vi["n"].astype(np.float32)
+    ref_s = vi["ref_s"].astype(np.float32)
+
+    asr_pad = np.zeros((1, 512, frame_count), dtype=np.float32)
+    t_asr = min(frame_count, asr.shape[-1])
+    asr_pad[:, :, :t_asr] = asr[:, :, :t_asr]
+    f0_pad = np.zeros((1, full_f0_len), dtype=np.float32)
+    n_pad = np.zeros((1, full_f0_len), dtype=np.float32)
+    t_f0 = min(full_f0_len, f0.shape[-1])
+    f0_pad[:, :t_f0] = f0[:, :t_f0]
+    n_pad[:, :t_f0] = n[:, :t_f0]
+
+    with torch.no_grad():
+        ref_t = torch.from_numpy(ref_s)
+        s = ref_t[:, :128]
+        asr_t = torch.from_numpy(asr_pad)
+        F0 = dec.F0_conv(torch.from_numpy(f0_pad).unsqueeze(1))
+        N = dec.N_conv(torch.from_numpy(n_pad).unsqueeze(1))
+        x = torch.cat([asr_t, F0, N], dim=1)
+        x = dec.encode(x, s)
+        asr_res = dec.asr_res(asr_t)
+        res = True
+        for block in dec.decode:
+            if res:
+                x = torch.cat([x, asr_res, F0, N], dim=1)
+            x = block(x, s)
+            if block.upsample_type != "none":
+                res = False
+        x_pre = x
+        f0_up = gen.f0_upsamp(torch.from_numpy(f0_pad)[:, None]).transpose(1, 2)
+        har_source, _, _ = gen.m_source(f0_up)
+        har_source = har_source.transpose(1, 2).squeeze(1)
+        har_spec, har_phase = gen.stft.transform(har_source)
+        har = torch.cat([har_spec, har_phase], dim=1)
+        har_np = har.numpy().astype(np.float32)
+
+    x_pre_np = x_pre.cpu().numpy().astype(np.float32)
+    if x_pre_np.shape[-1] != asr_len:
+        aligned = np.zeros((x_pre_np.shape[0], x_pre_np.shape[1], asr_len), dtype=np.float32)
+        c = min(x_pre_np.shape[-1], asr_len)
+        aligned[:, :, :c] = x_pre_np[:, :, :c]
+        x_pre_np = aligned
+
+    if har_np.shape[-1] != har_t:
+        h_new = np.zeros((har_np.shape[0], har_np.shape[1], har_t), dtype=np.float32)
+        cpy = min(har_np.shape[-1], har_t)
+        h_new[:, :, :cpy] = har_np[:, :, :cpy]
+        har_np = h_new
+
+    print(
+        f"🍎 Decoder_HAR post bucket {sec}s: Core ML post-har "
+        f"(x_pre {tuple(x_pre_shape)}, har {tuple(har_shape)})"
+    )
+    inputs = {
+        "x_pre": x_pre_np,
+        "ref_s": ref_s,
+        "har": har_np,
+    }
+    res = model.predict(inputs)
+    key = "waveform" if "waveform" in res else list(res.keys())[0]
+    audio = np.asarray(res[key], dtype=np.float32).squeeze()
+    # Trim to natural utterance length: F0 curves are 80 Hz; do not derive length from
+    # len(audio)/full_f0_len (breaks when Core ML returns fewer samples than a full bucket).
+    target_len = int(round((T_f0 / 80.0) * 24000.0))
+    return audio[: min(int(audio.shape[-1]), target_len)]
 
 
 def decoder_har_sliding_impl(pipe: HybridTTSPipeline, vocoder_inputs: dict) -> np.ndarray | None:
@@ -452,6 +560,7 @@ def pytorch_fallback_impl(pipe: HybridTTSPipeline, text: str, voice: str = "af_h
 
 
 DEFAULT_TEXT_BACKENDS: tuple[TextBackend, ...] = (
+    decoder_har_post_bucket_impl,
     synth_bucket_impl,
     decoder_har_bucket_impl,
 )
@@ -505,6 +614,7 @@ __all__ = [
     "TextBackend",
     "ViBackend",
     "synth_bucket_impl",
+    "decoder_har_post_bucket_impl",
     "decoder_har_sliding_impl",
     "decoder_har_bucket_impl",
     "decoder_har_grouped_impl",

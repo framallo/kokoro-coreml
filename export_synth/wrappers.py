@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import torch
 import torch.nn as nn
+import torch.nn.functional as F
 
 from kokoro.conv_length import conv1d_min_input_length_for_output_length
 
@@ -56,6 +57,58 @@ LayerNorm = kokoro_modules.LayerNorm
 AdaLayerNorm = kokoro_modules.AdaLayerNorm
 LinearNorm = kokoro_modules.LinearNorm
 AdainResBlk1d = kokoro_modules.AdainResBlk1d
+
+
+class GeneratorFromHar(nn.Module):
+    """Vocoder tail after hn-nsf harmonic features: same as ``Generator.forward`` once ``har`` exists.
+
+    PyTorch runs ``f0_upsamp`` → ``m_source`` → ``stft.transform`` on CPU; this module is exported
+    to Core ML for the heavy conv/AdaIN/iSTFT stack (see ``export_synth.convert`` ``decoder-har`` mode).
+
+    Inputs:
+        x_pre: decoder output before the generator, shape ``(B, 512, T_asr)``.
+        ref_s: full voice embedding ``(B, 256)``; style uses the first ``VOICE_BASELINE_DIM`` channels.
+        har: concat ``[har_spec, har_phase]`` along channel dim, shape ``(B, C, T_har)``.
+
+    Called by:
+        - ``export_synth.convert`` when ``mode == \"decoder-har\"``.
+        - Runtime: ``kokoro.synthesis_backends.decoder_har_post_bucket_impl`` (PyTorch pre + Core ML).
+    """
+
+    def __init__(self, generator):
+        super().__init__()
+        self.generator = generator
+
+    def forward(self, x_pre: torch.Tensor, ref_s: torch.Tensor, har: torch.Tensor) -> torch.Tensor:
+        s = ref_s[:, : CoreMLExportConstants.VOICE_BASELINE_DIM]
+        gen = self.generator
+        x = x_pre
+        for i in range(gen.num_upsamples):
+            x = F.leaky_relu(x, negative_slope=0.1)
+            x_source = gen.noise_convs[i](har)
+            x_source = gen.noise_res[i](x_source, s)
+            x = gen.ups[i](x)
+            if i == gen.num_upsamples - 1:
+                x = gen.reflection_pad(x)
+            tx = x.size(2)
+            ts = x_source.size(2)
+            if ts < tx:
+                x_source = F.pad(x_source, (0, tx - ts))
+            elif ts > tx:
+                x_source = x_source[:, :, :tx]
+            x = x + x_source
+            xs = None
+            for j in range(gen.num_kernels):
+                if xs is None:
+                    xs = gen.resblocks[i * gen.num_kernels + j](x, s)
+                else:
+                    xs = xs + gen.resblocks[i * gen.num_kernels + j](x, s)
+            x = xs / gen.num_kernels
+        x = F.leaky_relu(x)
+        x = gen.conv_post(x)
+        spec = torch.exp(x[:, : gen.post_n_fft // 2 + 1, :])
+        phase = torch.sin(x[:, gen.post_n_fft // 2 + 1 :, :])
+        return gen.stft.inverse(spec, phase)
 
 class CoreMLFriendlyTextEncoder(nn.Module):
     """Replaces the original TextEncoder to avoid pack_padded_sequence."""

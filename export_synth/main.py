@@ -24,7 +24,10 @@ def main() -> None:
         "--mode",
         type=str,
         default="decoder",
-        help="Export mode: 'decoder' (default, recommended) or 'full' for the experimental full synthesizer",
+        help=(
+            "Export mode: 'decoder' (default), 'decoder-har' (post-hn-nsf tail only: x_pre+ref_s+har→waveform), "
+            "or 'full' (experimental full synthesizer)"
+        ),
     )
     args = parser.parse_args()
 

@@ -26,6 +26,7 @@ from kokoro.synthesis_backends import (
     ViBackend,
     decoder_har_bucket_impl,
     decoder_har_grouped_impl,
+    decoder_har_post_bucket_impl,
     decoder_har_sliding_impl,
     pytorch_fallback_impl,
     run_synthesis_chain,
@@ -36,7 +37,24 @@ from kokoro.synthesis_backends import (
 _REPO_ROOT = Path(__file__).resolve().parent.parent
 COREML_MODEL_PATH = str(_REPO_ROOT / "coreml" / "KokoroVocoder.mlpackage")
 COREML_DECODER_HAR_PATH = str(_REPO_ROOT / "coreml" / "KokoroDecoder_HAR.mlpackage")
-COREML_AVAILABLE = os.path.exists(COREML_MODEL_PATH) or os.path.exists(COREML_DECODER_HAR_PATH)
+COREML_BUCKET_GLOBS = (
+    str(_REPO_ROOT / "coreml" / "kokoro_synthesizer_*s.mlpackage"),
+    str((_REPO_ROOT.parent / "coreml" / "kokoro_synthesizer_*s.mlpackage")),
+    str(_REPO_ROOT / "coreml" / "KokoroDecoder_HAR_*s.mlpackage"),
+    str((_REPO_ROOT.parent / "coreml" / "KokoroDecoder_HAR_*s.mlpackage")),
+    str(_REPO_ROOT / "coreml" / "kokoro_decoder_har_post_*s.mlpackage"),
+    str((_REPO_ROOT.parent / "coreml" / "kokoro_decoder_har_post_*s.mlpackage")),
+)
+
+
+def _coreml_assets_exist() -> bool:
+    """Return True when any supported Core ML package is present on disk."""
+    if os.path.exists(COREML_MODEL_PATH) or os.path.exists(COREML_DECODER_HAR_PATH):
+        return True
+    return any(glob.glob(pattern) for pattern in COREML_BUCKET_GLOBS)
+
+
+COREML_AVAILABLE = _coreml_assets_exist()
 
 ct = None  # coremltools, when available
 if COREML_AVAILABLE:
@@ -93,6 +111,7 @@ class HybridTTSPipeline:
         self.coreml_decoder_har = None
         self.coreml_synth_buckets = {}
         self.coreml_decoder_har_buckets = {}
+        self.coreml_decoder_har_post_buckets = {}
         self.use_coreml = False
 
         if force_engine == "coreml" and not COREML_AVAILABLE:
@@ -138,16 +157,30 @@ class HybridTTSPipeline:
                     self.coreml_decoder_har_buckets[sec] = model
                     print(f"✅ Loaded Decoder_HAR bucket: {sec}s → {path}")
 
+            har_post_globs = [
+                str(_REPO_ROOT / "coreml" / "kokoro_decoder_har_post_*s.mlpackage"),
+                str((_REPO_ROOT.parent / "coreml" / "kokoro_decoder_har_post_*s.mlpackage")),
+            ]
+            for g in har_post_globs:
+                for path in glob.glob(g):
+                    model = ct.models.MLModel(path)
+                    base = os.path.basename(path)
+                    sec = int(base.split("_")[-1].replace("s.mlpackage", ""))
+                    self.coreml_decoder_har_post_buckets[sec] = model
+                    print(f"✅ Loaded Decoder_HAR post (x_pre+har) bucket: {sec}s → {path}")
+
             synth_n = len(self.coreml_synth_buckets)
             har_n = len(self.coreml_decoder_har_buckets)
+            har_post_n = len(self.coreml_decoder_har_post_buckets)
             self.use_coreml = (
                 self.coreml_vocoder is not None
                 or self.coreml_decoder_har is not None
                 or synth_n > 0
                 or har_n > 0
+                or har_post_n > 0
             )
-            if synth_n or har_n:
-                print(f"✅ Buckets → synth: {synth_n}, decoder_har: {har_n}")
+            if synth_n or har_n or har_post_n:
+                print(f"✅ Buckets → synth: {synth_n}, decoder_har: {har_n}, decoder_har_post: {har_post_n}")
 
             if self.coreml_vocoder is not None:
                 print("\n📋 CoreML Vocoder Info:")
@@ -160,7 +193,8 @@ class HybridTTSPipeline:
                 raise RuntimeError(
                     "force_engine='coreml' but no CoreML models loaded. "
                     f"Expected at least one of: {COREML_MODEL_PATH!r}, {COREML_DECODER_HAR_PATH!r}, "
-                    "or bucket packages matching kokoro_synthesizer_*s / KokoroDecoder_HAR_*s under coreml/."
+                    "or bucket packages matching kokoro_synthesizer_*s / KokoroDecoder_HAR_*s / "
+                    "kokoro_decoder_har_post_*s under coreml/."
                 )
         else:
             print("⚠️ CoreML not used (unavailable or engine=pytorch); PyTorch-only pipeline")
@@ -279,8 +313,10 @@ class HybridTTSPipeline:
         candidates = []
         if getattr(self, 'coreml_synth_buckets', None):
             candidates.extend(self.coreml_synth_buckets.keys())
-        if getattr(self, 'coreml_decoder_har_buckets', None):
+        if getattr(self, "coreml_decoder_har_buckets", None):
             candidates.extend(self.coreml_decoder_har_buckets.keys())
+        if getattr(self, "coreml_decoder_har_post_buckets", None):
+            candidates.extend(self.coreml_decoder_har_post_buckets.keys())
         candidates = sorted(set(candidates))
         if not candidates:
             return None
@@ -328,6 +364,10 @@ class HybridTTSPipeline:
     def run_coreml_decoder_har_bucket(self, text, voice='af_heart', speed=1.0):
         """Single-shot Decoder_HAR bucket: compute har once, call CoreML once, inverse STFT once."""
         return decoder_har_bucket_impl(self, text, voice, speed)
+
+    def run_coreml_decoder_har_post_bucket(self, text, voice="af_heart", speed=1.0):
+        """PyTorch decoder pre + CPU hn-nsf ``har``; Core ML runs post-har stack to waveform."""
+        return decoder_har_post_bucket_impl(self, text, voice, speed)
 
     def run_coreml_decoder_har_grouped(self, vocoder_inputs):
         """Greedy large-bucket segmentation with minimal calls and seam crossfades."""

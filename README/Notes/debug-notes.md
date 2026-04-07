@@ -6,6 +6,87 @@ Institutional memory for Kokoro PyTorch → Core ML (`mlprogram`) export, synthe
 
 ---
 
+## Issue: Decoder-only Core ML sounds non-human (ghost / unintelligible) — Active
+
+**First spotted:** 2026-04-07  
+**Status:** Active
+
+### Summary
+
+Listening tests on `kokoro_decoder_only_3s.mlpackage` (fed from `HybridTTSPipeline.extract_vocoder_inputs`) produced whispery, non-intelligible audio. **Objective checks show two separate problems:** (1) the **export graph is not the same as stock Kokoro** because `IdentityAdaIN` replaces real AdaIN in `AdainResBlk1d` for MIL compatibility; (2) even when PyTorch uses the **same** export surgery, **Core ML output still has low correlation** with that PyTorch reference—so conversion is not numerically faithful to the traced graph. A stage bisect now narrows the **first major divergence** to the **harmonic source path** (`SourceModuleHnNSF` / `SineGen`), not the conv stack or STFT transforms. **Quality baseline for “human” speech:** `examples/example_synthesis.py --engine pytorch` (full PyTorch path).
+
+### Symptom
+
+- Perceptual: ghost-like / whisper, no clear words from Core ML decoder path.
+- Not a crash; `predict()` returns finite `waveform`.
+
+### Root Cause
+
+**Confirmed (two layers):**
+
+1. **Export preprocessing (`IdentityAdaIN`)** — `export_synth/wrappers.py` documents that `AdainResBlk1d.norm1/norm2` are replaced with `IdentityAdaIN` (pass-through) to avoid MIL broadcast failures. That **removes style-conditioned normalization** in those blocks; the vocoder is not the same as eager `KModel` in `HybridTTSPipeline`.
+
+2. **Core ML vs traced PyTorch parity** — On identical padded inputs (3s bucket: ASR 120, F0/N 240):
+   - **Eager decoder vs `torch.jit.trace` (same wrapper):** correlation ~**0.98** (trace is OK for that graph).
+   - **Stock PyTorch decoder vs Core ML:** correlation ~**0.02** (misleading comparison: stock still has real AdaIN).
+   - **Export-matched PyTorch** (same `prepare_pytorch_models` + `SynthesizerModel` surgery + `remove_dropout` + IdentityAdaIN on `kmodel`) **vs Core ML FP16:** correlation ~**0.21** (still unacceptable; conversion loses most of the signal).
+   - **FP32 vs FP16** Core ML: modest change (~0.05 vs ~0.02 vs stock PT); **not** the primary fix.
+
+3. **Decoder-stage bisect (export-matched graph, FP32 Core ML, CPU_ONLY predict)** — Coarse stage wrappers show:
+   - **`pre_generator`** (`F0_conv/N_conv` + concat + `encode` + `decode`): correlation ~**1.0**
+   - **`har_builder`** (`f0_upsamp` + `m_source` + `stft.transform`): correlation ~**0.22**
+   - **`post_conv`** (upsample / noise injection / resblocks / `conv_post`, fed reference `har`): correlation ~**1.0**
+   - **`spectral_head_inverse`** (`exp` + `sin` + `stft.inverse`, fed reference `x_post`): correlation ~**1.0**
+
+4. **HAR sub-bisect** — Splitting `har_builder` shows:
+   - **`f0_upsample`** only: correlation ~**1.0**
+   - **`source_module_only`** (`SourceModuleHnNSF` / `SineGen`): correlation ~**0.00**
+   - **`stft_transform`** on reference `har_source`: correlation ~**1.0**
+
+**Ruled out:** `jit.trace` being the main culprit (correlation eager vs traced ~0.98 on decoder-only wrapper). Also ruled out `CustomSTFT.transform` / `inverse` and the heavy conv stack as the *first* parity failure in this bisect.
+
+### Related Guides
+
+- [CLAUDE.md](../../CLAUDE.md) — redesign pipeline vs fighting converter; validate with metrics not just “passes export”
+- [README/learnings.md](../learnings.md) — §14 decoder-only / BNNS; HAR decoder as alternate path; `kokoro_decoder_only_3s_nn` (neuralnetwork) notes
+- Apple **coremltools** debugging: [MLModel debugging / perf utilities](https://github.com/apple/coremltools/blob/main/docs-guides/source/mlmodel-debugging-perf-utilities.md) (`MLModelComparator`, `MLModelValidator`); [bisect_model](https://github.com/apple/coremltools/blob/main/docs-guides/source/mlmodel-utilities.md) for chunking and numerical compare
+
+### Fix
+
+**TBD.** Candidate directions (not proven here):
+
+- Replace `IdentityAdaIN` with a **MIL-exportable** AdaIN-style op (or move affected blocks off ANE per playbook).
+- Keep the **conv-heavy decoder stack** on Core ML / ANE, but move **`SourceModuleHnNSF` / `SineGen`** off Core ML (Swift / CPU / Accelerate or PyTorch fallback) and feed its output or a cheaper surrogate into the ANE-friendly conv stack.
+- Use **`MLModelComparator`** / `bisect_model` for finer-grained inspection inside `SourceModuleHnNSF` if we want to know whether the first bad primitive is `cumsum`, `sin`, random noise injection, or harmonic accumulation.
+- Try **neuralnetwork** backend vs `mlprogram` (see learnings re `kokoro_decoder_only_3s_nn`).
+- **`torch.export`** (or FX) instead of `jit.trace` if trace hides dynamic behavior.
+
+### Verification
+
+**Human-sounding reference (bypasses Core ML decoder issues):**
+
+```bash
+.venv/bin/python examples/example_synthesis.py --engine pytorch --text "Hello from Kokoro." --voice af_heart --out outputs/pytorch_reference.wav
+```
+
+**Objective parity checks (local scripts):** compare Pearson correlation of waveform: PyTorch `decoder(asr,f0,n,ref[:,:128])` vs `MLModel.predict` on same numpy inputs; require export-matched PyTorch graph when comparing to Core ML.
+
+### Investigation Log
+
+**2026-04-07**
+
+- **Hypothesis:** Bad audio = wrong bucket padding or peak normalization only.
+- **Tried:** Same inputs to PyTorch decoder vs Core ML; measured correlation; compared `torch.jit.trace` vs eager.
+- **Outcome:** **Ruled out** trace as main issue (~0.98). **Confirmed** IdentityAdaIN + low PT–CoreML correlation (~0.21 export-matched). User should use `--engine pytorch` for intelligibility until conversion is fixed.
+
+**2026-04-07**
+
+- **Hypothesis:** A coarse decoder-stage bisect would show which op family loses correlation first, so we can keep the ANE-friendly heavy math and move only the problematic branch off Core ML.
+- **Tried:** Exported four FP32 Core ML stage wrappers from the export-matched decoder and compared PyTorch vs Core ML on identical inputs: `pre_generator`, `har_builder`, `post_conv`, and `spectral_head_inverse`. Then sub-bisected `har_builder` into `f0_upsample`, `source_module_only`, and `stft_transform`.
+- **Outcome:** **Confirmed** the first real breakdown is **`SourceModuleHnNSF` / `SineGen`**. `pre_generator`, `post_conv`, `stft_transform`, and `spectral_head_inverse` were effectively exact, but `source_module_only` collapsed immediately (correlation ~0.00). This is promising for the Apple Silicon goal: the **slow conv stack still looks ANE-friendly**, while the **harmonic source branch** is the best candidate to keep off Core ML / ANE.
+
+---
+
 ## Issue: Synthesizer traced-vs-CoreML waveform gate (finite / allclose) — Active
 
 **First spotted:** 2026-04-07
@@ -232,6 +313,21 @@ Discrete `pred_dur` is sensitive to FP16 drift before rounding; `d` and `t_en` a
 ```bash
 .venv/bin/python export_duration.py   # without KOKORO_EXPORT_SKIP_NUMERIC_CHECK
 ```
+
+---
+
+## Decoder HAR post (`kokoro_decoder_har_post_*s`) — 2026-04-07
+
+### Summary
+
+- **Pipeline:** PyTorch builds decoder `x_pre` + CPU hn-nsf `har` (same as stock); Core ML runs **`GeneratorFromHar`** (post-source stack + iSTFT). Export mode: `python -m export_synth.main --mode decoder-har --buckets 3s -o coreml`.
+- **Quality:** Subjective check — **sounds strong** vs full-CoreML-decoder ghosting; hn-nsf stays off ANE/Core ML.
+- **Speed (one run, not a benchmark suite):** Same phrase *“Hello from the new decoder har split.”*, `af_heart`, `examples/example_synthesis.py` timing **only** `synthesize()` (not model load):
+  - **Core ML hybrid** (`decoder_har_post_bucket_impl` confirmed in log): `time_sec≈0.374`, `audio_sec≈1.36`, **RTF ≈ 0.27** (faster than real time).
+  - **PyTorch** `--engine pytorch`: `time_sec≈0.41`, `audio_sec≈2.73`, **RTF ≈ 0.15`.
+  - **Caveat:** The two clips had **different durations** (different path through duration/alignment), so RTF is not a clean A/B; compare wall time or fix inputs for a controlled race.
+- **End trim:** Earlier, `decoder_har_post_bucket_impl` trimmed using `len(audio)/full_f0_len * t_f0`, which **mis-scaled** when Core ML returned fewer samples than a full bucket → **cutoff at end**. **Fix:** `target_len = round((T_f0/80)*24000)` then `audio[:min(len(audio), target_len)]` (`kokoro/synthesis_backends.py`).
+- **Discovery:** `COREML_AVAILABLE` / `force_engine=coreml` must treat **bucket-only** trees (`kokoro_decoder_har_post_*s`, etc.) as present, not only `KokoroVocoder.mlpackage` / `KokoroDecoder_HAR.mlpackage` (`kokoro/coreml_pipeline.py`).
 
 ---
 

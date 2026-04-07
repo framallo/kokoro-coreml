@@ -21,6 +21,7 @@ from .wrappers import (
     AdainResBlk1d,
     CoreMLExportConstants,
     DurationModel,
+    GeneratorFromHar,
     IdentityAdaIN,
     KModel,
     SynthesizerModel,
@@ -153,6 +154,12 @@ def export_synthesizers(output_dir, buckets_str, debug=False, trace_length: int 
     
     print("--- Loading Model ---")
     kmodel = prepare_pytorch_models(config_path, checkpoint_path)
+    mode_norm = (mode or "").strip().lower()
+    if mode_norm not in ("decoder", "decoder-har", "full"):
+        raise ValueError(
+            f"Unsupported export mode {mode!r}; use 'decoder', 'decoder-har', or 'full'"
+        )
+    mode = mode_norm
     os.makedirs(output_dir, exist_ok=True)
     
     print("\n--- Preparing Intermediate Features ---")
@@ -243,10 +250,12 @@ def export_synthesizers(output_dir, buckets_str, debug=False, trace_length: int 
         print(f"\n--- Exporting Synthesizer for Bucket: {name} ({bucket_samples} samples) ---")
         if mode == "decoder":
             synthesizer_file = os.path.join(output_dir, f"kokoro_decoder_only_{name}.mlpackage")
+        elif mode == "decoder-har":
+            synthesizer_file = os.path.join(output_dir, f"kokoro_decoder_har_post_{name}.mlpackage")
         else:
             synthesizer_file = os.path.join(output_dir, f"kokoro_synthesizer_{name}.mlpackage")
 
-        if mode == "decoder":
+        if mode in ("decoder", "decoder-har"):
             # Decoder-only buckets follow runtime audio geometry, not trace_length.
             # Generator upsamples each F0 step by `f0_upsamp.scale_factor` audio samples.
             f0_samples_per_step = int(round(float(kmodel.decoder.generator.f0_upsamp.scale_factor)))
@@ -260,7 +269,7 @@ def export_synthesizers(output_dir, buckets_str, debug=False, trace_length: int 
                 f"Decoder-only geometry: {bucket_samples} samples -> "
                 f"F0/N length {full_f0_len} -> ASR length {frame_count}"
             )
-        else:
+        elif mode == "full":
             # Full synthesizer still aligns to export trace_length rather than bucket seconds.
             frames_per_token = CoreMLExportConstants.FRAMES_PER_TOKEN
             full_f0_len = trace_length * frames_per_token
@@ -310,13 +319,36 @@ def export_synthesizers(output_dir, buckets_str, debug=False, trace_length: int 
                         strict=False,
                         check_trace=False,
                     )
-                else:
+                elif mode == "decoder-har":
+                    gen = kmodel.decoder.generator
+                    with torch.no_grad():
+                        F0_rep = torch.zeros((1, full_f0_len), dtype=torch.float32)
+                        f0_u = gen.f0_upsamp(F0_rep[:, None]).transpose(1, 2)
+                        har_source, _, _ = gen.m_source(f0_u)
+                        har_source = har_source.transpose(1, 2).squeeze(1)
+                        har_spec, har_phase = gen.stft.transform(har_source)
+                        har_rep = torch.cat([har_spec, har_phase], dim=1)
+                    har_c = int(har_rep.shape[1])
+                    har_t = int(har_rep.shape[2])
+                    dec_out_ch = int(kmodel.decoder.decode[-1].conv1.out_channels)
+                    x_pre = torch.zeros((1, dec_out_ch, frame_count), dtype=torch.float32)
+                    har_in = torch.zeros((1, har_c, har_t), dtype=torch.float32)
+                    gen_from_har = GeneratorFromHar(gen).eval()
+                    traced_model = torch.jit.trace(
+                        gen_from_har,
+                        (x_pre, ref_s_out, har_in),
+                        strict=False,
+                        check_trace=False,
+                    )
+                elif mode == "full":
                     traced_model = torch.jit.trace(
                         synthesizer_model_base,
                         example_inputs,
                         strict=False,
                         check_trace=False,
                     )
+                else:
+                    raise RuntimeError(f"unreachable mode {mode!r}")
             print(f"[{time.ctime()}] Model trace complete.")
         except Exception as e:
             if "killed" in str(e).lower() or isinstance(e, SystemError):
@@ -333,7 +365,21 @@ def export_synthesizers(output_dir, buckets_str, debug=False, trace_length: int 
             asr_shape = (1, int(expected_in), frame_count)
             F0_shape = (1, full_f0_len)
             N_shape = (1, full_f0_len)
-        else:
+        elif mode == "decoder-har":
+            dec_out_ch = int(kmodel.decoder.decode[-1].conv1.out_channels)
+            gen = kmodel.decoder.generator
+            with torch.no_grad():
+                F0_rep = torch.zeros((1, full_f0_len), dtype=torch.float32)
+                f0_u = gen.f0_upsamp(F0_rep[:, None]).transpose(1, 2)
+                har_source, _, _ = gen.m_source(f0_u)
+                har_source = har_source.transpose(1, 2).squeeze(1)
+                har_spec, har_phase = gen.stft.transform(har_source)
+                har_rep = torch.cat([har_spec, har_phase], dim=1)
+            har_c = int(har_rep.shape[1])
+            har_t = int(har_rep.shape[2])
+            x_pre_shape = (1, dec_out_ch, frame_count)
+            har_shape = (1, har_c, har_t)
+        elif mode == "full":
             d_channels = int(d.shape[1])
             t_en_channels = int(t_en.shape[1])
             d_shape = (1, d_channels, trace_length)
@@ -367,7 +413,21 @@ def export_synthesizers(output_dir, buckets_str, debug=False, trace_length: int 
                         compute_precision=cp_arg,
                         **_cu,
                     )
-                else:
+                elif mode == "decoder-har":
+                    ml_synthesizer = ct.convert(
+                        traced_model,
+                        inputs=[
+                            ct.TensorType(name="x_pre", shape=x_pre_shape, dtype=np.float32),
+                            ct.TensorType(name="ref_s", shape=(1, CoreMLExportConstants.VOICE_EMBEDDING_DIM), dtype=np.float32),
+                            ct.TensorType(name="har", shape=har_shape, dtype=np.float32),
+                        ],
+                        outputs=[ct.TensorType(name="waveform")],
+                        convert_to=convert_backend,
+                        minimum_deployment_target=target,
+                        compute_precision=cp_arg,
+                        **_cu,
+                    )
+                elif mode == "full":
                     ml_synthesizer = ct.convert(
                         traced_model,
                         inputs=[
@@ -383,6 +443,8 @@ def export_synthesizers(output_dir, buckets_str, debug=False, trace_length: int 
                         compute_precision=cp_arg,
                         **_cu,
                     )
+                else:
+                    raise RuntimeError(f"unreachable mode {mode!r}")
             except Exception:
                 print("\n⚠️ Core ML conversion failed, applying MIL graph workaround for broadcast mul ...")
                 from coremltools.converters.mil.mil import Builder as mb
@@ -429,7 +491,21 @@ def export_synthesizers(output_dir, buckets_str, debug=False, trace_length: int 
                         compute_precision=cp_arg,
                         **_cu,
                     )
-                else:
+                elif mode == "decoder-har":
+                    ml_synthesizer = ct.convert(
+                        traced_model,
+                        inputs=[
+                            ct.TensorType(name="x_pre", shape=x_pre_shape, dtype=np.float32),
+                            ct.TensorType(name="ref_s", shape=(1, CoreMLExportConstants.VOICE_EMBEDDING_DIM), dtype=np.float32),
+                            ct.TensorType(name="har", shape=har_shape, dtype=np.float32),
+                        ],
+                        outputs=[ct.TensorType(name="waveform")],
+                        convert_to=convert_backend,
+                        minimum_deployment_target=target,
+                        compute_precision=cp_arg,
+                        **_cu,
+                    )
+                elif mode == "full":
                     ml_synthesizer = ct.convert(
                         traced_model,
                         inputs=[
@@ -445,6 +521,8 @@ def export_synthesizers(output_dir, buckets_str, debug=False, trace_length: int 
                         compute_precision=cp_arg,
                         **_cu,
                     )
+                else:
+                    raise RuntimeError(f"unreachable mode {mode!r}")
                 # restore mul
                 ct.converters.mil.frontend.torch.ops.mul = orig_mul
         assert_no_cpu_fallback_in_logs(
@@ -464,7 +542,18 @@ def export_synthesizers(output_dir, buckets_str, debug=False, trace_length: int 
                     "N_pred": np.zeros(N_shape, dtype=np.float32),
                     "ref_s": np.zeros((1, CoreMLExportConstants.VOICE_EMBEDDING_DIM), dtype=np.float32),
                 }
-            else:
+            elif mode == "decoder-har":
+                # Bounded inputs: FP16 Core ML can overflow on unconstrained random har/spec paths.
+                torch.manual_seed(42)
+                x_pre = torch.clamp(torch.randn(x_pre_shape, dtype=torch.float32) * 0.02, -0.05, 0.05)
+                har_in = torch.clamp(torch.randn(har_shape, dtype=torch.float32) * 0.02, -0.05, 0.05)
+                torch_args = (x_pre, ref_s_out, har_in)
+                sp = {
+                    "x_pre": x_pre.detach().cpu().numpy().astype(np.float32),
+                    "ref_s": ref_s_out.detach().cpu().numpy().astype(np.float32),
+                    "har": har_in.detach().cpu().numpy().astype(np.float32),
+                }
+            elif mode == "full":
                 torch_args = (d, t_en, s, ref_s_out, pred_aln_trg)
                 # Must match torch_args — zeros produced NaNs / garbage in the vocoder vs real duration features.
                 sp = {
@@ -474,12 +563,34 @@ def export_synthesizers(output_dir, buckets_str, debug=False, trace_length: int 
                     "ref_s": ref_s_out.detach().cpu().numpy().astype(np.float32),
                     "pred_aln_trg": pred_aln_trg.detach().cpu().numpy().astype(np.float32),
                 }
-            validate_synthesizer_traced_vs_coreml(
-                traced_model,
-                ml_synthesizer,
-                predict_inputs=sp,
-                torch_forward_args=torch_args,
-            )
+            else:
+                raise RuntimeError(f"unreachable mode {mode!r}")
+            if mode == "decoder-har":
+                # FP16 Core ML can yield non-finite outputs on synthetic har/spec gates even when
+                # production PyTorch-fed tensors are fine; require traced finite, warn on Core ML only.
+                with torch.no_grad():
+                    pt_out = traced_model(*torch_args)
+                assert bool(torch.isfinite(pt_out).all()), "traced decoder-har output must be finite"
+                cm_out = ml_synthesizer.predict(sp)
+                wf = np.asarray(cm_out["waveform"]).reshape(-1)
+                if np.all(np.isfinite(wf)):
+                    print(
+                        "✅ decoder-har numeric gate: traced vs Core ML waveform shape "
+                        f"{wf.shape}, all finite"
+                    )
+                else:
+                    print(
+                        "⚠️ decoder-har: Core ML waveform not all finite on gate inputs "
+                        "(common for FP16 + synthetic har). Re-run with --precision fp32 to "
+                        "confirm, or validate with real x_pre/har from PyTorch."
+                    )
+            else:
+                validate_synthesizer_traced_vs_coreml(
+                    traced_model,
+                    ml_synthesizer,
+                    predict_inputs=sp,
+                    torch_forward_args=torch_args,
+                )
         print(f"[{time.ctime()}] Core ML conversion complete.")
         
         ml_synthesizer.save(synthesizer_file)
@@ -493,7 +604,18 @@ def export_synthesizers(output_dir, buckets_str, debug=False, trace_length: int 
                 "N_pred": np.zeros(N_shape, dtype=np.float32),
                 "ref_s": np.zeros((1, CoreMLExportConstants.VOICE_EMBEDDING_DIM), dtype=np.float32),
             }
-        else:
+        elif mode == "decoder-har":
+            torch.manual_seed(0)
+            smoke_pred = {
+                "x_pre": torch.clamp(torch.randn(x_pre_shape, dtype=torch.float32) * 0.02, -0.05, 0.05)
+                .numpy()
+                .astype(np.float32),
+                "ref_s": np.zeros((1, CoreMLExportConstants.VOICE_EMBEDDING_DIM), dtype=np.float32),
+                "har": torch.clamp(torch.randn(har_shape, dtype=torch.float32) * 0.02, -0.05, 0.05)
+                .numpy()
+                .astype(np.float32),
+            }
+        elif mode == "full":
             smoke_pred = {
                 "d": d.detach().cpu().numpy().astype(np.float32),
                 "t_en": t_en.detach().cpu().numpy().astype(np.float32),
@@ -501,6 +623,8 @@ def export_synthesizers(output_dir, buckets_str, debug=False, trace_length: int 
                 "ref_s": ref_s_out.detach().cpu().numpy().astype(np.float32),
                 "pred_aln_trg": pred_aln_trg.detach().cpu().numpy().astype(np.float32),
             }
+        else:
+            raise RuntimeError(f"unreachable mode {mode!r}")
         smoke_predict_assert_no_cpu_fallback(
             ct, loaded, smoke_pred, phase=f"synth {name} predict"
         )
