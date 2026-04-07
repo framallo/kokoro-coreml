@@ -59,72 +59,81 @@ class HybridTTSPipeline:
         self.pipeline = KPipeline(lang_code='a', model=False)  # English pipeline
         print("✅ PyTorch components loaded")
         
+        self.coreml_vocoder = None
+        self.coreml_decoder_har = None
+        self.coreml_synth_buckets = {}
+        self.coreml_decoder_har_buckets = {}
+        self.use_coreml = False
+
+        if force_engine == "coreml" and not COREML_AVAILABLE:
+            raise RuntimeError(
+                "force_engine='coreml' but CoreML is unavailable "
+                "(install coremltools and/or add .mlpackage files under coreml/)."
+            )
+
         # Initialize CoreML models if available
-        if COREML_AVAILABLE and (force_engine is None or force_engine == 'coreml'):
-            print("🍎 Loading CoreML vocoder...")
-            try:
-                self.coreml_vocoder = ct.models.MLModel(COREML_MODEL_PATH) if os.path.exists(COREML_MODEL_PATH) else None
-                self.coreml_decoder_har = ct.models.MLModel(COREML_DECODER_HAR_PATH) if os.path.exists(COREML_DECODER_HAR_PATH) else None
-                # Load synthesizer bucket models if present (search local and parent coreml dirs)
-                self.coreml_synth_buckets = {}
-                synth_globs = [
-                    str(_REPO_ROOT / "coreml" / "kokoro_synthesizer_*s.mlpackage"),
-                    str((_REPO_ROOT.parent / "coreml" / "kokoro_synthesizer_*s.mlpackage"))
-                ]
-                for g in synth_globs:
-                    for path in glob.glob(g):
-                        try:
-                            model = ct.models.MLModel(path)
-                            base = os.path.basename(path)
-                            sec_str = base.split("_")[-1].replace("s.mlpackage", "").replace(".mlpackage", "")
-                            sec = int(sec_str.replace('s','')) if sec_str.endswith('s') else int(sec_str)
-                            self.coreml_synth_buckets[sec] = model
-                            print(f"✅ Loaded Synthesizer bucket: {sec}s → {path}")
-                        except Exception as e:
-                            print(f"⚠️ Failed to load synthesizer bucket {path}: {e}")
-                # Load Decoder_HAR bucket models if present (search local and parent coreml dirs)
-                self.coreml_decoder_har_buckets = {}
-                har_globs = [
-                    str(_REPO_ROOT / "coreml" / "KokoroDecoder_HAR_*s.mlpackage"),
-                    str((_REPO_ROOT.parent / "coreml" / "KokoroDecoder_HAR_*s.mlpackage"))
-                ]
-                for g in har_globs:
-                    for path in glob.glob(g):
-                        try:
-                            model = ct.models.MLModel(path)
-                            base = os.path.basename(path)
-                            # KokoroDecoder_HAR_XXs.mlpackage
-                            sec = int(base.split('_')[-1].replace('s.mlpackage',''))
-                            self.coreml_decoder_har_buckets[sec] = model
-                            print(f"✅ Loaded Decoder_HAR bucket: {sec}s → {path}")
-                        except Exception as e:
-                            print(f"⚠️ Failed to load Decoder_HAR bucket {path}: {e}")
-                self.use_coreml = self.coreml_vocoder is not None or self.coreml_decoder_har is not None
-                if self.coreml_vocoder is not None:
-                    print("✅ CoreML vocoder loaded successfully")
-                if self.coreml_decoder_har is not None:
-                    print("✅ CoreML Decoder_HAR loaded successfully (exact hn-nsf parity)")
-                
-                # Print vocoder specifications
+        if COREML_AVAILABLE and (force_engine is None or force_engine == "coreml"):
+            print("🍎 Loading CoreML models...")
+            if os.path.exists(COREML_MODEL_PATH):
+                self.coreml_vocoder = ct.models.MLModel(COREML_MODEL_PATH)
+                print("✅ CoreML vocoder loaded successfully")
+            if os.path.exists(COREML_DECODER_HAR_PATH):
+                self.coreml_decoder_har = ct.models.MLModel(COREML_DECODER_HAR_PATH)
+                print("✅ CoreML Decoder_HAR loaded successfully (exact hn-nsf parity)")
+
+            # Bucket models: any path returned by glob must load or __init__ fails (no silent skip).
+            synth_globs = [
+                str(_REPO_ROOT / "coreml" / "kokoro_synthesizer_*s.mlpackage"),
+                str((_REPO_ROOT.parent / "coreml" / "kokoro_synthesizer_*s.mlpackage")),
+            ]
+            for g in synth_globs:
+                for path in glob.glob(g):
+                    model = ct.models.MLModel(path)
+                    base = os.path.basename(path)
+                    sec_str = base.split("_")[-1].replace("s.mlpackage", "").replace(".mlpackage", "")
+                    sec = int(sec_str.replace("s", "")) if sec_str.endswith("s") else int(sec_str)
+                    self.coreml_synth_buckets[sec] = model
+                    print(f"✅ Loaded Synthesizer bucket: {sec}s → {path}")
+
+            har_globs = [
+                str(_REPO_ROOT / "coreml" / "KokoroDecoder_HAR_*s.mlpackage"),
+                str((_REPO_ROOT.parent / "coreml" / "KokoroDecoder_HAR_*s.mlpackage")),
+            ]
+            for g in har_globs:
+                for path in glob.glob(g):
+                    model = ct.models.MLModel(path)
+                    base = os.path.basename(path)
+                    sec = int(base.split("_")[-1].replace("s.mlpackage", ""))
+                    self.coreml_decoder_har_buckets[sec] = model
+                    print(f"✅ Loaded Decoder_HAR bucket: {sec}s → {path}")
+
+            synth_n = len(self.coreml_synth_buckets)
+            har_n = len(self.coreml_decoder_har_buckets)
+            self.use_coreml = (
+                self.coreml_vocoder is not None
+                or self.coreml_decoder_har is not None
+                or synth_n > 0
+                or har_n > 0
+            )
+            if synth_n or har_n:
+                print(f"✅ Buckets → synth: {synth_n}, decoder_har: {har_n}")
+
+            if self.coreml_vocoder is not None:
                 print("\n📋 CoreML Vocoder Info:")
-                if self.coreml_vocoder is not None:
-                    for input_spec in self.coreml_vocoder.get_spec().description.input:
-                        print(f"  Input - {input_spec.name}: {input_spec.type}")
-                    for output_spec in self.coreml_vocoder.get_spec().description.output:
-                        print(f"  Output - {output_spec.name}: {output_spec.type}")
-                    
-            except Exception as e:
-                print(f"⚠️ CoreML vocoder loading failed: {e}")
-                print("🔄 Falling back to PyTorch-only pipeline")
-                self.use_coreml = False
+                for input_spec in self.coreml_vocoder.get_spec().description.input:
+                    print(f"  Input - {input_spec.name}: {input_spec.type}")
+                for output_spec in self.coreml_vocoder.get_spec().description.output:
+                    print(f"  Output - {output_spec.name}: {output_spec.type}")
+
+            if force_engine == "coreml" and not self.use_coreml:
+                raise RuntimeError(
+                    "force_engine='coreml' but no CoreML models loaded. "
+                    f"Expected at least one of: {COREML_MODEL_PATH!r}, {COREML_DECODER_HAR_PATH!r}, "
+                    "or bucket packages matching kokoro_synthesizer_*s / KokoroDecoder_HAR_*s under coreml/."
+                )
         else:
-            print("⚠️ CoreML vocoder not found, using PyTorch-only pipeline")
-            self.use_coreml = False
-            
-        # Consider bucket models as CoreML availability
-        if getattr(self, 'coreml_synth_buckets', None) or getattr(self, 'coreml_decoder_har_buckets', None):
-            self.use_coreml = True
-            print(f"✅ Buckets → synth: {len(getattr(self, 'coreml_synth_buckets', {}))}, decoder_har: {len(getattr(self, 'coreml_decoder_har_buckets', {}))}")
+            print("⚠️ CoreML not used (unavailable or engine=pytorch); PyTorch-only pipeline")
+
         print(f"\n🎯 Pipeline Mode: {'Hybrid (PyTorch + CoreML)' if self.use_coreml else 'PyTorch Only'}")
     
     def extract_vocoder_inputs(self, text, voice='af_heart', speed=1.0):
