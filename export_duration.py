@@ -11,8 +11,12 @@ Outputs:
 - coreml/kokoro_duration.mlpackage
 """
 import os
+from pathlib import Path
+
 import numpy as np
 import coremltools as ct
+
+_ROOT = Path(__file__).resolve().parent
 import torch
 import torch.nn as nn
 
