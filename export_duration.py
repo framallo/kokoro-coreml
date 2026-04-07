@@ -130,12 +130,21 @@ def remove_training_ops(model):
             # Ensure LSTM is in eval mode
             module.eval()
 
+
+def _path_is_readable_file(p: Path) -> bool:
+    """True if path is a readable file; False on missing or broken symlinks / permission errors."""
+    try:
+        return p.is_file()
+    except OSError:
+        return False
+
+
 def main():
     cfg = _ROOT / "checkpoints/config.json"
     ckpt = _ROOT / "checkpoints/kokoro-v1_0.pth"
-    if cfg.exists() and ckpt.exists():
+    if _path_is_readable_file(cfg) and _path_is_readable_file(ckpt):
         kmodel = KModel(config=str(cfg), model=str(ckpt), disable_complex=True)
-    elif cfg.exists():
+    elif _path_is_readable_file(cfg):
         kmodel = KModel(config=str(cfg), disable_complex=True)
     else:
         kmodel = KModel(disable_complex=True)

@@ -259,10 +259,17 @@ def export_synthesizers(output_dir, buckets_str, debug=False, trace_length: int 
         if effective_t != frame_count:
             print(f"Adjusting frame_count from {frame_count} to {effective_t} to match {'decoder ' if mode=='decoder' else ''}trace_length alignment")
             frame_count = effective_t
-        pred_aln_trg = torch.zeros((trace_length, frame_count), dtype=torch.float32)
+        # Uniform alignment over tokens per frame so bmm(asr path) is non-zero; all-zeros caused NaNs in the vocoder.
+        pred_aln_trg = torch.full(
+            (trace_length, frame_count), 1.0 / float(trace_length), dtype=torch.float32
+        )
         
         print(f"[{time.ctime()}] Tracing model with torch.jit.trace...")
         example_inputs = (d, t_en, s, ref_s_out, pred_aln_trg)
+        # Vocoder uses torch.rand/randn; trace re-runs forward for verification.
+        torch.manual_seed(0)
+        if torch.cuda.is_available():
+            torch.cuda.manual_seed_all(0)
         try:
             with torch.no_grad():
                 if mode == "decoder":
@@ -285,9 +292,19 @@ def export_synthesizers(output_dir, buckets_str, debug=False, trace_length: int 
                     asr_rep = torch.zeros((B, expected_in, frame_count), dtype=torch.float32)
                     F0_rep = torch.zeros((B, full_f0_len), dtype=torch.float32)
                     N_rep = torch.zeros((B, full_f0_len), dtype=torch.float32)
-                    traced_model = torch.jit.trace(decoder_only, (asr_rep, F0_rep, N_rep, ref_s_out), strict=False)
+                    traced_model = torch.jit.trace(
+                        decoder_only,
+                        (asr_rep, F0_rep, N_rep, ref_s_out),
+                        strict=False,
+                        check_trace=False,
+                    )
                 else:
-                    traced_model = torch.jit.trace(synthesizer_model_base, example_inputs, strict=False)
+                    traced_model = torch.jit.trace(
+                        synthesizer_model_base,
+                        example_inputs,
+                        strict=False,
+                        check_trace=False,
+                    )
             print(f"[{time.ctime()}] Model trace complete.")
         except Exception as e:
             if "killed" in str(e).lower() or isinstance(e, SystemError):
@@ -437,12 +454,13 @@ def export_synthesizers(output_dir, buckets_str, debug=False, trace_length: int 
                 }
             else:
                 torch_args = (d, t_en, s, ref_s_out, pred_aln_trg)
+                # Must match torch_args — zeros produced NaNs / garbage in the vocoder vs real duration features.
                 sp = {
-                    "d": np.zeros(d_shape, dtype=np.float32),
-                    "t_en": np.zeros(t_en_shape, dtype=np.float32),
-                    "s": np.zeros(s_shape, dtype=np.float32),
-                    "ref_s": np.zeros(ref_s_shape, dtype=np.float32),
-                    "pred_aln_trg": np.zeros(pred_aln_trg_shape, dtype=np.float32),
+                    "d": d.detach().cpu().numpy().astype(np.float32),
+                    "t_en": t_en.detach().cpu().numpy().astype(np.float32),
+                    "s": s.detach().cpu().numpy().astype(np.float32),
+                    "ref_s": ref_s_out.detach().cpu().numpy().astype(np.float32),
+                    "pred_aln_trg": pred_aln_trg.detach().cpu().numpy().astype(np.float32),
                 }
             validate_synthesizer_traced_vs_coreml(
                 traced_model,
@@ -465,11 +483,11 @@ def export_synthesizers(output_dir, buckets_str, debug=False, trace_length: int 
             }
         else:
             smoke_pred = {
-                "d": np.zeros(d_shape, dtype=np.float32),
-                "t_en": np.zeros(t_en_shape, dtype=np.float32),
-                "s": np.zeros(s_shape, dtype=np.float32),
-                "ref_s": np.zeros(ref_s_shape, dtype=np.float32),
-                "pred_aln_trg": np.zeros(pred_aln_trg_shape, dtype=np.float32),
+                "d": d.detach().cpu().numpy().astype(np.float32),
+                "t_en": t_en.detach().cpu().numpy().astype(np.float32),
+                "s": s.detach().cpu().numpy().astype(np.float32),
+                "ref_s": ref_s_out.detach().cpu().numpy().astype(np.float32),
+                "pred_aln_trg": pred_aln_trg.detach().cpu().numpy().astype(np.float32),
             }
         smoke_predict_assert_no_cpu_fallback(
             ct, loaded, smoke_pred, phase=f"synth {name} predict"

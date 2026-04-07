@@ -54,8 +54,8 @@ def load_kokoro_for_export(
     kokoro_modules = importlib.util.module_from_spec(importlib.util.spec_from_loader(modules_name, loader=None))
     kokoro_modules.__dict__[istftnet_name] = kokoro_istftnet
     kokoro_modules.__dict__["__name__"] = modules_name
-    exec(kokoro_modules_src, kokoro_modules.__dict__)
     sys.modules[modules_name] = kokoro_modules
+    exec(kokoro_modules_src, kokoro_modules.__dict__)
 
     kokoro_model_src = (repo_root / "kokoro/model.py").read_text()
     kokoro_model_src = kokoro_model_src.replace(
@@ -70,7 +70,7 @@ def load_kokoro_for_export(
     kokoro_model.__dict__[istftnet_name] = kokoro_istftnet
     kokoro_model.__dict__[modules_name] = kokoro_modules
     kokoro_model.__dict__["__name__"] = model_name
-    exec(kokoro_model_src, kokoro_model.__dict__)
     sys.modules[model_name] = kokoro_model
+    exec(kokoro_model_src, kokoro_model.__dict__)
 
     return kokoro_istftnet, kokoro_modules, kokoro_model

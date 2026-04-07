@@ -4,7 +4,7 @@ torch==2.5.0
 torchaudio
 coremltools==8.3.0
 numpy==1.26.4
-transformers
+transformers==4.44.2
 huggingface_hub
 loguru
 misaki[en]>=0.9.4

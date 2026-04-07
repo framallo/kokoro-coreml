@@ -453,6 +453,14 @@ class Generator(nn.Module):
             x = self.ups[i](x)
             if i == self.num_upsamples - 1:
                 x = self.reflection_pad(x)
+            # Harmonic branch vs upsampled feature length can differ by a few samples (STFT / conv
+            # output rounding). Align before add — required for stable torch.jit.trace and Core ML.
+            tx = x.size(2)
+            ts = x_source.size(2)
+            if ts < tx:
+                x_source = F.pad(x_source, (0, tx - ts))
+            elif ts > tx:
+                x_source = x_source[:, :, :tx]
             x = x + x_source
             xs = None
             for j in range(self.num_kernels):
