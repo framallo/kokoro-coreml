@@ -1,9 +1,10 @@
 #!/usr/bin/env python3
 """
-Hybrid ANE-Accelerated TTS pipeline tests.
+Hybrid ANE-Accelerated TTS pipeline demo (CLI).
 
-Production orchestration lives in ``kokoro.coreml_pipeline.HybridTTSPipeline``.
-This script exercises that pipeline and optional ANE checks.
+Renamed from ``test_ane_pipeline.py`` so repo tooling does not treat it as a
+pytest module. Production orchestration lives in ``kokoro.coreml_pipeline.HybridTTSPipeline``.
+``run_single.py`` imports only that package—not this file.
 """
 
 import argparse

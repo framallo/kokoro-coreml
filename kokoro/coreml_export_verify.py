@@ -9,6 +9,7 @@ hardware or when logs are known to be noisy).
 
 Called by:
 - ``export_duration.py`` after ``ct.convert`` and ``predict`` smoke.
+- ``kokoro/coreml_numeric_validate.py`` for traced-vs-CoreML ``allclose`` gates (FP16 drift).
 - ``archive/export_vocoder.py`` after conversion and first ``predict`` (legacy).
 - ``export_synth/convert.py`` after each bucket save (reload + predict).
 """

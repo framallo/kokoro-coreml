@@ -10,6 +10,12 @@ import torch
 import torch.nn as nn
 
 from kokoro.conv_length import conv1d_output_length_from_module
+from kokoro.coreml_export_verify import (
+    assert_no_cpu_fallback_in_logs,
+    capture_ane_logs,
+    smoke_predict_assert_no_cpu_fallback,
+)
+from kokoro.coreml_numeric_validate import validate_synthesizer_traced_vs_coreml
 
 from .wrappers import (
     AdainResBlk1d,
@@ -308,101 +314,163 @@ def export_synthesizers(output_dir, buckets_str, debug=False, trace_length: int 
             pred_aln_trg_shape = (trace_length, frame_count)
         
         print(f"[{time.ctime()}] Converting to Core ML...")
-        try:
-            # compute_precision is only valid for mlprogram backend
-            cp_arg = None if convert_backend == "neuralnetwork" else chosen_precision
+        # compute_precision is only valid for mlprogram backend
+        cp_arg = None if convert_backend == "neuralnetwork" else chosen_precision
+        _cu = (
+            dict(compute_units=ct.ComputeUnit.ALL)
+            if convert_backend == "mlprogram"
+            else {}
+        )
+        with capture_ane_logs() as convert_buf:
+            try:
+                if mode == "decoder":
+                    ml_synthesizer = ct.convert(
+                        traced_model,
+                        inputs=[
+                            ct.TensorType(name="asr", shape=asr_shape, dtype=np.float32),
+                            ct.TensorType(name="F0_pred", shape=F0_shape, dtype=np.float32),
+                            ct.TensorType(name="N_pred", shape=N_shape, dtype=np.float32),
+                            ct.TensorType(name="ref_s", shape=(1, CoreMLExportConstants.VOICE_EMBEDDING_DIM), dtype=np.float32),
+                        ],
+                        outputs=[ct.TensorType(name="waveform")],
+                        convert_to=convert_backend,
+                        minimum_deployment_target=target,
+                        compute_precision=cp_arg,
+                        **_cu,
+                    )
+                else:
+                    ml_synthesizer = ct.convert(
+                        traced_model,
+                        inputs=[
+                            ct.TensorType(name="d", shape=d_shape, dtype=np.float32),
+                            ct.TensorType(name="t_en", shape=t_en_shape, dtype=np.float32),
+                            ct.TensorType(name="s", shape=s_shape, dtype=np.float32),
+                            ct.TensorType(name="ref_s", shape=ref_s_shape, dtype=np.float32),
+                            ct.TensorType(name="pred_aln_trg", shape=pred_aln_trg_shape, dtype=np.float32)
+                        ],
+                        outputs=[ct.TensorType(name="waveform")],
+                        convert_to=convert_backend,
+                        minimum_deployment_target=target,
+                        compute_precision=cp_arg,
+                        **_cu,
+                    )
+            except Exception:
+                print("\n⚠️ Core ML conversion failed, applying MIL graph workaround for broadcast mul ...")
+                from coremltools.converters.mil.mil import Builder as mb
+                from coremltools.converters.mil.mil import Program, Function
+                # Fallback: re-run convert with MIL op registry monkey-patch for mul to reshape to match channels
+                orig_mul = ct.converters.mil.frontend.torch.ops.mul
+                def patched_mul(context, node):
+                    try:
+                        return orig_mul(context, node)
+                    except Exception:
+                        x, y = context[node.inputs]
+                        # Insert a safe broadcast by expanding 1-d dims
+                        def _shape(val):
+                            return list(val.shape) if hasattr(val, 'shape') and val.shape is not None else None
+                        sx, sy = _shape(x), _shape(y)
+                        if sx is not None and sy is not None:
+                            # If ranks differ, expand the smaller to match
+                            while len(sx) < len(sy):
+                                x = mb.expand_dims(x=x, axes=[0])
+                                sx = [1] + sx
+                            while len(sy) < len(sx):
+                                y = mb.expand_dims(x=y, axes=[0])
+                                sy = [1] + sy
+                            # Replace size-1 dims with broadcastable ones
+                            shape_out = [max(a or 1, b or 1) for a, b in zip(sx, sy)]
+                            x = mb.broadcast_to(x=x, shape=shape_out)
+                            y = mb.broadcast_to(x=y, shape=shape_out)
+                        res = mb.mul(x=x, y=y, name=node.name)
+                        context.add(res)
+                ct.converters.mil.frontend.torch.ops.mul = patched_mul
+                cp_arg = None if convert_backend == "neuralnetwork" else chosen_precision
+                if mode == "decoder":
+                    ml_synthesizer = ct.convert(
+                        traced_model,
+                        inputs=[
+                            ct.TensorType(name="asr", shape=asr_shape, dtype=np.float32),
+                            ct.TensorType(name="F0_pred", shape=F0_shape, dtype=np.float32),
+                            ct.TensorType(name="N_pred", shape=N_shape, dtype=np.float32),
+                            ct.TensorType(name="ref_s", shape=(1, CoreMLExportConstants.VOICE_EMBEDDING_DIM), dtype=np.float32),
+                        ],
+                        outputs=[ct.TensorType(name="waveform")],
+                        convert_to=convert_backend,
+                        minimum_deployment_target=target,
+                        compute_precision=cp_arg,
+                        **_cu,
+                    )
+                else:
+                    ml_synthesizer = ct.convert(
+                        traced_model,
+                        inputs=[
+                            ct.TensorType(name="d", shape=d_shape, dtype=np.float32),
+                            ct.TensorType(name="t_en", shape=t_en_shape, dtype=np.float32),
+                            ct.TensorType(name="s", shape=s_shape, dtype=np.float32),
+                            ct.TensorType(name="ref_s", shape=ref_s_shape, dtype=np.float32),
+                            ct.TensorType(name="pred_aln_trg", shape=pred_aln_trg_shape, dtype=np.float32)
+                        ],
+                        outputs=[ct.TensorType(name="waveform")],
+                        convert_to=convert_backend,
+                        minimum_deployment_target=target,
+                        compute_precision=cp_arg,
+                        **_cu,
+                    )
+                # restore mul
+                ct.converters.mil.frontend.torch.ops.mul = orig_mul
+        assert_no_cpu_fallback_in_logs(
+            convert_buf.getvalue(), phase=f"synth {name} ct.convert"
+        )
+        if convert_backend == "mlprogram":
             if mode == "decoder":
-                ml_synthesizer = ct.convert(
-                    traced_model,
-                    inputs=[
-                        ct.TensorType(name="asr", shape=asr_shape, dtype=np.float32),
-                        ct.TensorType(name="F0_pred", shape=F0_shape, dtype=np.float32),
-                        ct.TensorType(name="N_pred", shape=N_shape, dtype=np.float32),
-                        ct.TensorType(name="ref_s", shape=(1, CoreMLExportConstants.VOICE_EMBEDDING_DIM), dtype=np.float32),
-                    ],
-                    outputs=[ct.TensorType(name="waveform")],
-                    convert_to=convert_backend,
-                    minimum_deployment_target=target,
-                    compute_precision=cp_arg
-                )
+                expected_in = kmodel.decoder.encode.conv1.in_channels - 2
+                B = 1
+                asr_rep = torch.zeros((B, expected_in, frame_count), dtype=torch.float32)
+                F0_rep = torch.zeros((B, full_f0_len), dtype=torch.float32)
+                N_rep = torch.zeros((B, full_f0_len), dtype=torch.float32)
+                torch_args = (asr_rep, F0_rep, N_rep, ref_s_out)
+                sp = {
+                    "asr": np.zeros(asr_shape, dtype=np.float32),
+                    "F0_pred": np.zeros(F0_shape, dtype=np.float32),
+                    "N_pred": np.zeros(N_shape, dtype=np.float32),
+                    "ref_s": np.zeros((1, CoreMLExportConstants.VOICE_EMBEDDING_DIM), dtype=np.float32),
+                }
             else:
-                ml_synthesizer = ct.convert(
-                    traced_model,
-                    inputs=[
-                        ct.TensorType(name="d", shape=d_shape, dtype=np.float32),
-                        ct.TensorType(name="t_en", shape=t_en_shape, dtype=np.float32),
-                        ct.TensorType(name="s", shape=s_shape, dtype=np.float32),
-                        ct.TensorType(name="ref_s", shape=ref_s_shape, dtype=np.float32),
-                        ct.TensorType(name="pred_aln_trg", shape=pred_aln_trg_shape, dtype=np.float32)
-                    ],
-                    outputs=[ct.TensorType(name="waveform")],
-                    convert_to=convert_backend,
-                    minimum_deployment_target=target,
-                    compute_precision=cp_arg
-                )
-        except Exception as e:
-            print("\n⚠️ Core ML conversion failed, applying MIL graph workaround for broadcast mul ...")
-            from coremltools.converters.mil.mil import Builder as mb
-            from coremltools.converters.mil.mil import Program, Function
-            # Fallback: re-run convert with MIL op registry monkey-patch for mul to reshape to match channels
-            orig_mul = ct.converters.mil.frontend.torch.ops.mul
-            def patched_mul(context, node):
-                try:
-                    return orig_mul(context, node)
-                except Exception:
-                    x, y = context[node.inputs]
-                    # Insert a safe broadcast by expanding 1-d dims
-                    def _shape(val):
-                        return list(val.shape) if hasattr(val, 'shape') and val.shape is not None else None
-                    sx, sy = _shape(x), _shape(y)
-                    if sx is not None and sy is not None:
-                        # If ranks differ, expand the smaller to match
-                        while len(sx) < len(sy):
-                            x = mb.expand_dims(x=x, axes=[0])
-                            sx = [1] + sx
-                        while len(sy) < len(sx):
-                            y = mb.expand_dims(x=y, axes=[0])
-                            sy = [1] + sy
-                        # Replace size-1 dims with broadcastable ones
-                        shape_out = [max(a or 1, b or 1) for a, b in zip(sx, sy)]
-                        x = mb.broadcast_to(x=x, shape=shape_out)
-                        y = mb.broadcast_to(x=y, shape=shape_out)
-                    res = mb.mul(x=x, y=y, name=node.name)
-                    context.add(res)
-            ct.converters.mil.frontend.torch.ops.mul = patched_mul
-            cp_arg = None if convert_backend == "neuralnetwork" else chosen_precision
-            if mode == "decoder":
-                ml_synthesizer = ct.convert(
-                    traced_model,
-                    inputs=[
-                        ct.TensorType(name="asr", shape=asr_shape, dtype=np.float32),
-                        ct.TensorType(name="F0_pred", shape=F0_shape, dtype=np.float32),
-                        ct.TensorType(name="N_pred", shape=N_shape, dtype=np.float32),
-                        ct.TensorType(name="ref_s", shape=(1, CoreMLExportConstants.VOICE_EMBEDDING_DIM), dtype=np.float32),
-                    ],
-                    outputs=[ct.TensorType(name="waveform")],
-                    convert_to=convert_backend,
-                    minimum_deployment_target=target,
-                    compute_precision=cp_arg
-                )
-            else:
-                ml_synthesizer = ct.convert(
-                    traced_model,
-                    inputs=[
-                        ct.TensorType(name="d", shape=d_shape, dtype=np.float32),
-                        ct.TensorType(name="t_en", shape=t_en_shape, dtype=np.float32),
-                        ct.TensorType(name="s", shape=s_shape, dtype=np.float32),
-                        ct.TensorType(name="ref_s", shape=ref_s_shape, dtype=np.float32),
-                        ct.TensorType(name="pred_aln_trg", shape=pred_aln_trg_shape, dtype=np.float32)
-                    ],
-                    outputs=[ct.TensorType(name="waveform")],
-                    convert_to=convert_backend,
-                    minimum_deployment_target=target,
-                    compute_precision=cp_arg
-                )
-            # restore mul
-            ct.converters.mil.frontend.torch.ops.mul = orig_mul
+                torch_args = (d, t_en, s, ref_s_out, pred_aln_trg)
+                sp = {
+                    "d": np.zeros(d_shape, dtype=np.float32),
+                    "t_en": np.zeros(t_en_shape, dtype=np.float32),
+                    "s": np.zeros(s_shape, dtype=np.float32),
+                    "ref_s": np.zeros(ref_s_shape, dtype=np.float32),
+                    "pred_aln_trg": np.zeros(pred_aln_trg_shape, dtype=np.float32),
+                }
+            validate_synthesizer_traced_vs_coreml(
+                traced_model,
+                ml_synthesizer,
+                predict_inputs=sp,
+                torch_forward_args=torch_args,
+            )
         print(f"[{time.ctime()}] Core ML conversion complete.")
         
         ml_synthesizer.save(synthesizer_file)
         print(f"✅ Saved Synthesizer Model ({name}) to: {synthesizer_file}")
+
+        loaded = ct.models.MLModel(synthesizer_file, compute_units=ct.ComputeUnit.ALL)
+        if mode == "decoder":
+            smoke_pred = {
+                "asr": np.zeros(asr_shape, dtype=np.float32),
+                "F0_pred": np.zeros(F0_shape, dtype=np.float32),
+                "N_pred": np.zeros(N_shape, dtype=np.float32),
+                "ref_s": np.zeros((1, CoreMLExportConstants.VOICE_EMBEDDING_DIM), dtype=np.float32),
+            }
+        else:
+            smoke_pred = {
+                "d": np.zeros(d_shape, dtype=np.float32),
+                "t_en": np.zeros(t_en_shape, dtype=np.float32),
+                "s": np.zeros(s_shape, dtype=np.float32),
+                "ref_s": np.zeros(ref_s_shape, dtype=np.float32),
+                "pred_aln_trg": np.zeros(pred_aln_trg_shape, dtype=np.float32),
+            }
+        smoke_predict_assert_no_cpu_fallback(
+            ct, loaded, smoke_pred, phase=f"synth {name} predict"
+        )

@@ -122,7 +122,7 @@ This baseline was captured before enabling GPU/ANE acceleration. The hybrid pipe
   - Torch 2.5.0, coremltools 8.3.0
   - Acceleration: MPS/GPU and ANE not used (CPU fallback)
 - **Method**:
-  - Ran `kokoro-coreml/test_ane_pipeline.py` which generates and times several sentences; saved WAVs to `kokoro-coreml/outputs/`.
+  - Ran `kokoro-coreml/demo_ane_pipeline.py` which generates and times several sentences; saved WAVs to `kokoro-coreml/outputs/`.
   - Voice: `af_heart`, speed: `1.0`, sample rate: 24 kHz.
 - **Results** (synthesis time vs. audio duration; lower RTF is faster):
   - "Hello world!": 2.994 s compute for 1.550 s audio → RTF ≈ 1.93× (overhead‑dominated)
@@ -216,7 +216,7 @@ PY
 ## 9. CoreML Decoder_HAR Buckets + Latency — 2025‑08‑19
 
 - Exported Decoder_HAR bucket models at 5s/15s/30s that accept exact hn‑nsf features from PyTorch (`har_spec`, `har_phase`).
-- Implemented single‑shot and grouped bucket decoding in `test_ane_pipeline.py` with 10% overlap and Hann crossfades; inverse STFT remains in PyTorch for fidelity.
+- Implemented single‑shot and grouped bucket decoding in `demo_ane_pipeline.py` with 10% overlap and Hann crossfades; inverse STFT remains in PyTorch for fidelity.
 - End‑to‑end latency on a ~23.7 s utterance (user text) — warm, averaged over 5 runs:
   - 5s bucket: ~1.350 s total (RTF ≈ 0.057)
   - 15s bucket: ~1.413 s total (RTF ≈ 0.060)

@@ -44,14 +44,14 @@ We will use CoreML's [Composite Operator](https://coremltools.readme.io/docs/com
     -   Ensure the `@register_torch_op` decorator is correctly pointing to the original `SourceModuleHnSinc` class.
     -   Remove the old `DummySource` monkey-patching logic.
 2.  **Export the New Model:** Run the modified export script to generate a new `KokoroVocoder_v2.mlpackage`.
-3.  **Verify Audio Quality (Subjective):** Run the `test_ane_pipeline.py` script with the new model. The output audio in `kokoro-coreml/outputs/` should sound rich, pitched, and natural, without the "buzzy" artifact. It should be indistinguishable from the pure PyTorch baseline.
+3.  **Verify Audio Quality (Subjective):** Run the `demo_ane_pipeline.py` script with the new model. The output audio in `kokoro-coreml/outputs/` should sound rich, pitched, and natural, without the "buzzy" artifact. It should be indistinguishable from the pure PyTorch baseline.
 4.  **Verify ANE Execution (Objective):** Use Instruments and `powermetrics` to confirm that the new, complex `TalkToMeSource` operator is still executing entirely on the ANE. There should be no regressions in performance or fallbacks to the CPU/GPU.
 
 ## 3. Deliverables
 
 Delivered for V1 (alternative path):
 1.  Decoder_HAR bucket models (5s/15s/30s) as `.mlpackage` artifacts
-2.  Single‑shot and grouped decode paths in `test_ane_pipeline.py` with overlap‑add stitching
+2.  Single‑shot and grouped decode paths in `demo_ane_pipeline.py` with overlap‑add stitching
 3.  Benchmarks and warmed latency breakdown (ANE vs CPU) recorded in `docs/learnings.md`
 
 Deferred beyond V1:

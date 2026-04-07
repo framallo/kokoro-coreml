@@ -113,6 +113,7 @@ import time
 import numpy as np
 import wave
 from pathlib import Path
+# Imports only kokoro.coreml_pipeline — no test_* or demo_* modules (production CLI).
 from kokoro.coreml_pipeline import HybridTTSPipeline
 
 

@@ -810,7 +810,7 @@ def main():
             print(f"\n🎉 Conversion Complete!")
             print(f"📁 CoreML vocoder saved to: {output_path}")
             print("\nNext steps:")
-            print("1. Test the vocoder with test_ane_pipeline.py")
+            print("1. Test the vocoder with demo_ane_pipeline.py (or run_single.py)")
             print("2. Verify ANE usage with Instruments or powermetrics")
             print("3. Compare performance vs CPU-only pipeline")
 

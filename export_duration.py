@@ -17,6 +17,12 @@ import torch
 import torch.nn as nn
 
 from kokoro._export_utils import load_kokoro_for_export
+from kokoro.coreml_export_verify import (
+    assert_no_cpu_fallback_in_logs,
+    capture_ane_logs,
+    merge_log_checks,
+)
+from kokoro.coreml_numeric_validate import validate_duration_traced_vs_coreml
 
 kokoro_istftnet, kokoro_modules, kokoro_model = load_kokoro_for_export(suffix="_duration")
 KModel = kokoro_model.KModel
@@ -167,26 +173,29 @@ def main():
 
     # Convert with fixed shapes to avoid E5RT stride conflicts
     # Use static shapes that E5RT can handle reliably
-    duration_ml = ct.convert(
-        traced,
-        inputs=[
-            ct.TensorType(name="input_ids",      shape=(1, 128),  dtype=np.int32),
-            ct.TensorType(name="ref_s",          shape=(1, 256),  dtype=np.float32),
-            ct.TensorType(name="speed",          shape=(1,),      dtype=np.float32),
-            ct.TensorType(name="attention_mask", shape=(1, 128),  dtype=np.int32),
-        ],
-        outputs=[
-            ct.TensorType(name="pred_dur"),
-            ct.TensorType(name="d"), 
-            ct.TensorType(name="t_en"),
-            ct.TensorType(name="s"),
-            ct.TensorType(name="ref_s_out"),  # Renamed to avoid conflict with input
-        ],
-        convert_to="mlprogram",
-        minimum_deployment_target=ct.target.macOS12,
-        compute_precision=ct.precision.FLOAT16,
-        compute_units=ct.ComputeUnit.ALL,  # Allow ANE optimization
-    )
+    with capture_ane_logs() as convert_buf:
+        duration_ml = ct.convert(
+            traced,
+            inputs=[
+                ct.TensorType(name="input_ids",      shape=(1, 128),  dtype=np.int32),
+                ct.TensorType(name="ref_s",          shape=(1, 256),  dtype=np.float32),
+                ct.TensorType(name="speed",          shape=(1,),      dtype=np.float32),
+                ct.TensorType(name="attention_mask", shape=(1, 128),  dtype=np.int32),
+            ],
+            outputs=[
+                ct.TensorType(name="pred_dur"),
+                ct.TensorType(name="d"), 
+                ct.TensorType(name="t_en"),
+                ct.TensorType(name="s"),
+                ct.TensorType(name="ref_s_out"),  # Renamed to avoid conflict with input
+            ],
+            convert_to="mlprogram",
+            minimum_deployment_target=ct.target.macOS12,
+            compute_precision=ct.precision.FLOAT16,
+            compute_units=ct.ComputeUnit.ALL,  # Allow ANE optimization
+        )
+    assert_no_cpu_fallback_in_logs(convert_buf.getvalue(), phase="duration ct.convert")
+    validate_duration_traced_vs_coreml(traced, duration_ml)
 
     out_dir = _ROOT / "coreml"
     out_dir.mkdir(parents=True, exist_ok=True)
@@ -196,26 +205,30 @@ def main():
     
     # Validate the exported model with fixed 128-token inputs
     print("🔍 Validating exported model with fixed shapes...")
+    predict_logs: list[str] = []
     for test_tokens in [16, 64, 128]:
-        try:
-            # Create fixed-size inputs (always 128 tokens)
-            input_ids = np.zeros((1, 128), dtype=np.int32)
-            input_ids[0, :test_tokens] = np.random.randint(1, 100, test_tokens)  # Fill first N with tokens
-            
-            attention_mask = np.zeros((1, 128), dtype=np.int32)
-            attention_mask[0, :test_tokens] = 1  # Mark actual tokens as 1, padding as 0
-            
-            test_input = {
-                "input_ids": input_ids,
-                "ref_s": np.zeros((1, 256), dtype=np.float32),
-                "speed": np.array([1.0], dtype=np.float32),
-                "attention_mask": attention_mask
-            }
+        # Create fixed-size inputs (always 128 tokens)
+        input_ids = np.zeros((1, 128), dtype=np.int32)
+        input_ids[0, :test_tokens] = np.random.randint(1, 100, test_tokens)  # Fill first N with tokens
+
+        attention_mask = np.zeros((1, 128), dtype=np.int32)
+        attention_mask[0, :test_tokens] = 1  # Mark actual tokens as 1, padding as 0
+
+        test_input = {
+            "input_ids": input_ids,
+            "ref_s": np.zeros((1, 256), dtype=np.float32),
+            "speed": np.array([1.0], dtype=np.float32),
+            "attention_mask": attention_mask,
+        }
+        with capture_ane_logs() as pred_buf:
             test_output = duration_ml.predict(test_input)
-            print(f"✓ Test tokens={test_tokens}: SUCCESS - output keys: {list(test_output.keys())}")
-        except Exception as e:
-            print(f"❌ Test tokens={test_tokens}: FAILED - {e}")
-            raise
+        predict_logs.append(pred_buf.getvalue())
+        print(
+            f"✓ Test tokens={test_tokens}: SUCCESS - output keys: {list(test_output.keys())}"
+        )
+    assert_no_cpu_fallback_in_logs(
+        merge_log_checks(*predict_logs), phase="duration predict"
+    )
     
     # Print model specs for debugging
     print("\n📋 Model input specifications:")

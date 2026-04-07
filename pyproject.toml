@@ -37,6 +37,5 @@ only-packages = true
 Homepage = "https://github.com/hexgrad/kokoro"
 Repository = "https://github.com/hexgrad/kokoro"
 
-# test_ane_pipeline.py is a CLI demo (ANE pipeline), not a pytest module.
 [tool.pytest.ini_options]
-collect_ignore = ["test_ane_pipeline.py"]
+testpaths = ["tests"]

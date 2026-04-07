@@ -2,7 +2,7 @@
 """Kokoro hybrid PyTorch + CoreML TTS pipeline (production orchestration).
 
 Orchestrates CPU text/encoder work with CoreML vocoder buckets and Decoder_HAR
-paths. Consumed by ``run_single.py`` and exercised by ``test_ane_pipeline.py``.
+paths. Consumed by ``run_single.py`` and exercised by ``demo_ane_pipeline.py`` (CLI demo).
 """
 
 from __future__ import annotations
