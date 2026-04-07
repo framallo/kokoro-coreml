@@ -2,6 +2,9 @@
 
 A production-ready PyTorch → CoreML conversion pipeline for [Kokoro-82M](https://huggingface.co/hexgrad/Kokoro-82M), enabling on-device text-to-speech on Apple Silicon with Apple Neural Engine acceleration.
 
+> 🤗 **Pre-converted `.mlpackage` files (drop-in for your app):** [huggingface.co/mattmireles/kokoro-coreml](https://huggingface.co/mattmireles/kokoro-coreml)
+> 🔗 **Source, exporters, Swift runtime (this repo):** [github.com/mattmireles/kokoro-coreml](https://github.com/mattmireles/kokoro-coreml)
+
 > **Kokoro** is an open-weight TTS model with 82 million parameters. Despite its lightweight architecture, it delivers comparable quality to larger models while being significantly faster and more cost-efficient. With Apache-licensed weights, Kokoro can be deployed anywhere from production environments to personal projects.
 
 ## 🧭 What’s in this repo (macOS integration, Aug 2025)
