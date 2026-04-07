@@ -33,7 +33,7 @@ HybridTTSPipeline system, providing:
 - Error handling and user feedback
 
 Cross-File Dependencies:
-- **Imports from**: test_ane_pipeline.py (HybridTTSPipeline)
+- **Imports from**: kokoro.coreml_pipeline (HybridTTSPipeline)
 - **Uses**: CoreML models from coreml/ directory (when available)
 - **Outputs**: WAV files with proper audio formatting
 - **Called by**: Development scripts, testing workflows, CI/CD pipelines
@@ -113,7 +113,7 @@ import time
 import numpy as np
 import wave
 from pathlib import Path
-from test_ane_pipeline import HybridTTSPipeline
+from kokoro.coreml_pipeline import HybridTTSPipeline
 
 
 # ==============================================================================
