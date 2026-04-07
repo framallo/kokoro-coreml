@@ -35,7 +35,7 @@
 - Hardware: Apple Silicon (M2 Ultra primary), macOS 15.6 (24G84)
 - Python venv: `torch==2.5.0`, `coremltools==8.3.0`, `numpy==1.26.4`, `safetensors`, `soundfile`
 - Export scripts (kokoro-coreml):
-  - Duration: `python examples/export_coreml.py --output_dir ../coreml --duration_only`
+  - Duration: `python export_duration.py`  *(writes to `kokoro-coreml/coreml/`)*
   - Synthesizer: `python export_synthesizers.py --buckets="5s" --debug --output_dir ../coreml`
 - App bundling: `.mlpackage` copied into `Contents/Resources/coreml/`; runtime compiles to temp `.mlmodelc` before loading.
 
@@ -159,7 +159,7 @@
   - `coreml/kokoro_duration.mlpackage`
   - `coreml/kokoro_synthesizer_5s.mlpackage` (and 10s)
 - Export commands used:
-  - `python kokoro-coreml/examples/export_coreml.py --output_dir ../coreml --duration_only`
+  - `cd kokoro-coreml && python export_duration.py`  *(writes to `kokoro-coreml/coreml/`)*
   - `python kokoro-coreml/export_synthesizers.py --buckets="5s" --debug --output_dir ../coreml`
 - Toolchain:
   - `torch==2.5.0`, `coremltools==8.3.0`, `numpy==1.26.4`, `safetensors`, `soundfile`

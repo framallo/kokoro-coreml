@@ -108,9 +108,12 @@ Symptoms and fixes:
 ## 📦 Files of interest
 
 - `coreml/kokoro_duration.mlpackage` – fixed-input duration model
-- `coreml/kokoro_decoder_only_3s.mlpackage` – fixed-shape decoder-only synthesizer
+- Synthesizer buckets from `export_synth/convert.py` (under `coreml/` by default):
+  - **`mode=full` (default):** `kokoro_synthesizer_<bucket>.mlpackage` (e.g. `kokoro_synthesizer_3s.mlpackage`, `kokoro_synthesizer_5s.mlpackage`)
+  - **`mode=decoder`:** `kokoro_decoder_only_<bucket>.mlpackage` (e.g. `kokoro_decoder_only_3s.mlpackage`)
+- Runtime also loads `coreml/KokoroDecoder_HAR_*s.mlpackage` buckets and `KokoroVocoder.mlpackage` / `KokoroDecoder_HAR.mlpackage` when present (see `kokoro/coreml_pipeline.py`).
 - `dev_tokenize.py` – Python tokenizer bridge (now prints pure JSON ids)
-- `docs/learnings.md` – running log of issues and mitigations (E5RT, BNNS, shapes)
+- `README/learnings.md` – running log of issues and mitigations (E5RT, BNNS, shapes)
 
 ## 🧠 Design rationale (why decoder‑only)
 
@@ -145,14 +148,21 @@ pip install torch==2.6.0 coremltools==8.3.0 safetensors numpy==1.26.4 soundfile
 git clone https://github.com/yourusername/kokoro-coreml.git
 cd kokoro-coreml
 
-# 4. Export to CoreML with HAR decoder buckets
-python examples/export_coreml.py --output_dir coreml
+# 4. Export to CoreML
+#    a) Duration model (dynamic text length; always writes to ./coreml)
+python export_duration.py
+#    b) Synthesizer HAR decoder buckets
+python export_synthesizers.py --buckets="3s,10s,45s" --output_dir coreml
 
-# Expected output:
-# ✅ kokoro_duration.mlpackage (dynamic text length)
-# ✅ KokoroDecoder_HAR_3s.mlpackage (3-second audio synthesis)
-# ✅ KokoroDecoder_HAR_10s.mlpackage (10-second audio synthesis)  
-# ✅ KokoroDecoder_HAR_45s.mlpackage (45-second audio synthesis)
+# If long buckets hit the trace_length=128 alignment-matrix blowup, use --debug
+# (sets trace_length=64). See README/learnings.md.
+# python export_synthesizers.py --buckets="5s" --debug --output_dir coreml
+
+# Expected output (under coreml/):
+# ✅ kokoro_duration.mlpackage          (dynamic text length)
+# ✅ kokoro_synthesizer_3s.mlpackage    (3-second audio synthesis)
+# ✅ kokoro_synthesizer_10s.mlpackage   (10-second audio synthesis)
+# ✅ kokoro_synthesizer_45s.mlpackage   (45-second audio synthesis)
 ```
 
 ### Verification
@@ -388,7 +398,7 @@ dependencies:
 ## 🛠️ Advanced Usage
 
 ### Custom Bucketing
-Modify the buckets in `export_coreml.py`:
+Pass `--buckets` to `export_synthesizers.py` (e.g. `--buckets="3s,5s,10s,30s"`), or edit the bucket table in `export_synth/convert.py`:
 ```python
 buckets = {
     "3s": 3 * 24000,   # 72,000 frames

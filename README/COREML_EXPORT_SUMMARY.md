@@ -5,10 +5,11 @@ Successfully implemented CoreML export for Kokoro TTS model with a two-stage app
 
 ## Key Files Changed
 
-### 1. `examples/export_coreml.py`
-- Main export script implementing the bucketing strategy
+### 1. `export_synthesizers.py` (+ `export_synth/` package)
+- Main synthesizer export script implementing the bucketing strategy
 - Created CoreML-friendly versions of TextEncoder and DurationEncoder that avoid pack_padded_sequence
-- Exports Duration Model (dynamic input) and multiple Synthesizer Models (fixed-size buckets)
+- Exports multiple Synthesizer Models (fixed-size buckets)
+- Use `export_duration.py` separately to export the Duration Model
 
 ### 2. `kokoro/istftnet.py` 
 - Modified line 380: Changed `torch.tensor(2)` to `torch.tensor(2.0)` to fix dtype issue

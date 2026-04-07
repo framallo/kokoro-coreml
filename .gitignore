@@ -173,3 +173,6 @@ cython_debug/
 # Local TTS debug outputs (WAV/CSV/JSON)
 outputs/
 outputs/**
+
+# Local scratch notes (not for version control)
+scratchpad.md
