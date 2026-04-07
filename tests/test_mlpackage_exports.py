@@ -63,10 +63,7 @@ def test_kokoro_synthesizer_3s_mlpackage_loads_and_predict_shapes():
     for name in ("d", "t_en", "s", "ref_s", "pred_aln_trg"):
         shape = _multiarray_shape(inputs[name])
         assert shape, f"missing static shape for {name}"
-        if name in ("d", "t_en", "s", "ref_s"):
-            test_inputs[name] = np.zeros(shape, dtype=np.float32)
-        else:
-            test_inputs[name] = np.zeros(shape, dtype=np.float32)
+        test_inputs[name] = np.zeros(shape, dtype=np.float32)
 
     out = model.predict(test_inputs)
     assert isinstance(out, dict)
