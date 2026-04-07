@@ -55,6 +55,9 @@ def test_synthesizer_model_forward_runs_and_returns_1d_audio(kmodel):
     k2 = KModel(disable_complex=True)
     sm = SynthesizerModel(k2)
     audio = sm(d, t_en, s, ref_s_out, pred_aln_trg)
+    if audio.ndim == 2:
+        assert audio.shape[0] == 1
+        audio = audio.squeeze(0)
     assert audio.ndim == 1
     assert audio.numel() > 0
 

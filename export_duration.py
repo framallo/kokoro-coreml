@@ -72,13 +72,14 @@ class CoreMLFriendlyDurationEncoder(nn.Module):
         x = x.transpose(0, 1)
         x = x.transpose(-1, -2)
         for block in self.lstms:
-            if isinstance(block, AdaLayerNorm):
+            if isinstance(block, AdaLayerNorm) or type(block).__name__ == "AdaLayerNorm":
                 x = block(x.transpose(-1, -2), style).transpose(-1, -2)
                 x = torch.cat([x, s.permute(1, 2, 0)], axis=1)
                 x.masked_fill_(masks.unsqueeze(-1).transpose(-1, -2), 0.0)
             else:
                 x = x.transpose(-1, -2)
-                block.flatten_parameters()
+                if isinstance(block, nn.LSTM):
+                    block.flatten_parameters()
                 x, _ = block(x)
                 x = nn.functional.dropout(x, p=self.dropout, training=False)
                 x = x.transpose(-1, -2)
