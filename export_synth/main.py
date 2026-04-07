@@ -4,12 +4,18 @@ from __future__ import annotations
 import argparse
 
 from .convert import export_synthesizers
+from .wrappers import CoreMLExportConstants
 
 
 def main() -> None:
     parser = argparse.ArgumentParser(description="Export Kokoro Synthesizer to CoreML with bucketing.")
     parser.add_argument("--output_dir", "-o", type=str, default="coreml", help="Output directory for mlpackage files.")
-    parser.add_argument("--buckets", type=str, default="3s", help="Comma-separated list of bucket sizes in seconds (e.g., '3s,5s,10s').")
+    parser.add_argument(
+        "--buckets",
+        type=str,
+        default=f"{CoreMLExportConstants.BUCKET_3S}s",
+        help="Comma-separated list of bucket sizes in seconds (e.g., '3s,5s,10s').",
+    )
     parser.add_argument("--debug", action="store_true", help="Use smaller trace_length for debugging to avoid memory issues.")
     parser.add_argument("--trace_length", type=int, default=None, help="Override trace length (tokens). Must match duration export.")
     parser.add_argument("--precision", type=str, default=None, help="Core ML precision: 'float16'|'fp16' or 'float32'|'fp32'. Default: float16")

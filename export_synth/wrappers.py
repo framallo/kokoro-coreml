@@ -28,14 +28,17 @@ class CoreMLExportConstants:
     
     # Audio format constants (matching AudioConstants from pipeline)
     SAMPLE_RATE = 24000  # Hz - Audio output sample rate
-    
-    # Bucket sample counts (duration * sample_rate)
-    BUCKET_3S_SAMPLES = BUCKET_3S * SAMPLE_RATE    # 72,000 samples
-    BUCKET_5S_SAMPLES = BUCKET_5S * SAMPLE_RATE    # 120,000 samples  
-    BUCKET_10S_SAMPLES = BUCKET_10S * SAMPLE_RATE  # 240,000 samples
-    BUCKET_30S_SAMPLES = BUCKET_30S * SAMPLE_RATE  # 720,000 samples
-    BUCKET_45S_SAMPLES = BUCKET_45S * SAMPLE_RATE  # 1,080,000 samples
-    
+
+    @classmethod
+    def audio_samples_for_seconds(cls, seconds: int) -> int:
+        """Audio frame count for a bucket of ``seconds`` at ``SAMPLE_RATE`` (single source of truth)."""
+        return int(seconds) * cls.SAMPLE_RATE
+
+    @classmethod
+    def bucket_dict_from_seconds(cls, seconds_list: list[int]) -> dict[str, int]:
+        """Map ``{\"3s\": 72000, ...}`` from integer second durations (matches export_synth.convert)."""
+        return {f"{s}s": cls.audio_samples_for_seconds(s) for s in seconds_list}
+
     # Model architecture constants
     VOICE_EMBEDDING_DIM = 256      # Total voice embedding dimension
     VOICE_STYLE_DIM = 128          # Style conditioning dimension

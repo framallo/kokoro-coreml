@@ -194,8 +194,8 @@ def export_synthesizers(output_dir, buckets_str, debug=False, trace_length: int 
     
     # Define buckets
     # e.g., "3s,5s,10s"
-    bucket_seconds = [int(b.replace('s','')) for b in buckets_str.split(',')]
-    buckets = {f"{sec}s": sec * CoreMLExportConstants.SAMPLE_RATE for sec in bucket_seconds}
+    bucket_seconds = [int(b.replace("s", "")) for b in buckets_str.split(",")]
+    buckets = CoreMLExportConstants.bucket_dict_from_seconds(bucket_seconds)
 
     synthesizer_model_base = SynthesizerModel(kmodel).eval()
     

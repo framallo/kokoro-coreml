@@ -63,6 +63,12 @@ from collections import OrderedDict
 
 # Load kokoro model code directly to avoid importing pipeline/misaki from package __init__
 from kokoro._export_utils import load_kokoro_for_export
+from kokoro.coreml_export_verify import (
+    assert_no_cpu_fallback_in_logs,
+    capture_ane_logs,
+    smoke_predict_assert_no_cpu_fallback,
+)
+from export_synth.wrappers import CoreMLExportConstants
 
 kokoro_istftnet, kokoro_modules, kokoro_model = load_kokoro_for_export(
     ROOT_DIR, suffix="_for_examples"
@@ -525,20 +531,35 @@ def export_models(kmodel, output_dir, duration_only=False, trace_length: int = 1
     with torch.no_grad():
         traced_duration_model = torch.jit.trace(duration_model, (input_ids, ref_s, speed, attention_mask))
 
-    ml_duration_model = ct.convert(
-        traced_duration_model,
-        inputs=[
-            ct.TensorType(name="input_ids",      shape=(trace_length,),                                       dtype=np.int32),
-            ct.TensorType(name="ref_s",          shape=(256,),                                                dtype=np.float32),
-            ct.TensorType(name="speed",          shape=(1,),                                                  dtype=np.float32),
-            ct.TensorType(name="attention_mask", shape=(trace_length,),                                       dtype=np.int32),
-        ],
-        outputs=[ct.TensorType(name="pred_dur"), ct.TensorType(name="d"), ct.TensorType(name="t_en"), ct.TensorType(name="s")],
-        convert_to="mlprogram",
-        minimum_deployment_target=ct.target.macOS12
+    with capture_ane_logs() as duration_convert_buf:
+        ml_duration_model = ct.convert(
+            traced_duration_model,
+            inputs=[
+                ct.TensorType(name="input_ids",      shape=(trace_length,),                                       dtype=np.int32),
+                ct.TensorType(name="ref_s",          shape=(256,),                                                dtype=np.float32),
+                ct.TensorType(name="speed",          shape=(1,),                                                  dtype=np.float32),
+                ct.TensorType(name="attention_mask", shape=(trace_length,),                                       dtype=np.int32),
+            ],
+            outputs=[ct.TensorType(name="pred_dur"), ct.TensorType(name="d"), ct.TensorType(name="t_en"), ct.TensorType(name="s")],
+            convert_to="mlprogram",
+            minimum_deployment_target=ct.target.macOS12,
+            compute_units=ct.ComputeUnit.ALL,
+        )
+    assert_no_cpu_fallback_in_logs(
+        duration_convert_buf.getvalue(), phase="examples export_coreml duration ct.convert"
     )
     ml_duration_model.save(duration_file)
     print(f"✅ Saved Duration Model to: {duration_file}")
+    loaded_dur = ct.models.MLModel(duration_file, compute_units=ct.ComputeUnit.ALL)
+    smoke_dur = {
+        "input_ids": np.zeros((trace_length,), dtype=np.int32),
+        "ref_s": np.zeros((256,), dtype=np.float32),
+        "speed": np.array([1.0], dtype=np.float32),
+        "attention_mask": np.ones((trace_length,), dtype=np.int32),
+    }
+    smoke_predict_assert_no_cpu_fallback(
+        ct, loaded_dur, smoke_dur, phase="examples export_coreml duration predict"
+    )
 
     # --- 2. Export multiple (fixed-size) SynthesizerModels ---
     if duration_only:
@@ -558,11 +579,10 @@ def export_models(kmodel, output_dir, duration_only=False, trace_length: int = 1
         ref_s_out = ref_s.unsqueeze(0) if ref_s.dim() == 1 else ref_s
         ref_s_out = ref_s_out + torch.zeros_like(ref_s_out)  # Non-aliased copy
     
-    buckets = {
-        "5s": 5 * 24000,   # 120k frames - minimum app-compatible bucket
-        # "10s": 10 * 24000,   # Enable after 5s succeeds  
-        # "20s": 20 * 24000,   # Enable after 5s succeeds
-    }
+    # Single source of truth: export_synth.wrappers.CoreMLExportConstants
+    buckets = CoreMLExportConstants.bucket_dict_from_seconds(
+        [CoreMLExportConstants.BUCKET_5S]
+    )
 
     synthesizer_model_base = SynthesizerModel(kmodel).eval()
 
@@ -581,21 +601,38 @@ def export_models(kmodel, output_dir, duration_only=False, trace_length: int = 1
         ref_s_shape = (1, 256)
         pred_aln_trg_shape = (trace_length, frame_count)
         
-        ml_synthesizer_model = ct.convert(
-            traced_synthesizer_model,
-            inputs=[
-                ct.TensorType(name="d", shape=d_shape),
-                ct.TensorType(name="t_en", shape=t_en_shape),
-                ct.TensorType(name="s", shape=s_shape),
-                ct.TensorType(name="ref_s", shape=ref_s_shape),
-                ct.TensorType(name="pred_aln_trg", shape=pred_aln_trg_shape)
-            ],
-            outputs=[ct.TensorType(name="waveform")],
-            convert_to="mlprogram",
-            minimum_deployment_target=ct.target.macOS13
+        with capture_ane_logs() as synth_convert_buf:
+            ml_synthesizer_model = ct.convert(
+                traced_synthesizer_model,
+                inputs=[
+                    ct.TensorType(name="d", shape=d_shape),
+                    ct.TensorType(name="t_en", shape=t_en_shape),
+                    ct.TensorType(name="s", shape=s_shape),
+                    ct.TensorType(name="ref_s", shape=ref_s_shape),
+                    ct.TensorType(name="pred_aln_trg", shape=pred_aln_trg_shape)
+                ],
+                outputs=[ct.TensorType(name="waveform")],
+                convert_to="mlprogram",
+                minimum_deployment_target=ct.target.macOS13,
+                compute_units=ct.ComputeUnit.ALL,
+            )
+        assert_no_cpu_fallback_in_logs(
+            synth_convert_buf.getvalue(),
+            phase=f"examples export_coreml synthesizer {name} ct.convert",
         )
         ml_synthesizer_model.save(synthesizer_file)
         print(f"✅ Saved Synthesizer Model to: {synthesizer_file}")
+        loaded_syn = ct.models.MLModel(synthesizer_file, compute_units=ct.ComputeUnit.ALL)
+        smoke_pred = {
+            "d": np.zeros(d_shape, dtype=np.float32),
+            "t_en": np.zeros(t_en_shape, dtype=np.float32),
+            "s": np.zeros(s_shape, dtype=np.float32),
+            "ref_s": np.zeros(ref_s_shape, dtype=np.float32),
+            "pred_aln_trg": np.zeros(pred_aln_trg_shape, dtype=np.float32),
+        }
+        smoke_predict_assert_no_cpu_fallback(
+            ct, loaded_syn, smoke_pred, phase=f"examples export_coreml synthesizer {name} predict"
+        )
 
 
 if __name__ == "__main__":

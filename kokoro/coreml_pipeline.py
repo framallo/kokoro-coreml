@@ -30,11 +30,15 @@ if COREML_AVAILABLE:
         COREML_AVAILABLE = False
         ct = None
 
+# 5 s @ 24 kHz per vocoder window chunk (matches export bucket seconds; see export_synth.wrappers.CoreMLExportConstants.BUCKET_5S)
+VOCODER_CHUNK_SAMPLES = 5 * 24000
+
 __all__ = [
     "HybridTTSPipeline",
     "COREML_MODEL_PATH",
     "COREML_DECODER_HAR_PATH",
     "COREML_AVAILABLE",
+    "VOCODER_CHUNK_SAMPLES",
 ]
 
 class HybridTTSPipeline:
@@ -636,7 +640,7 @@ class HybridTTSPipeline:
         
         try:
             # CoreML vocoder expects fixed windows; chunk instead of resample.
-            # Window sizes from export: asr=200, f0/n=400. Output per window observed ~120000 samples.
+            # Window sizes from export: asr=200, f0/n=400. Output per window ~VOCODER_CHUNK_SAMPLES.
             asr = vocoder_inputs['asr'].astype(np.float32)   # (1, 512, T_asr)
             f0 = vocoder_inputs['f0_curve'].astype(np.float32)  # (1, T_f0)
             n = vocoder_inputs['n'].astype(np.float32)       # (1, T_n)
@@ -650,10 +654,10 @@ class HybridTTSPipeline:
             hop_f0 = f0_win // 4  # 75% overlap for smoother continuity
             hop_asr = asr_win // 4
             num_windows = int(np.ceil((T_f0 - f0_win) / hop_f0)) + 1 if T_f0 > 0 else 0
-            # Pre-allocate overlap-add buffer (approx): each chunk ~120000 samples
-            chunk_len = 120000
+            # Pre-allocate overlap-add buffer (approx): each chunk VOCODER_CHUNK_SAMPLES
+            chunk_len = VOCODER_CHUNK_SAMPLES
             # Map hop in f0 frames to hop in audio samples using observed samples_per_f0_frame
-            samples_per_f0_frame = chunk_len // f0_win  # 120000/400 = 300
+            samples_per_f0_frame = chunk_len // f0_win
             hop_samples = hop_f0 * samples_per_f0_frame
             total_len = max(chunk_len, chunk_len + (num_windows - 1) * hop_samples)
             out_audio = np.zeros((total_len,), dtype=np.float32)
@@ -691,7 +695,7 @@ class HybridTTSPipeline:
                 }
                 result = self.coreml_vocoder.predict(cm_inputs)
                 audio_key = 'waveform' if 'waveform' in result else list(result.keys())[0]
-                chunk = result[audio_key].squeeze().astype(np.float32)  # (120000,)
+                chunk = result[audio_key].squeeze().astype(np.float32)  # length chunk_len
                 # Overlap-add with Hann crossfade
                 dst_start = w * hop_samples
                 dst_end = dst_start + chunk_len

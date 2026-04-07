@@ -327,9 +327,14 @@ class CustomSTFT(nn.Module):
 
         # Remove center padding applied during forward analysis.
         # Transposed convolution may produce extra samples, so careful trimming is needed.
+        # Guard: pad_len==0 would make waveform[..., 0:-0] an empty slice; need wlen > 2*pad_len.
         if self.center:
             pad_len = self.n_fft // 2
-            waveform = waveform[..., pad_len:-pad_len]
+            if pad_len > 0:
+                wlen = int(waveform.shape[-1])
+                if wlen > 2 * pad_len:
+                    waveform = waveform[..., pad_len:-pad_len]
+                # else: too short to strip symmetric padding; leave waveform unchanged
 
         # Trim to exact target length if specified.
         # Essential for maintaining input/output length consistency.
