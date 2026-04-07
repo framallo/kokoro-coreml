@@ -20,7 +20,12 @@ def main() -> None:
     parser.add_argument("--trace_length", type=int, default=None, help="Override trace length (tokens). Must match duration export.")
     parser.add_argument("--precision", type=str, default=None, help="Core ML precision: 'float16'|'fp16' or 'float32'|'fp32'. Default: float16")
     parser.add_argument("--backend", type=str, default=None, help="Core ML backend: 'mlprogram' (default) or 'neuralnetwork' ('nn')")
-    parser.add_argument("--mode", type=str, default="full", help="Export mode: 'full' (default) or 'decoder' for decoder-only model")
+    parser.add_argument(
+        "--mode",
+        type=str,
+        default="decoder",
+        help="Export mode: 'decoder' (default, recommended) or 'full' for the experimental full synthesizer",
+    )
     args = parser.parse_args()
 
     try:

@@ -127,6 +127,36 @@ TBD. Not manually confirmed. Likely **multiple factors**: (1) harmonic vs upsamp
 
 **2026-04-07**
 
+- **Hypothesis:** The export-time non-finite failure might be caused by the representative validation path rather than the saved `coreml/kokoro_synthesizer_3s.mlpackage` itself.
+- **Tried:** Loaded the saved 3s synthesizer package directly and ran `predict()` on multiple input recipes built from `DurationModel` outputs (`zero_ref_zero_ids`, `zero_ref_rand_ids`, `rand_ref_rand_ids`, `small_ref_rand_ids`) with uniform `pred_aln_trg`.
+- **Outcome:** **Failed** for all cases. The saved package returned `(1, 768000)` waveforms containing `-inf` / `inf` in every probe. This confirms the current full synthesizer artifact is numerically broken for representative inputs, not just blocked by the export-time validator.
+
+**2026-04-07**
+
+- **Hypothesis:** `coremltools` `MLModelValidator` could identify the exact Core ML op causing non-finite waveform output.
+- **Tried:** Followed current Core ML docs and instantiated `MLModelValidator(model=..., compute_unit=ct.ComputeUnit.CPU_ONLY)` against the broken synthesizer package.
+- **Outcome:** **Failed** immediately with `TypeError: MLModelValidator.__init__() got an unexpected keyword argument 'compute_unit'`. The installed `coremltools` API differs from the newer docs snippet, so this path needs version-specific introspection before it can help.
+
+**2026-04-07**
+
+- **Hypothesis:** The existing decoder-only 3s package might already be healthy if fed proper `asr` / `F0_pred` / `N_pred` inputs built from the duration model.
+- **Tried:** Manually reconstructed a decoder-only probe using `DurationModel`, a one-hot alignment matrix, and `kmodel.predictor.F0Ntrain(en, s)` before calling `coreml/kokoro_decoder_only_3s.mlpackage`.
+- **Outcome:** **Failed** early with `RuntimeError: Expected size for first two dimensions of batch2 tensor to be: [1, 640] but got: [1, 128]`. I rebuilt `en` with the wrong `d` orientation. Next step is to reuse the repo’s own `extract_vocoder_inputs` / backend path instead of hand-rolling the matmuls.
+
+**2026-04-07**
+
+- **Hypothesis:** The decoder-only runtime contract from the repo docs might already be correct, and only my manual probe was wrong.
+- **Tried:** Rebuilt the decoder-only probe with the correct raw `DurationModel` shape contract (`d [1,128,640]`, `t_en [1,512,128]`), then computed `en = d.transpose(-1, -2) @ pred_aln_trg`, `F0_pred/N_pred = predictor.F0Ntrain(en, s)`, and `asr = t_en @ pred_aln_trg` for the existing `coreml/kokoro_decoder_only_3s.mlpackage`.
+- **Outcome:** **Worked**. The package returned `waveform (1, 72000)` with all finite values. This proves the decoder-only architecture is healthy when fed realistic inputs.
+
+**2026-04-07**
+
+- **Hypothesis:** The current `export_synthesizers.py --mode decoder` path would reproduce the healthy decoder-only 3s package.
+- **Tried:** Ran `export_synthesizers.py --mode decoder --buckets 3s -o coreml`.
+- **Outcome:** **Failed**. The exporter still rewrote the 3s bucket to `frame_count=1280` (`Adjusting frame_count from 72000 to 1280 to match decoder trace_length alignment`) and then died in validation with `AssertionError: waveform: Core ML output has non-finite values`. So the decoder-only exporter has drifted away from the known-good 3s contract (`asr 120`, `F0/N 240`, `waveform 72000`).
+
+**2026-04-07**
+
 - **Hypothesis:** Removing `max_abs=0.15` alone would make the waveform parity gate realistic for raw vocoder samples.
 - **Tried:** Set synthesizer validation default `max_abs=None`; also tried `--precision float32`.
 - **Outcome:** **Failed**. Strict `allclose` still blew up (`max_abs_err=nan` / `2.02805e+16`). Raw traced-vs-Core ML waveform parity is not a reliable default ship gate here.

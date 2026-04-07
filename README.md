@@ -109,8 +109,8 @@ Symptoms and fixes:
 
 - `coreml/kokoro_duration.mlpackage` – fixed-input duration model
 - Synthesizer buckets from `export_synth/convert.py` (under `coreml/` by default):
-  - **`mode=full` (default):** `kokoro_synthesizer_<bucket>.mlpackage` (e.g. `kokoro_synthesizer_3s.mlpackage`, `kokoro_synthesizer_5s.mlpackage`)
-  - **`mode=decoder`:** `kokoro_decoder_only_<bucket>.mlpackage` (e.g. `kokoro_decoder_only_3s.mlpackage`)
+  - **`mode=decoder` (default, recommended):** `kokoro_decoder_only_<bucket>.mlpackage` (e.g. `kokoro_decoder_only_3s.mlpackage`)
+  - **`mode=full` (experimental):** `kokoro_synthesizer_<bucket>.mlpackage` (e.g. `kokoro_synthesizer_3s.mlpackage`, `kokoro_synthesizer_5s.mlpackage`)
 - Optional runtime models (not produced by `export_synth/convert.py`; legacy or hand-built): `KokoroVocoder.mlpackage`, `KokoroDecoder_HAR.mlpackage`, and bucket packages matching `KokoroDecoder_HAR_*s.mlpackage` if you add them under `coreml/` (see `kokoro/coreml_pipeline.py`).
 - `dev_tokenize.py` – Python tokenizer bridge (now prints pure JSON ids)
 - `README/learnings.md` – running log of issues and mitigations (E5RT, BNNS, shapes)
@@ -151,7 +151,7 @@ cd kokoro-coreml
 # 4. Export to CoreML
 #    a) Duration model (dynamic text length; always writes to ./coreml)
 python export_duration.py
-#    b) Synthesizer HAR decoder buckets
+#    b) Decoder-only buckets (recommended default mode)
 python export_synthesizers.py --buckets="3s,10s,45s" --output_dir coreml
 
 # If long buckets hit the trace_length=128 alignment-matrix blowup, use --debug
@@ -160,9 +160,9 @@ python export_synthesizers.py --buckets="3s,10s,45s" --output_dir coreml
 
 # Expected output (under coreml/):
 # ✅ kokoro_duration.mlpackage          (dynamic text length)
-# ✅ kokoro_synthesizer_3s.mlpackage    (3-second audio synthesis)
-# ✅ kokoro_synthesizer_10s.mlpackage   (10-second audio synthesis)
-# ✅ kokoro_synthesizer_45s.mlpackage   (45-second audio synthesis)
+# ✅ kokoro_decoder_only_3s.mlpackage   (3-second decoder-only synthesis)
+# ✅ kokoro_decoder_only_10s.mlpackage  (10-second decoder-only synthesis)
+# ✅ kokoro_decoder_only_45s.mlpackage  (45-second decoder-only synthesis)
 ```
 
 ### Verification
@@ -172,9 +172,9 @@ python export_synthesizers.py --buckets="3s,10s,45s" --output_dir coreml
 python -c "
 import coremltools as ct
 duration_model = ct.models.MLModel('coreml/kokoro_duration.mlpackage')
-synth_model = ct.models.MLModel('coreml/kokoro_synthesizer_3s.mlpackage')
+decoder_model = ct.models.MLModel('coreml/kokoro_decoder_only_3s.mlpackage')
 print(f'✅ Duration model: {duration_model}')
-print(f'✅ Synthesizer model: {synth_model}')
+print(f'✅ Decoder-only model: {decoder_model}')
 print('Models loaded successfully!')
 "
 ```

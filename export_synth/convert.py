@@ -239,25 +239,37 @@ def export_synthesizers(output_dir, buckets_str, debug=False, trace_length: int 
         target = ct.target.macOS13
     print(f"Using Core ML backend: {convert_backend}")
 
-    for name, frame_count in buckets.items():
-        print(f"\n--- Exporting Synthesizer for Bucket: {name} ({frame_count} frames) ---")
+    for name, bucket_samples in buckets.items():
+        print(f"\n--- Exporting Synthesizer for Bucket: {name} ({bucket_samples} samples) ---")
         if mode == "decoder":
             synthesizer_file = os.path.join(output_dir, f"kokoro_decoder_only_{name}.mlpackage")
         else:
             synthesizer_file = os.path.join(output_dir, f"kokoro_synthesizer_{name}.mlpackage")
 
-        # Align per frames per token (24kHz, 600 hop -> typical frames/token ratio)
-        frames_per_token = CoreMLExportConstants.FRAMES_PER_TOKEN
-        full_f0_len = trace_length * frames_per_token
         if mode == "decoder":
-            # ASR time == F0_conv(F0_curve) length (Conv1d k=3,s=2,p=1; not L//2)
-            effective_t = conv1d_output_length_from_module(
+            # Decoder-only buckets follow runtime audio geometry, not trace_length.
+            # Generator upsamples each F0 step by `f0_upsamp.scale_factor` audio samples.
+            f0_samples_per_step = int(round(float(kmodel.decoder.generator.f0_upsamp.scale_factor)))
+            if f0_samples_per_step <= 0:
+                raise ValueError(f"invalid f0_upsamp scale: {kmodel.decoder.generator.f0_upsamp.scale_factor}")
+            full_f0_len = int(round(bucket_samples / float(f0_samples_per_step)))
+            frame_count = conv1d_output_length_from_module(
                 full_f0_len, kmodel.decoder.F0_conv
             )
+            print(
+                f"Decoder-only geometry: {bucket_samples} samples -> "
+                f"F0/N length {full_f0_len} -> ASR length {frame_count}"
+            )
         else:
+            # Full synthesizer still aligns to export trace_length rather than bucket seconds.
+            frames_per_token = CoreMLExportConstants.FRAMES_PER_TOKEN
+            full_f0_len = trace_length * frames_per_token
             effective_t = full_f0_len
-        if effective_t != frame_count:
-            print(f"Adjusting frame_count from {frame_count} to {effective_t} to match {'decoder ' if mode=='decoder' else ''}trace_length alignment")
+            if effective_t != bucket_samples:
+                print(
+                    f"Adjusting frame_count from {bucket_samples} to {effective_t} "
+                    "to match trace_length alignment"
+                )
             frame_count = effective_t
         # Uniform alignment over tokens per frame so bmm(asr path) is non-zero; all-zeros caused NaNs in the vocoder.
         pred_aln_trg = torch.full(
