@@ -157,6 +157,12 @@ TBD. Not manually confirmed. Likely **multiple factors**: (1) harmonic vs upsamp
 
 **2026-04-07**
 
+- **Hypothesis:** The decoder-only exporter would work again if bucket geometry was derived from runtime audio seconds instead of `trace_length`.
+- **Tried:** Patched `export_synth/convert.py` so `mode=decoder` computes `F0/N` length from `bucket_samples / decoder.generator.f0_upsamp.scale_factor` and then derives ASR length through `decoder.F0_conv`, matching the known-good runtime contract (`3s -> F0/N 240, ASR 120, waveform 72000`). Also switched the CLI default to `mode=decoder`, updated README guidance, and added a decoder-only mlpackage integration test.
+- **Outcome:** **Worked**. `python export_synthesizers.py --buckets 3s -o coreml` now exports `coreml/kokoro_decoder_only_3s.mlpackage` successfully, the built-in numeric gate reports finite waveform output of shape `(72000,)`, and the targeted pytest suite passed (`10 passed`).
+
+**2026-04-07**
+
 - **Hypothesis:** Removing `max_abs=0.15` alone would make the waveform parity gate realistic for raw vocoder samples.
 - **Tried:** Set synthesizer validation default `max_abs=None`; also tried `--precision float32`.
 - **Outcome:** **Failed**. Strict `allclose` still blew up (`max_abs_err=nan` / `2.02805e+16`). Raw traced-vs-Core ML waveform parity is not a reliable default ship gate here.
