@@ -21,11 +21,19 @@ Key Technical Solutions:
 Usage:
     python examples/export_coreml.py --output_dir coreml
 
-Output:
-    - kokoro_duration.mlpackage: Dynamic duration prediction model
-    - kokoro_synthesizer_3s.mlpackage: 3-second synthesis bucket
-    - kokoro_synthesizer_5s.mlpackage: 5-second synthesis bucket
+Output (intentionally namespaced to avoid clobbering canonical artifacts):
+    - kokoro_duration_legacy.mlpackage: Dynamic duration prediction model (4-output schema:
+      pred_dur, d, t_en, s — no ref_s_out)
+    - kokoro_synthesizer_legacy_3s.mlpackage: 3-second synthesis bucket
+    - kokoro_synthesizer_legacy_5s.mlpackage: 5-second synthesis bucket
     - Additional buckets as configured
+
+WARNING:
+    The canonical exporter is ``export_synth/convert.py`` (CLI: ``export_synthesizers.py``).
+    Its DurationModel returns a 5-tuple including ``ref_s_out``, which is what the runtime
+    validator (``kokoro/coreml_numeric_validate.py``) and the Swift TalkToMe pipeline expect.
+    This example file deliberately uses a simpler 4-output schema for reference / bring-up
+    purposes only. Do NOT point production at the ``*_legacy*`` artifacts produced here.
 
 Performance:
     - 17x faster than real-time synthesis on M2 Ultra
@@ -524,7 +532,10 @@ def export_models(kmodel, output_dir, duration_only=False, trace_length: int = 1
     # --- 1. Export the (dynamic) DurationModel ---
     print("\n--- Exporting Duration Model ---")
     duration_model = DurationModel(kmodel).eval()
-    duration_file = os.path.join(output_dir, "kokoro_duration.mlpackage")
+    # Namespaced filename: this exporter produces a 4-output duration model, which is
+    # incompatible with the canonical 5-output schema expected by the runtime. Writing to
+    # a `_legacy` path makes it impossible to silently clobber the canonical artifact.
+    duration_file = os.path.join(output_dir, "kokoro_duration_legacy.mlpackage")
     
     # Use caller-provided trace length. Smaller values reduce memory use during export.
     # Must match synthesizer export to avoid shape/rank mismatches at runtime.
@@ -604,7 +615,9 @@ def export_models(kmodel, output_dir, duration_only=False, trace_length: int = 1
             )
             fc = effective_t
         print(f"Exporting synthesizer for bucket: {name} ({fc} frames)")
-        synthesizer_file = os.path.join(output_dir, f"kokoro_synthesizer_{name}.mlpackage")
+        # See note above duration_file: namespaced to avoid clobbering canonical artifacts
+        # produced by export_synth/convert.py.
+        synthesizer_file = os.path.join(output_dir, f"kokoro_synthesizer_legacy_{name}.mlpackage")
 
         pred_aln_trg = torch.zeros((trace_length, fc), dtype=torch.float32)
 
