@@ -11,48 +11,14 @@ Outputs:
 - coreml/kokoro_duration.mlpackage
 """
 import os
-import pathlib
 import numpy as np
 import coremltools as ct
 import torch
 import torch.nn as nn
 
-# Use the same module loading approach as the working export_coreml.py
-import importlib.util, sys
-_ROOT = pathlib.Path(__file__).resolve().parent
+from kokoro._export_utils import load_kokoro_for_export
 
-def _load_module_from(path_rel: str, name: str):
-    p = (_ROOT / path_rel).resolve()
-    spec = importlib.util.spec_from_file_location(name, p)
-    mod = importlib.util.module_from_spec(spec)
-    assert spec and spec.loader
-    spec.loader.exec_module(mod)
-    return mod
-
-# Load modules with unique names and proper relative import handling
-kokoro_istftnet = _load_module_from("kokoro/istftnet.py", "kokoro_istftnet_duration")
-sys.modules['kokoro_istftnet_duration'] = kokoro_istftnet
-
-kokoro_modules_src = (_ROOT / "kokoro/modules.py").read_text()
-# Fix relative imports in modules.py
-kokoro_modules_src = kokoro_modules_src.replace("from .istftnet import AdainResBlk1d", "from kokoro_istftnet_duration import AdainResBlk1d")
-kokoro_modules = importlib.util.module_from_spec(importlib.util.spec_from_loader("kokoro_modules_duration", loader=None))
-kokoro_modules.__dict__['kokoro_istftnet_duration'] = kokoro_istftnet
-kokoro_modules.__dict__['__name__'] = 'kokoro_modules_duration'
-exec(kokoro_modules_src, kokoro_modules.__dict__)
-sys.modules['kokoro_modules_duration'] = kokoro_modules
-
-kokoro_model_src = (_ROOT / "kokoro/model.py").read_text()
-# Fix relative imports in model.py
-kokoro_model_src = kokoro_model_src.replace("from .istftnet import Decoder", "from kokoro_istftnet_duration import Decoder")
-kokoro_model_src = kokoro_model_src.replace("from .modules import CustomAlbert, ProsodyPredictor, TextEncoder", "from kokoro_modules_duration import CustomAlbert, ProsodyPredictor, TextEncoder")
-kokoro_model = importlib.util.module_from_spec(importlib.util.spec_from_loader("kokoro_model_duration", loader=None))
-kokoro_model.__dict__['kokoro_istftnet_duration'] = kokoro_istftnet
-kokoro_model.__dict__['kokoro_modules_duration'] = kokoro_modules
-kokoro_model.__dict__['__name__'] = 'kokoro_model_duration'
-exec(kokoro_model_src, kokoro_model.__dict__)
-sys.modules['kokoro_model_duration'] = kokoro_model
-
+kokoro_istftnet, kokoro_modules, kokoro_model = load_kokoro_for_export(suffix="_duration")
 KModel = kokoro_model.KModel
 AdaLayerNorm = kokoro_modules.AdaLayerNorm
 

@@ -5,10 +5,6 @@ Loaded by export_synth.convert for tracing and ct.convert. Avoids importing
 """
 from __future__ import annotations
 
-import importlib.util
-import pathlib
-import sys
-
 import torch
 import torch.nn as nn
 
@@ -59,35 +55,9 @@ class CoreMLExportConstants:
     ANE_UTILIZATION_PERCENT = 90   # Expected Apple Neural Engine utilization
 
 
-# --- Dynamic Kokoro load (avoid kokoro package __init__) ---
-_REPO_ROOT = pathlib.Path(__file__).resolve().parent.parent
-def _load_module_from(path_rel: str, name: str):
-    p = (_REPO_ROOT / path_rel).resolve()
-    spec = importlib.util.spec_from_file_location(name, p)
-    mod = importlib.util.module_from_spec(spec)
-    assert spec and spec.loader
-    spec.loader.exec_module(mod)
-    return mod
+from kokoro._export_utils import load_kokoro_for_export
 
-kokoro_istftnet = _load_module_from("kokoro/istftnet.py", "kokoro_istftnet")
-sys.modules['kokoro_istftnet'] = kokoro_istftnet
-kokoro_modules_src = (_REPO_ROOT / "kokoro/modules.py").read_text()
-kokoro_modules_src = kokoro_modules_src.replace("from .istftnet import AdainResBlk1d", "from kokoro_istftnet import AdainResBlk1d")
-kokoro_modules = importlib.util.module_from_spec(importlib.util.spec_from_loader("kokoro_modules", loader=None))
-kokoro_modules.__dict__['kokoro_istftnet'] = kokoro_istftnet
-kokoro_modules.__dict__['__name__'] = 'kokoro_modules'
-exec(kokoro_modules_src, kokoro_modules.__dict__)
-sys.modules['kokoro_modules'] = kokoro_modules
-kokoro_model_src = (_REPO_ROOT / "kokoro/model.py").read_text()
-kokoro_model_src = kokoro_model_src.replace("from .istftnet import Decoder", "from kokoro_istftnet import Decoder")
-kokoro_model_src = kokoro_model_src.replace("from .modules import CustomAlbert, ProsodyPredictor, TextEncoder", "from kokoro_modules import CustomAlbert, ProsodyPredictor, TextEncoder")
-kokoro_model = importlib.util.module_from_spec(importlib.util.spec_from_loader("kokoro_model", loader=None))
-kokoro_model.__dict__['kokoro_istftnet'] = kokoro_istftnet
-kokoro_model.__dict__['kokoro_modules'] = kokoro_modules
-kokoro_model.__dict__['__name__'] = 'kokoro_model'
-exec(kokoro_model_src, kokoro_model.__dict__)
-sys.modules['kokoro_model'] = kokoro_model
-
+kokoro_istftnet, kokoro_modules, kokoro_model = load_kokoro_for_export(suffix="")
 KModel = kokoro_model.KModel
 LayerNorm = kokoro_modules.LayerNorm
 AdaLayerNorm = kokoro_modules.AdaLayerNorm
