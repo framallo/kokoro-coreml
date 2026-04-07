@@ -289,6 +289,7 @@ class HybridTTSPipeline:
 
     def _build_alignment_matrix(self, pred_dur_tokens: np.ndarray, trace_length: int, frame_count: int) -> np.ndarray:
         """Construct pred_aln_trg of shape (trace_length, frame_count) with one-hot repeats."""
+        assert trace_length >= 1 and frame_count >= 1, (trace_length, frame_count)
         # Pad or truncate token durations to trace_length
         pred_dur = np.zeros((trace_length,), dtype=np.int64)
         L = min(trace_length, pred_dur_tokens.shape[-1])
@@ -300,8 +301,16 @@ class HybridTTSPipeline:
         else:
             # pad with last valid token index
             pad = frame_count - repeat_idx.size
-            last_idx = repeat_idx[-1] if repeat_idx.size > 0 else 0
+            last_idx = int(repeat_idx[-1]) if repeat_idx.size > 0 else 0
+            last_idx = int(np.clip(last_idx, 0, trace_length - 1))
             repeat_idx = np.concatenate([repeat_idx, np.full((pad,), last_idx, dtype=repeat_idx.dtype)])
+        repeat_idx = np.clip(repeat_idx, 0, trace_length - 1)
+        assert repeat_idx.shape == (frame_count,)
+        assert bool(np.all((repeat_idx >= 0) & (repeat_idx < trace_length))), (
+            repeat_idx.min(),
+            repeat_idx.max(),
+            trace_length,
+        )
         mat = np.zeros((trace_length, frame_count), dtype=np.float32)
         mat[repeat_idx, np.arange(frame_count)] = 1.0
         return mat
