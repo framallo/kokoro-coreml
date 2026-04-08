@@ -174,5 +174,18 @@ cython_debug/
 outputs/
 outputs/**
 
+# Local MPS / device debug samples (same idea as outputs/)
+outputs_mps/
+
+# macOS
+.DS_Store
+
+# Local Python virtualenv (named variants; `.venv` alone does not match `.venv-coreml`)
+.venv-coreml/
+
+# Cursor / Agents: local symlinks to `.claude/skills` (canonical copy is under `.claude/`)
+.cursor/skills
+.agents/skills
+
 # Local scratch notes (not for version control)
 scratchpad.md
