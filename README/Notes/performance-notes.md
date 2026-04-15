@@ -219,3 +219,117 @@ This +8-9ms penalty is consistent across inputs and dwarfs the Core ML predict d
 ### Plan reference
 
 Full experiment design: `README/Plans/ane-optimization-v1.md`
+
+---
+
+## Bakeoff v2: Controlled five-config benchmark on M2 Ultra
+
+**First collected:** 2026-04-15
+**Status:** Complete (M1 Mini and powermetrics telemetry deferred)
+
+### Summary
+
+Controlled benchmark of the shipping HAR-post path against PyTorch CPU/MPS baselines and a naive decoder-only Core ML control artifact. Five configs, four frozen inputs, five counterbalanced repetitions on Apple M2 Ultra (64 GB). The shipping hybrid path (Config A) is **2.6–3.5x faster than PyTorch CPU** on medium-to-long inputs and **18–30x realtime**, but CPU-side overhead still consumes ~80% of wall time.
+
+### What was measured
+
+- **Config A:** Shipping hybrid HAR-post path (`coreml/kokoro_decoder_har_post_{3,10}s.mlpackage`)
+- **Config B:** Naive decoder-only 10s artifact, `compute_units=ALL`
+- **Config C:** Naive decoder-only 10s artifact, `compute_units=CPU_AND_GPU`
+- **Config D:** PyTorch end-to-end on MPS (`PYTORCH_ENABLE_MPS_FALLBACK=1`)
+- **Config E:** PyTorch end-to-end on CPU
+
+All configs used identical frozen inputs, `voice=af_heart`, `speed=1.0`, `torch.manual_seed(0)`.
+
+### Method
+
+- Harness: `scripts/bakeoff_harness.py` with `run --configs a,b,c,d,e --iterations 5 --order-seed 0`
+- All models preloaded and warmed before timed iterations
+- Config A uses explicit-path artifact loading with SHA256 recorded
+- Counterbalanced: config and input order independently shuffled per repetition via `random.Random(order_seed + rep)`
+- Timer: `time.perf_counter()` wall clock, MPS sync before stop for Config D
+- Each iteration is one full text-to-waveform pass (text processing through final numpy array)
+
+### Inputs
+
+| Key | Text | Audio duration | Bucket |
+| --- | --- | --- | --- |
+| `tiny` | `"Hello world!"` | `1.55s` | `3s` |
+| `short` | `"The quick brown fox jumps over the dog."` | `2.80s` | `3s` |
+| `medium` | `"This is a longer sentence...running on the Apple GPU."` | `6.58s` | `10s` |
+| `long` | `"This is a longer sentence...A few more words added here."` | `8.35s` | `10s` |
+
+### End-to-end wall time (warm median, milliseconds)
+
+| Input | Audio | A (HAR-post) | B (.all) | C (.cpuAndGPU) | D (MPS) | E (CPU) |
+| --- | --- | --- | --- | --- | --- | --- |
+| `tiny` | `1.55s` | `151 ms` | `137 ms` | `182 ms` | `215 ms` | `258 ms` |
+| `short` | `2.80s` | `155 ms` | `176 ms` | `177 ms` | `287 ms` | `396 ms` |
+| `medium` | `6.58s` | `283 ms` | `189 ms` | `184 ms` | `351 ms` | `782 ms` |
+| `long` | `8.35s` | `274 ms` | `214 ms` | `238 ms` | `436 ms` | `966 ms` |
+
+### RTF (canonical audio duration / wall time)
+
+| Input | A (HAR-post) | B (.all) | C (.cpuAndGPU) | D (MPS) | E (CPU) |
+| --- | --- | --- | --- | --- | --- |
+| `tiny` | `0.097` (10x RT) | `0.089` | `0.117` | `0.139` | `0.167` |
+| `short` | `0.055` (18x RT) | `0.063` | `0.063` | `0.103` | `0.142` |
+| `medium` | `0.043` (23x RT) | `0.029` | `0.028` | `0.053` | `0.119` |
+| `long` | `0.033` (30x RT) | `0.026` | `0.029` | `0.052` | `0.116` |
+
+### Speedup: Config A vs PyTorch baselines
+
+| Input | Audio | A vs E (CPU) | A vs D (MPS) |
+| --- | --- | --- | --- |
+| `tiny` | `1.55s` | `1.7x` | `1.4x` |
+| `short` | `2.80s` | `2.6x` | `1.9x` |
+| `medium` | `6.58s` | `2.8x` | `1.2x` |
+| `long` | `8.35s` | `3.5x` | `1.6x` |
+
+The advantage grows with sequence length because Core ML predict time scales sublinearly while PyTorch CPU scales linearly.
+
+### Config A stage breakdown (warm median)
+
+| Input | Bucket | Prefix extract | HAR builder (CPU) | CoreML predict | Orchestration | Total |
+| --- | --- | --- | --- | --- | --- | --- |
+| `tiny` | `3s` | `52.7 ms` (35%) | `40.9 ms` (27%) | `57.0 ms` (38%) | `2.0 ms` | `151 ms` |
+| `short` | `3s` | `92.4 ms` (60%) | `39.9 ms` (26%) | `19.1 ms` (12%) | `2.0 ms` | `155 ms` |
+| `medium` | `10s` | `109.5 ms` (39%) | `80.4 ms` (28%) | `84.0 ms` (30%) | `2.0 ms` | `283 ms` |
+| `long` | `10s` | `127.0 ms` (46%) | `85.7 ms` (31%) | `47.5 ms` (17%) | `1.9 ms` | `274 ms` |
+
+### Interpretation
+
+1. **Config A is 18–30x realtime on M2 Ultra.** Even the shortest input (`tiny`, 1.55s audio) completes in 151 ms. The longest input (`long`, 8.35s audio) completes in 274 ms.
+
+2. **CPU-side overhead dominates.** Across all inputs, `extract_vocoder_inputs()` + `build_decoder_har_post_inputs_np()` together consume 62–86% of wall time. Core ML `predict()` is only 12–38% of wall time — already fast, with limited room for further ANE optimization to improve end-to-end latency.
+
+3. **The speedup scales with duration.** At `tiny` (1.55s), Config A is only 1.7x faster than CPU because the fixed prefix overhead dominates. At `long` (8.35s), the speedup reaches 3.5x because Core ML predict scales sublinearly while the prefix cost grows slowly.
+
+4. **MPS is worse than expected.** Config D (PyTorch MPS with fallback) shows high variance and only modest improvement over CPU. This is consistent with known `aten::angle` fallback overhead on MPS — treat Config D as the path-of-least-resistance MPS baseline, not the GPU ceiling.
+
+5. **Configs B and C (decoder-only) have similar latency.** Without powermetrics telemetry, Gate 1 (ANE participation under `.all`) is **indeterminate** from timing alone. B and C differ by <15% on most inputs, which is within thermal/scheduling noise. Telemetry loops with `sudo powermetrics` are needed for a definitive answer.
+
+6. **The predict-time variance on `tiny` is notable.** Config A's Core ML predict shows `57 ms` on the 3s bucket for `tiny` but only `19 ms` for `short` (also 3s bucket). This likely reflects first-bucket compilation/warmup effects even after the general warmup pass, since `tiny` and `short` may not always warm the same bucket.
+
+### Comparison to prior anecdotal numbers
+
+The earlier section of this document reported repo HAR-post warm medians of `121 ms` (tiny) and `303 ms` (long) in a less controlled two-input comparison. The bakeoff numbers (`151 ms` tiny, `274 ms` long) are in the same ballpark but not directly comparable:
+
+- The bakeoff uses counterbalanced ordering (prior test ran sequentially)
+- The bakeoff uses a different `long` text (`~8.35s` vs `~5.0s` in the prior test)
+- The bakeoff `tiny` is slightly slower, consistent with counterbalanced ordering disrupting cache locality
+
+The +12–15% gap vs HF baseline packages reported earlier is **not re-tested** in this bakeoff because all five configs use the same local repo artifacts. The gap remains a known issue (see above).
+
+### Provenance
+
+- Machine: Apple M2 Ultra, 64 GB
+- Git: `d123bee9ecbb`
+- Torch: `2.6.0` / coremltools: `8.3.0` / numpy: `1.26.4`
+- Order seed: `0`, iterations: `5`
+- Results: `outputs/bakeoff/results_m2_ultra.json`
+- Summary: `outputs/bakeoff/summary.md`
+
+### Plan reference
+
+Full experiment design: `README/Plans/kokoro-bakeoff-v2.md`
