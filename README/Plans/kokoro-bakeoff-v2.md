@@ -620,9 +620,11 @@ explicit-path loading.
 
 **Tasks:**
 
-- [ ] Install the same benchmark environment from `requirements-bakeoff.txt`.
-- [ ] Export `PYTORCH_ENABLE_MPS_FALLBACK=1` before any Config D run.
-- [ ] Copy the frozen M2 Ultra input manifest
+- [x] ~~Install the same benchmark environment from `requirements-bakeoff.txt`.~~
+      **Deferred:** M1 Mini hardware not available during this benchmark session.
+      Skip file written to `outputs/bakeoff/results_m1_mini_skipped.json`.
+- [ ] ~~Export `PYTORCH_ENABLE_MPS_FALLBACK=1` before any Config D run.~~
+- [ ] ~~Copy the frozen M2 Ultra input manifest
       (`outputs/bakeoff/input_manifest.json`) to the M1 Mini. **Do not re-run
       `prepare-inputs` on M1** — canonical durations must come from a single
       machine so RTF denominators are comparable across the dataset.
