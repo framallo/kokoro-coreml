@@ -97,6 +97,12 @@ requirements for `scripts/bakeoff_harness.py`.
   decoder-only 10s Core ML artifact. The only variable is load-time
   `compute_units`:
   `ct.ComputeUnit.ALL` for B and `ct.ComputeUnit.CPU_AND_GPU` for C.
+  **Known quality caveat:** The decoder-only Core ML artifact currently produces
+  unintelligible audio (correlation ~0.21 vs export-matched PyTorch; see
+  `README/Notes/debug-notes.md`). This does **not** invalidate B/C for this
+  bakeoff: Configs B/C measure **scheduling throughput and ANE participation**,
+  not audio quality. The model still exercises the same compute graph and memory
+  traffic pattern regardless of output fidelity.
 - **Diagnostic CPU-only control is not a headline config:** A temporary
   `.cpuOnly` load of the same decoder-only artifact may be used inside
   `telemetry-loop` and Gate 1 analysis, but it is not part of the main five-row
@@ -105,8 +111,15 @@ requirements for `scripts/bakeoff_harness.py`.
   warmup happen before timed iterations. Timed runs measure steady-state wall
   time only.
 - **Timer discipline:** Wall time starts before text processing and ends after
-  the final waveform buffer is ready. For MPS, call `torch.mps.synchronize()`
-  immediately before stopping the timer.
+  the final waveform buffer is ready (numpy array fully materialized).
+  Config-specific sync rules:
+  - **Config A (HAR-post):** No sync needed; output is already a numpy array
+    from `np.asarray(prediction["waveform"]).squeeze()`.
+  - **Configs B/C (decoder-only):** No sync needed; Core ML `predict()` is
+    synchronous and returns numpy arrays.
+  - **Config D (MPS):** Call `torch.mps.synchronize()` immediately before
+    stopping the wall timer, then `.cpu().numpy()` the output tensor.
+  - **Config E (CPU):** No sync needed; output is already on CPU.
 - **MPS fallback is explicit:** Config D requires
   `PYTORCH_ENABLE_MPS_FALLBACK=1` in the benchmark environment. If that env var
   is absent, do not treat the run as the repo’s intended MPS baseline.
@@ -117,7 +130,10 @@ requirements for `scripts/bakeoff_harness.py`.
   timed iteration.
 - **Counterbalanced order:** The harness must not run configs or inputs in a
   single fixed order. Use a deterministic order seed and counterbalance across
-  repetitions.
+  repetitions. The PRNG must be `random.Random(order_seed + repetition_index)`
+  using Python's stdlib `random` module, with `random.shuffle()` applied
+  separately to config and input lists per repetition. This ensures exact
+  reproducibility from a given `--order-seed` across implementations.
 - **Telemetry proof is loop-based:** Gate 1 cannot rely on a single short
   inference call plus one `powermetrics -i 1000` sample. Use a sustained loop.
 - **Run manifest is mandatory:** Every results file records git commit, dirty
@@ -130,13 +146,30 @@ requirements for `scripts/bakeoff_harness.py`.
   [kokoro/coreml_pipeline.py](/Users/mm/Documents/GitHub/kokoro-coreml/kokoro/coreml_pipeline.py:205)
   is the shared DurationModel + alignment + hn-nsf entry point.
 - **Current shipping ANE backend:** `decoder_har_post_bucket_impl()` in
-  [kokoro/synthesis_backends.py](/Users/mm/Documents/GitHub/kokoro-coreml/kokoro/synthesis_backends.py:84)
+  [kokoro/synthesis_backends.py](/Users/mm/Documents/GitHub/kokoro-coreml/kokoro/synthesis_backends.py:167)
   defines the current HAR-post runtime contract.
 - **Canonical decoder-only export path:** `python -m export_synth.main --mode decoder --buckets ...`
   routes through [export_synth/main.py](/Users/mm/Documents/GitHub/kokoro-coreml/export_synth/main.py:10)
   and [export_synth/convert.py](/Users/mm/Documents/GitHub/kokoro-coreml/export_synth/convert.py:391).
 - **Integration coverage:** [tests/test_mlpackage_exports.py](/Users/mm/Documents/GitHub/kokoro-coreml/tests/test_mlpackage_exports.py:83)
   already validates the decoder-only and HAR-post package I/O contracts.
+
+## Prior Benchmark Scripts (Superseded)
+
+The following scripts in `scripts/` predate this harness. They are **superseded**
+by `scripts/bakeoff_harness.py` and should not be modified or extended as part of
+this plan. They remain in-tree during implementation as reference for stage-timer
+placement and preset text selection. **After the first confirmed full bakeoff
+run on M2 Ultra, move them to `scripts/archive/` in a cleanup commit.**
+
+- `bench_decoder_har_post.py` — early HAR-post timing loop, no provenance.
+- `bench_decoder_har_post_predict.py` — detailed predict-level timing, no
+  counterbalancing or input manifest.
+- `bench_pipeline_stages.py` — stage-level orchestration timing and `PRESETS`
+  dict (used as starting point for `BAKEOFF_INPUTS` text selection).
+- `compare_decoder_har_post_waveforms.py` — waveform comparison utility.
+- `ane_verify.sh` — `powermetrics`-based ANE activity check (superseded by
+  `telemetry-loop` mode).
 
 ## Fresh Baseline (Current State)
 
@@ -147,6 +180,11 @@ requirements for `scripts/bakeoff_harness.py`.
 - **Current HAR-post smoke reference:** The repo notes one short HAR-post smoke
   run at `time_sec≈0.374`, `audio_sec≈1.36`, `RTF≈0.27`, but the paired PyTorch
   comparison used a different output duration and is explicitly not a clean A/B.
+- **Known regression vs HF baseline:** `README/Notes/performance-notes.md`
+  documents that the current repo HAR-post packages are 12–15% slower than the
+  Hugging Face baseline packages on warm calls. Config A measures the **local
+  repo artifacts**, not the HF baseline. Do not compare Config A RTF numbers
+  against prior HF-based anecdotes without accounting for this gap.
 - **Known gaps:** No reproducible dataset, no run manifest with artifact hashes,
   no sustained telemetry loop for naive Core ML, and no counterbalanced timing.
 
@@ -154,10 +192,16 @@ requirements for `scripts/bakeoff_harness.py`.
 
 ```text
 scripts/bakeoff_harness.py   <- one harness with prepare-inputs / run / telemetry-loop / summarize
-requirements-bakeoff.txt     <- pinned benchmark environment
+requirements-bakeoff.txt     <- pinned benchmark environment (inherits requirements-export.txt)
 outputs/bakeoff/             <- manifests, results, telemetry logs, summaries
 outputs/bakeoff/models/      <- freshly exported naive decoder-only control artifact
 ```
+
+**LOC guard:** The Phase 1 verification step must include a `wc -l` check on
+`scripts/bakeoff_harness.py`. If it exceeds 800 LOC, extract `summarize` mode
+to `scripts/bakeoff_summarize.py` and import it before merging. The four modes
+are designed so `summarize` (read-only, no model loading) has zero coupling to
+the benchmark contexts and can be split without refactoring the rest.
 
 Headline configs:
 
@@ -169,10 +213,10 @@ Config D: PyTorch end-to-end on MPS (known fallback-heavy)
 Config E: PyTorch end-to-end on CPU
 ```
 
-Diagnostic-only control:
+Diagnostic-only control (valid for `telemetry-loop --config` only, **not** for `run --configs`):
 
 ```text
-Config Bcpu: Same naive decoder-only 10s artifact, loaded with compute_units=CPU_ONLY
+Config bcpu: Same naive decoder-only 10s artifact, loaded with compute_units=CPU_ONLY
 ```
 
 Why this split is correct for the current repo:
@@ -252,6 +296,14 @@ Fields that do not apply to a config are `null`.
 For Configs B/C/D/E, the stage timing fields are `null` unless the harness adds
 additional config-specific timers later.
 
+### Telemetry File Convention
+
+Telemetry logs use the fixed naming pattern
+`outputs/bakeoff/powermetrics_config_{config_id}.txt` where `{config_id}` is
+`b_all`, `c_cpu_and_gpu`, or `bcpu_cpu_only`. The `summarize` mode reads
+telemetry from this exact glob pattern. Phase 3 commands must use these filenames
+— any deviation causes `summarize` to silently emit "no telemetry data."
+
 ## Implementation Phases
 
 > Do one phase at a time. Verify before proceeding.
@@ -266,19 +318,32 @@ without truncation.
 - [ ] Create `BAKEOFF_INPUTS` in `scripts/bakeoff_harness.py` with exactly four
       named inputs:
   - `tiny` targeting `~1s`
-  - `short` targeting `~3s`
+  - `short` targeting `~3s` (must stay at or below `3.0s`; see bucket boundary assertion)
   - `medium` targeting `~6s`
   - `long` targeting `~9s`
-      Do not exceed the current 10s HAR-post ceiling.
+      Do not exceed the current 10s HAR-post ceiling. Use the existing
+      `PRESETS` in `scripts/bench_pipeline_stages.py:38` as a starting point
+      for text selection — those texts were already tuned to hit similar
+      duration targets. Adjust only if `prepare-inputs` shows a text violates
+      the duration or bucket constraints.
 - [ ] Hardcode `VOICE = "af_heart"` and `SPEED = 1.0`.
 - [ ] Implement `prepare-inputs` mode:
   - instantiate a CPU benchmark context once
   - run each input once under Config E
+  - hard-fail immediately if any input's `extract_vocoder_inputs()` returns
+    `None` — a partial manifest is never written
   - write `outputs/bakeoff/input_manifest.json`
   - record canonical duration and expected Config A bucket
 - [ ] Hard-fail `prepare-inputs` if any canonical duration exceeds `9.0s`.
       Shorten the offending text and rerun instead of accepting an input set
       that sits on the `10s` edge.
+- [ ] Add a bucket-boundary assertion: for the `short` input (targeting `~3s`),
+      verify that `ceil(canonical_duration) <= 3` so it routes to the `3s`
+      bucket. The bucket selection logic in `_select_bucket_seconds` uses
+      `sec >= ceil(total_seconds)`, so an audio duration of `3.01s` routes to
+      `10s`, not `3s`. If the `short` input drifts above `3.0s`, shorten its
+      text. Record the expected bucket in the manifest using the same
+      `_select_bucket_seconds` logic, not a hardcoded assumption.
 - [ ] Add a smoke assertion that Config A would choose only `3s` or `10s` for
       the frozen inputs.
 
@@ -300,36 +365,67 @@ forking them.
 
 - [ ] Create `scripts/bakeoff_harness.py`.
 - [ ] Implement benchmark contexts that preload everything before timing:
-  - `ConfigAContext`: `HybridTTSPipeline(force_engine="pytorch")` plus explicit
-    `MLModel` loads for HAR-post `3s` and `10s` artifacts by path.
-  - `DecoderOnlyContext(compute_units)`: same shared prefix pipeline plus one
-    explicit decoder-only artifact path loaded with the requested compute units.
+  - `ConfigAContext`: Instantiate `HybridTTSPipeline()` with default
+    `force_engine=None`, which loads the PyTorch text-processing components
+    **and** auto-discovers Core ML duration/bucket models. Then **override**
+    `pipe.coreml_decoder_har_post_buckets` with explicit `ct.models.MLModel`
+    loads by path for the `3s` and `10s` HAR-post artifacts. This ensures the
+    benchmark uses known artifact paths (with recorded SHA256) rather than
+    relying on glob-based auto-discovery, while still getting the Core ML
+    duration model needed by `extract_vocoder_inputs()`.
+  - `DecoderOnlyContext(compute_units)`: same `HybridTTSPipeline()` for the
+    shared prefix, plus one explicit decoder-only artifact loaded with the
+    requested `ct.ComputeUnit`. The decoder-only artifact path is defined by
+    the constant `DECODER_ONLY_ARTIFACT = "outputs/bakeoff/models/kokoro_decoder_only_10s.mlpackage"`.
+    If the artifact does not exist at init time, set `self.available = False`
+    and record the reason; the `run` mode must check `ctx.available` before
+    attempting B/C iterations and record a `"config_unavailable"` sentinel.
   - `PyTorchContext(device)`: `KPipeline(lang_code="a", model=False)` plus one
-    preloaded `KModel().to(device).eval()`.
+    preloaded `KModel().to(device)`.
 - [ ] Make `PyTorchContext(device="mps")` validate that
       `PYTORCH_ENABLE_MPS_FALLBACK=1` is set before the benchmark starts.
 - [ ] Reuse `HybridTTSPipeline.extract_vocoder_inputs()` as the canonical shared
       prefix for Configs A/B/C. Do not add a second shared-prefix helper to the
       production code.
-- [ ] Implement a benchmark-local timed replica of Config A that follows the
-      exact geometry in `decoder_har_post_bucket_impl()` but exposes stage
-      timings:
-  - `t_prefix_extract_s`
-  - `t_decoder_pre_cpu_s`
-  - `t_har_builder_cpu_s`
-  - `t_coreml_predict_s`
-  - `t_trim_s`
-  - `t_orchestration_s`
-- [ ] Add one smoke check proving the timed Config A runner still produces a
-      finite waveform and the same bucket choice as the canonical backend on a
-      representative input.
+- [ ] Implement a benchmark-local instrumented wrapper `_run_config_a_timed(ctx, vocoder_inputs)`
+      as a standalone module-level function (not a method on `ConfigAContext`).
+      This function wraps the exact logic in `decoder_har_post_bucket_impl()`
+      (lines 167–215 of `synthesis_backends.py`) with `time.perf_counter()`
+      pairs around each stage. The context class handles only lifecycle (load,
+      warmup, teardown); the timing function handles execution. Stage timers:
+  - `t_prefix_extract_s` — `extract_vocoder_inputs()` call
+  - `t_decoder_pre_cpu_s` — CPU tensor prep (spec introspection, padding, `build_decoder_har_post_inputs_np`)
+  - `t_har_builder_cpu_s` — `build_decoder_har_post_inputs_np` internal (PyTorch hn-nsf)
+  - `t_coreml_predict_s` — `model.predict()` call
+  - `t_trim_s` — waveform trim to target length
+  - `t_orchestration_s` — defined as `wall_time_s - sum(t_prefix_extract_s .. t_trim_s)`;
+    captures Python overhead, GC pauses, and any unmeasured gaps
+- [ ] Add two smoke checks for the timed Config A runner on a representative input:
+  1. The runner produces a finite waveform and the same bucket choice as
+     `decoder_har_post_bucket_impl()`.
+  2. The runner's wall time is within ±20% of calling `decoder_har_post_bucket_impl()`
+     directly on the same input. If this fails, the replica has diverged from
+     the production function and must be re-synced before benchmarking.
 - [ ] Add counterbalanced order:
   - warm each context once
   - use a deterministic `--order-seed`
-  - shuffle config order per repetition
-  - shuffle input order per repetition
+  - per repetition `i`, create `rng = random.Random(order_seed + i)` and call
+    `rng.shuffle()` on copies of the config and input lists
   - call `gc.collect()` between configs
   - call `torch.mps.empty_cache()` after MPS runs when available
+  - record the actual execution order in the results JSON for reproducibility
+- [ ] Handle `extract_vocoder_inputs()` returning `None`: record a failure
+      sentinel for that iteration (`status: "prefix_failed"`, all timing fields
+      `null`) and continue to the next iteration. Do not abort the run.
+- [ ] Before the first timed iteration in `run` mode, print a summary of which
+      configs are available and which will be skipped (with the reason). If any
+      requested config has `ctx.available == False`, print a loud `⚠️ WARNING`
+      line naming it. This prevents wasting a multi-iteration run before
+      noticing that B/C were silently skipped.
+- [ ] At the start of every `run` invocation (not just context init), re-run the
+      Config A wall-time agreement smoke test against `decoder_har_post_bucket_impl()`
+      on one input. This catches drift from production function changes between
+      benchmark campaigns without requiring manual re-sync.
 - [ ] Write results with failure sentinels instead of aborting the whole run.
 - [ ] Record top-level provenance:
   - `order_seed`
@@ -348,6 +444,8 @@ forking them.
 - Results JSON exists, records provenance, and shows two iterations for each
   input/config pair.
 - Config A results include bucket name and stage timings.
+- `wc -l scripts/bakeoff_harness.py` is under 800 LOC. If over, split
+  `summarize` to `scripts/bakeoff_summarize.py` before proceeding.
 
 ---
 
@@ -358,15 +456,18 @@ forking them.
 
 **Tasks:**
 
-- [ ] Create `requirements-bakeoff.txt` with concrete pins aligned to the repo’s
-      working export stack:
-  - `torch==2.5.0`
-  - `coremltools==8.3.0`
-  - `numpy==1.26.4`
-  - `transformers==4.44.2`
-  - `huggingface_hub==0.28.1`
-  - `loguru==0.7.3`
-  - `misaki[en]==0.9.4`
+- [ ] Create `requirements-bakeoff.txt` that includes `requirements-export.txt`
+      via `-r requirements-export.txt` and adds only the delta pins needed for
+      reproducible benchmarking:
+  - `-r requirements-export.txt` (provides `torch==2.5.0`, `coremltools==8.3.0`,
+    `numpy==1.26.4`, `transformers==4.44.2`, `huggingface_hub`, `loguru`,
+    `misaki[en]>=0.9.4`, `torchaudio`)
+  - `huggingface_hub==0.28.1` (pin the unpinned transitive dep)
+  - `loguru==0.7.3` (pin the unpinned transitive dep)
+      This avoids duplication with drift: when `requirements-export.txt` is
+      updated, the bakeoff file inherits the changes automatically. After
+      creating the file, verify with `pip install --dry-run -r requirements-bakeoff.txt`
+      that no version conflicts exist between the base and delta pins.
 - [ ] Export one fresh decoder-only 10s artifact with the canonical exporter:
 
 ```bash
@@ -392,9 +493,11 @@ python -m export_synth.main --mode decoder --buckets 10s -o outputs/bakeoff/mode
 **Verification:**
 
 - The decoder-only 10s artifact exists under `outputs/bakeoff/models/`.
-- `.all` and `.cpuAndGPU` both return finite waveforms on the same realistic
-  DurationModel-derived input bundle; otherwise do not claim B-vs-C
-  comparability.
+- `.all` and `.cpuAndGPU` both return finite, non-NaN waveforms on the same
+  realistic DurationModel-derived input bundle; otherwise do not claim B-vs-C
+  comparability. **Audio quality is expected to be poor** (see decoder-only
+  quality caveat above); the acceptance gate here is finite output, not
+  intelligible speech.
 - `.cpuOnly` either returns a finite waveform on that same realistic input
   bundle or is
   explicitly marked unavailable in the manifest and excluded from Gate 1
@@ -416,39 +519,81 @@ claims on the primary machine.
 - [ ] Export `PYTORCH_ENABLE_MPS_FALLBACK=1` in the shell before any Config D
       run.
 - [ ] Run `prepare-inputs` if the input manifest does not already exist.
+- [ ] Verify all required artifacts are present on the M2 Ultra. On this machine,
+      `HybridTTSPipeline` auto-discovers `coreml/kokoro_duration.mlpackage` and
+      the HAR-post buckets from the repo checkout. The decoder-only control
+      artifact at `outputs/bakeoff/models/` is created by Phase 2. Phase 4
+      lists explicit copy paths because the M1 Mini may not have the full repo.
 - [ ] Run the main benchmark:
 
 ```bash
 python scripts/bakeoff_harness.py run --configs a,b,c,d,e --iterations 5 --order-seed 0
 ```
 
-- [ ] Run telemetry loops for Gate 1 on the frozen `long` input:
-  - terminal A, using the smallest supported interval on the host
-    (`100 ms` preferred; `1000 ms` acceptable if `powermetrics` rejects
-    smaller):
+- [ ] Run telemetry loops for Gate 1 on the frozen `long` input.
+      **Sync protocol:** Start `powermetrics` (terminal A) first and wait 3–5
+      seconds for it to begin sampling, then start the inference loop
+      (terminal B). Use `+30` extra samples (not `+5`) to ensure capture
+      extends past the inference loop's final iteration.
+      **Evidence threshold for Gate 1:** Compare median ANE power (mW) across
+      the steady-state window (excluding the first and last 5 seconds) for
+      Config B vs Config C vs idle baseline. A sustained median ANE power
+      delta > 10 mW above idle during Config B inference is positive evidence
+      of ANE participation. If the delta is 0–10 mW, classify as
+      "indeterminate" and escalate to Bcpu for a CPU-only control comparison.
+  - terminal A:
 
 ```bash
-INTERVAL_MS=100
-SAMPLES=$((60000 / INTERVAL_MS + 5))
+SECONDS=60; INTERVAL_MS=100
+SAMPLES=$(( (SECONDS * 1000) / INTERVAL_MS + 30 ))
 sudo powermetrics -i "${INTERVAL_MS}" --samplers ane -n "${SAMPLES}" > outputs/bakeoff/powermetrics_config_b_all.txt
 ```
 
-  - terminal B:
+  - terminal B (start 3–5 seconds after terminal A):
 
 ```bash
 python scripts/bakeoff_harness.py telemetry-loop --config b --input long --seconds 60
 ```
 
 - [ ] Repeat the same pair for Config C (`.cpuAndGPU`) with a distinct capture
-      path:
+      path. **Note:** the `SECONDS=60` value in the bash blocks must match the
+      `--seconds` argument to `telemetry-loop`. If you change one, change both.
+
+  - terminal A:
 
 ```bash
-INTERVAL_MS=100
-SAMPLES=$((60000 / INTERVAL_MS + 5))
+SECONDS=60; INTERVAL_MS=100
+SAMPLES=$(( (SECONDS * 1000) / INTERVAL_MS + 30 ))
 sudo powermetrics -i "${INTERVAL_MS}" --samplers ane -n "${SAMPLES}" > outputs/bakeoff/powermetrics_config_c_cpu_and_gpu.txt
 ```
+
+  - terminal B (start 3–5 seconds after terminal A):
+
+```bash
+python scripts/bakeoff_harness.py telemetry-loop --config c --input long --seconds 60
+```
+
 - [ ] Run Config Bcpu telemetry only if Gate 1 classification is still
-      ambiguous after comparing B and C, again with its own capture path.
+      ambiguous after comparing B and C. Use the same two-terminal protocol
+      with explicit output path:
+
+  - terminal A:
+
+```bash
+SECONDS=60; INTERVAL_MS=100
+SAMPLES=$(( (SECONDS * 1000) / INTERVAL_MS + 30 ))
+sudo powermetrics -i "${INTERVAL_MS}" --samplers ane -n "${SAMPLES}" > outputs/bakeoff/powermetrics_config_bcpu_cpu_only.txt
+```
+
+  - terminal B (start 3–5 seconds after terminal A):
+
+```bash
+python scripts/bakeoff_harness.py telemetry-loop --config bcpu --input long --seconds 60
+```
+
+      Bcpu runs as an ad-hoc telemetry-only diagnostic **outside** the
+      counterbalanced `run` matrix; it is never part of the five-config benchmark
+      order.
 - [ ] Sanity-check the results:
   - no negative times
   - no NaN RTF values
@@ -473,6 +618,10 @@ explicit-path loading.
 
 - [ ] Install the same benchmark environment from `requirements-bakeoff.txt`.
 - [ ] Export `PYTORCH_ENABLE_MPS_FALLBACK=1` before any Config D run.
+- [ ] Copy the frozen M2 Ultra input manifest
+      (`outputs/bakeoff/input_manifest.json`) to the M1 Mini. **Do not re-run
+      `prepare-inputs` on M1** — canonical durations must come from a single
+      machine so RTF denominators are comparable across the dataset.
 - [ ] Copy only the required artifacts:
   - `coreml/kokoro_duration.mlpackage`
   - `coreml/kokoro_decoder_har_post_3s.mlpackage`
@@ -505,14 +654,20 @@ timing anecdotes.
 **Tasks:**
 
 - [ ] Implement `summarize` mode in `scripts/bakeoff_harness.py`.
+      `summarize` reads results JSON files via `--results` and telemetry logs
+      from the fixed path pattern `outputs/bakeoff/powermetrics_config_*.txt`.
+      If telemetry files are absent, Gate 1 is marked "no telemetry data."
 - [ ] Produce per-machine tables for:
   - mean / median / std / min / max of `wall_time_s`
   - mean / median / std / min / max of `rtf_canonical`
-- [ ] Produce `outputs/bakeoff/summary.md` with five gate answers:
+- [ ] Produce `outputs/bakeoff/summary.md` with four gate answers plus one
+      conditional footnote:
   - **Gate 1 — Does the naive decoder-only Core ML artifact use ANE under `.all`?**
-    Primary evidence is the telemetry loop plus B-vs-C latency on the same
-    artifact. Use Bcpu only if classification between CPU and GPU fallback is
-    still ambiguous.
+    Primary evidence is the telemetry loop (median ANE power delta vs idle;
+    see Phase 3 evidence threshold) plus B-vs-C latency on the same artifact.
+    Use Bcpu only if classification between CPU and GPU fallback is still
+    ambiguous. Emit a structured field `ane_participation: yes | no | indeterminate`
+    alongside the prose explanation.
   - **Gate 2 — How large is the shipping hybrid speedup versus PyTorch CPU and MPS?**
     Compare Config A against Config E and Config D using `wall_time_s` and
     `rtf_canonical`. Treat Config D as the real observed MPS baseline in this
@@ -520,9 +675,11 @@ timing anecdotes.
   - **Gate 3 — How does the advantage scale with sequence length?**
     Analyze the four frozen inputs from `~1s` through `~9s`.
   - **Gate 4 — How much CPU-side overhead remains in Config A?**
-    Use Config A stage timings.
-  - **Gate 5 — How does scaling change on weaker hardware?**
-    Answer only if M1 Mini data exists.
+    Use Config A stage timings. Report `t_orchestration_s` as the residual
+    gap and each named stage as a percentage of `wall_time_s`.
+  - **Gate 5 (conditional footnote):** If M1 Mini data exists, add a footnote
+    comparing cross-machine scaling. This is not a formal gate — it is
+    deferred until M1 data is confirmed available.
 - [ ] If Config B export fails or telemetry is inconclusive, say so explicitly
       in the gate answer instead of improvising certainty.
 
@@ -600,6 +757,10 @@ timing anecdotes.
 
 - **The naive decoder-only export fails:** This is a valid result. Capture the
   conversion log, skip B/C, and still complete A/D/E.
+- **Decoder-only audio quality is known-bad:** The `SourceModuleHnNSF` path
+  diverges between Core ML and PyTorch (correlation ~0.21; see
+  `README/Notes/debug-notes.md`). Configs B/C measure scheduling throughput and
+  ANE participation, not audio quality. This is explicitly accepted.
 - **M1 Mini still OOMs with explicit-path loading:** Save a skip file and treat
   cross-machine data as deferred rather than silently dropping the machine.
 - **MPS results remain poor because of fallback-heavy ops:** That is still worth
@@ -608,6 +769,11 @@ timing anecdotes.
   supported `powermetrics` interval on the host and record the exact command in
   the output directory. Prefer `100 ms`; fall back to `1000 ms` only when the
   host rejects smaller intervals.
+- **Timed Config A replica drifts from production function:** The instrumented
+  wrapper duplicates `decoder_har_post_bucket_impl()` logic. If the production
+  function changes, the replica may silently diverge. The ±20% wall-time smoke
+  check catches gross drift; for subtle changes, re-sync the replica from the
+  production function before each benchmark campaign.
 - **Stale or wrong artifacts get benchmarked:** Always record exact paths,
   input shapes, and SHA256 hashes. Avoid app-bundle `.mlmodelc` assumptions.
 
