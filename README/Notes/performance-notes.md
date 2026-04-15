@@ -431,3 +431,114 @@ The AdaIN export risk did NOT materialize. DecoderPre (F0_conv + N_conv + encode
 ### Plan reference
 
 Full plan: `README/Plans/swift-prefix-rewrite-v1.md`
+
+---
+
+## Bakeoff v2: Controlled benchmark on M2 MacBook Air
+
+**First collected:** 2026-04-15
+**Status:** Complete
+
+### Summary
+
+Same bakeoff harness and frozen inputs as the M2 Ultra run above, now on a consumer M2 MacBook Air (8-core CPU, 10-core GPU, 16-core ANE, 24 GB). Config A (shipping HAR-post) is **2.5–4.8x faster than PyTorch CPU** on medium-to-long inputs and **5–16x realtime**. CoreML `predict()` is substantially slower than on M2 Ultra (234–262 ms vs 19–84 ms), now consuming 50–71% of wall time — the bottleneck has shifted from CPU-side overhead to CoreML inference on this lower-end chip.
+
+### What was measured
+
+- **Config A:** Shipping hybrid HAR-post path (`coreml/kokoro_decoder_har_post_{3,10}s.mlpackage`)
+- **Config B:** Naive decoder-only 10s artifact, `compute_units=ALL`
+- **Config C:** Naive decoder-only 10s artifact, `compute_units=CPU_AND_GPU`
+- **Config D:** PyTorch end-to-end on MPS (`PYTORCH_ENABLE_MPS_FALLBACK=1`)
+- **Config E:** PyTorch end-to-end on CPU
+
+All configs used identical frozen inputs, `voice=af_heart`, `speed=1.0`, `torch.manual_seed(0)`.
+
+### Method
+
+Same as M2 Ultra run: `scripts/bakeoff_harness.py` with `run --configs a,b,c,d,e --iterations 5 --order-seed 0`. Counterbalanced ordering, models preloaded and warmed. Config D was run in a separate pass with `PYTORCH_ENABLE_MPS_FALLBACK=1` set.
+
+### End-to-end wall time (warm median, milliseconds)
+
+| Input | Audio | A (HAR-post) | B (.all) | C (.cpuAndGPU) | D (MPS) | E (CPU) |
+| --- | --- | --- | --- | --- | --- | --- |
+| `tiny` | `1.55s` | `329 ms` | `1453 ms` | `1437 ms` | `194 ms` | `436 ms` |
+| `short` | `2.80s` | `323 ms` | `1431 ms` | `1447 ms` | `329 ms` | `819 ms` |
+| `medium` | `6.58s` | `521 ms` | `1494 ms` | `1475 ms` | `682 ms` | `1929 ms` |
+| `long` | `8.35s` | `513 ms` | `1531 ms` | `1523 ms` | `860 ms` | `2441 ms` |
+
+### RTF (canonical audio duration / wall time)
+
+| Input | A (HAR-post) | B (.all) | C (.cpuAndGPU) | D (MPS) | E (CPU) |
+| --- | --- | --- | --- | --- | --- |
+| `tiny` | `0.212` (5x RT) | `0.937` | `0.927` | `0.125` (8x RT) | `0.281` |
+| `short` | `0.115` (9x RT) | `0.511` | `0.517` | `0.118` (9x RT) | `0.293` |
+| `medium` | `0.079` (13x RT) | `0.227` | `0.224` | `0.104` (10x RT) | `0.293` |
+| `long` | `0.061` (16x RT) | `0.183` | `0.182` | `0.103` (10x RT) | `0.292` |
+
+### Speedup: Config A vs PyTorch baselines
+
+| Input | Audio | A vs E (CPU) | A vs D (MPS) |
+| --- | --- | --- | --- |
+| `tiny` | `1.55s` | `1.3x` | `0.6x` (MPS faster) |
+| `short` | `2.80s` | `2.5x` | `1.0x` |
+| `medium` | `6.58s` | `3.7x` | `1.3x` |
+| `long` | `8.35s` | `4.8x` | `1.7x` |
+
+### Config A stage breakdown (warm median)
+
+| Input | Bucket | Prefix extract | HAR builder (CPU) | CoreML predict | Orchestration | Total |
+| --- | --- | --- | --- | --- | --- | --- |
+| `tiny` | `3s` | `46.9 ms` (14%) | `45.8 ms` (14%) | `234.0 ms` (71%) | `1.8 ms` | `329 ms` |
+| `short` | `3s` | `64.9 ms` (20%) | `46.4 ms` (14%) | `220.5 ms` (68%) | `1.8 ms` | `323 ms` |
+| `medium` | `10s` | `107.4 ms` (21%) | `123.5 ms` (24%) | `262.3 ms` (50%) | `1.8 ms` | `521 ms` |
+| `long` | `10s` | `137.5 ms` (27%) | `113.7 ms` (22%) | `259.6 ms` (51%) | `1.8 ms` | `513 ms` |
+
+### Interpretation
+
+1. **Config A is 5–16x realtime on M2 Air.** The shortest input (`tiny`, 1.55s audio) completes in 329 ms; the longest (`long`, 8.35s audio) in 513 ms. Roughly 2x slower than M2 Ultra across the board.
+
+2. **CoreML predict is now the bottleneck.** On M2 Ultra, CPU-side overhead dominated (62–86% of wall time). On M2 Air, CoreML `predict()` takes 220–262 ms (50–71% of wall time), while prefix extract + HAR builder are roughly similar to M2 Ultra. The M2 Air's 16-core ANE (vs Ultra's 32-core) and lower memory bandwidth explain the shift.
+
+3. **Speedup vs CPU scales with duration.** The 1.3x speedup at `tiny` grows to 4.8x at `long` — even steeper scaling than M2 Ultra (1.7x → 3.5x) because PyTorch CPU is proportionally slower on M2 Air while CoreML predict stays relatively flat.
+
+4. **MPS is surprisingly competitive on short inputs.** Config D (PyTorch MPS) beats Config A on `tiny` (194 ms vs 329 ms) and ties on `short`. Config A only pulls ahead at `medium` (1.3x) and `long` (1.7x). This is the opposite of M2 Ultra where MPS was consistently slower — suggesting the M2 Air's 10-core GPU handles this workload well, and the CoreML predict overhead (220–260 ms) is the limiter on short inputs.
+
+5. **Configs B and C remain indistinguishable.** Both hover around 1.4–1.5s regardless of input length, consistent with M2 Ultra. ANE participation under `.all` remains **indeterminate** without powermetrics telemetry.
+
+### Cross-machine comparison: M2 Air vs M2 Ultra
+
+| Input | M2 Air A | M2 Ultra A | Air/Ultra | M2 Air D | M2 Ultra D | Air/Ultra | M2 Air E | M2 Ultra E | Air/Ultra |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| `tiny` | `329 ms` | `151 ms` | `2.2x` | `194 ms` | `215 ms` | `0.9x` | `436 ms` | `258 ms` | `1.7x` |
+| `short` | `323 ms` | `155 ms` | `2.1x` | `329 ms` | `287 ms` | `1.1x` | `819 ms` | `396 ms` | `2.1x` |
+| `medium` | `521 ms` | `283 ms` | `1.8x` | `682 ms` | `351 ms` | `1.9x` | `1929 ms` | `782 ms` | `2.5x` |
+| `long` | `513 ms` | `274 ms` | `1.9x` | `860 ms` | `436 ms` | `2.0x` | `2441 ms` | `966 ms` | `2.5x` |
+
+Config A scales roughly 2x between Air and Ultra. PyTorch CPU scales 1.7–2.5x. MPS (Config D) is nearly identical on short inputs across both machines but diverges on longer ones — consistent with the Ultra's larger GPU providing more parallelism for longer sequences. The CoreML path degrades more gracefully than CPU because the CPU-side prefix cost is similar on both machines — only the predict portion scales with ANE core count.
+
+### Switching penalty analysis
+
+The counterbalanced ordering shuffles configs between repetitions, so Config A sometimes runs immediately after B/C (decoder-only), potentially paying ANE model-reload costs. Per-iteration predict times, grouped by Config A's position in the execution order:
+
+| Config A position | Mean predict | Median predict | N |
+| --- | --- | --- | --- |
+| Position 0 (runs first) | `225 ms` | `226 ms` | 4 |
+| Position 2+ (after B/C) | `241 ms` | `242 ms` | 15 |
+
+**Switching penalty: ~16 ms (~7%).** The ANE likely reloads the HAR-post model plan after running the decoder-only model, but the cost is small.
+
+One outlier was excluded: `medium` on iteration 0 spiked to `2101 ms` predict (vs typical 237–275 ms). This is a one-time ANE compilation hit for the 10s bucket — the warmup pass may not have fully compiled the 10s model for all input shapes. Every subsequent `medium` run was normal regardless of position.
+
+**Conclusion:** ~93% of the M2 Air vs M2 Ultra gap is real compute (16 vs 32 ANE cores, lower memory bandwidth). The counterbalanced switching penalty adds ~7% noise to predict times but does not explain the cross-machine difference.
+
+### Provenance
+
+- Machine: Apple M2 MacBook Air, 24 GB
+- Git: `1426c2182b5d`
+- Torch: `2.5.0` / coremltools: `8.3.0` / numpy: `1.26.4`
+- Order seed: `0`, iterations: `5`
+- Results: `outputs/bakeoff/results_m2_air.json`, `outputs/bakeoff/results_m2_air_mps.json`
+
+### Plan reference
+
+Full experiment design: `README/Plans/kokoro-bakeoff-v2.md`
