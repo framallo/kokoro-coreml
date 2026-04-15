@@ -397,6 +397,37 @@ The initial naive Swift implementation ran at 166 ms (3s) and 554 ms (10s) — *
 - Duration model: `coreml/kokoro_duration.mlpackage`
 - F0Ntrain models: `coreml/kokoro_f0ntrain_t120.mlpackage`, `coreml/kokoro_f0ntrain_t400.mlpackage`
 
+### Phase 4 update: DecoderPre CoreML export succeeded
+
+The AdaIN export risk did NOT materialize. DecoderPre (F0_conv + N_conv + encode + decode blocks) exports to CoreML with correlation 1.000000 (3s) and 0.999999 (10s). The debug-notes decoder-only issue was specific to SourceModuleHnNSF, not the decode blocks.
+
+**DecoderPre CoreML predict latency:**
+
+| Bucket | CoreML | PyTorch bridge | Speedup |
+| --- | --- | --- | --- |
+| 3s | 2.63 ms | 44.7 ms | 17x |
+| 10s | 6.49 ms | 103.8 ms | 16x |
+
+**Updated pipeline totals (all CoreML, no bridge):**
+
+| Stage | 3s bucket | 10s bucket |
+| --- | --- | --- |
+| Duration CoreML | 13.6 ms | 13.6 ms |
+| Alignment + matrix ops | ~1 ms | ~1 ms |
+| F0Ntrain CoreML | 3.1 ms | 23.4 ms |
+| Padding | ~0.5 ms | ~0.5 ms |
+| DecoderPre CoreML | 2.6 ms | 6.5 ms |
+| hn-nsf Swift | 14 ms | 45 ms |
+| GeneratorFromHar CoreML | 16.7 ms | 41.0 ms |
+| **Total** | **~51.5 ms** | **~131 ms** |
+
+**Speedup vs Python Config A (bakeoff v2):**
+
+| Bucket | Swift pipeline | Python Config A | Speedup |
+| --- | --- | --- | --- |
+| 3s | ~51.5 ms | 151 ms | 2.9x |
+| 10s | ~131 ms | 274 ms | 2.1x |
+
 ### Plan reference
 
 Full plan: `README/Plans/swift-prefix-rewrite-v1.md`

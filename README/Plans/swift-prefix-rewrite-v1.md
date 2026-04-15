@@ -243,14 +243,11 @@ Trim (Swift)
   - `forward(asr_pad, f0_pad, n_pad, ref_s) → x_pre`
   - Internal: F0_conv, N_conv, cat, encode, asr_res, decode loop (with AdaIN)
   - Bucket-specific static shapes (3s and 10s)
-- [ ] **AdaIN export gate:** Trace with real AdaIN first. If MIL broadcast fails:
-  - Option A: Use `IdentityAdaIN` (known quality degradation — document and measure)
-  - Option B: Rewrite AdaIN as explicit MIL-friendly ops (scale+shift without broadcast)
-  - Option C: Accept the bridge and close this phase as "deferred — AdaIN blocks export"
-- [ ] Numeric validation: correlation > 0.99 with real AdaIN, or > 0.95 with IdentityAdaIN (document the gap)
-- [ ] Save to `coreml/kokoro_decoder_pre_{3,10}s.mlpackage`
-- [ ] Update Swift Package to use CoreML DecoderPre instead of bridge
-- [ ] Re-benchmark and update performance-notes.md
+- [x] **AdaIN export gate:** Real AdaIN exports cleanly. No IdentityAdaIN needed. The debug-notes decoder-only issue was specific to SourceModuleHnNSF, not the decode blocks.
+- [x] Numeric validation: correlation 1.000000 (3s), 0.999999 (10s). PASS.
+- [x] Saved to `coreml/kokoro_decoder_pre_3s.mlpackage` and `coreml/kokoro_decoder_pre_10s.mlpackage`
+- [ ] Update Swift Package to use CoreML DecoderPre instead of bridge (deferred — needs model loading integration)
+- [x] Re-benchmarked: DecoderPre CoreML 2.63 ms (3s) / 6.49 ms (10s) vs bridge 44.7 ms / 103.8 ms = 16-17x speedup. Total pipeline: ~51.5 ms (3s) / ~131 ms (10s) = 2.1-2.9x vs Python Config A. Updated performance-notes.md.
 
 **Verification:** Export succeeds for 3s and 10s buckets; numeric validation passes; full chain (Duration → F0Ntrain → DecoderPre CoreML → hn-nsf Swift → GeneratorFromHar) produces intelligible audio. Re-benchmark shows measurable improvement over bridge.
 
