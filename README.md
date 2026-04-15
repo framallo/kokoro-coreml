@@ -72,49 +72,51 @@ The Swift+CoreML path solves both: models run on the ANE (no fallback), and orch
 
 ## Quick start
 
-### 1. Download models
+### One-command setup
 
 ```bash
-# From Hugging Face Hub
-python scripts/download_models.py --coreml
+bash scripts/setup_bakeoff.sh
 ```
 
-### 2. Export models (if not using pre-built)
+This handles everything: Python deps, model downloads from HF, all model exports (Duration, F0Ntrain, DecoderPre, GeneratorFromHar), Swift binary build, and benchmark input preparation. Takes ~10 minutes. Use `--skip-download` if models are already local.
+
+### Run the benchmark
 
 ```bash
-# Duration models (all enumerated token sizes)
-uv run python export_duration.py
-
-# HAR-post pipeline models (all bucket sizes)
-uv run python -m export_synth.main --buckets "3s,7s,10s,15s,30s" --mode decoder-har --output_dir coreml
-
-# F0Ntrain models
-uv run python export_f0ntrain.py --t-frames 120 400 560 1200 2400
-
-# DecoderPre models
-uv run python export_decoder_pre.py --buckets 3 7 10 15 30
-```
-
-### 3. Build Swift pipeline
-
-```bash
-cd swift
-swift build -c release --product kokoro-bench
-```
-
-### 4. Run benchmark
-
-```bash
-# Prepare inputs
-uv run python scripts/prepare_swift_bench_inputs.py
-
-# Run bakeoff (all configs, 5 iterations)
 BAKEOFF_SKIP_SMOKE=1 PYTORCH_ENABLE_MPS_FALLBACK=1 \
 uv run python scripts/bakeoff_harness.py run \
   --configs a,d,e,f --iterations 5 --order-seed 0
 ```
 
-Or use the `$bakeoff` skill: it handles prerequisites, runs the harness, and updates performance-notes.md.
+Or use the `$bakeoff` skill — it walks through prerequisites, runs the harness, and updates performance-notes.md.
+
+### Manual steps (if you prefer)
+
+<details>
+<summary>Individual setup commands</summary>
+
+```bash
+# 1. Python deps
+uv sync
+
+# 2. Download base models from HF
+uv run python scripts/download_models.py --coreml
+
+# 3. Export all models
+uv run python export_duration.py
+uv run python export_f0ntrain.py --t-frames 120 400 560 1200 2400
+uv run python export_decoder_pre.py --buckets 3 7 10 15 30
+uv run python -m export_synth.main --buckets "3s,7s,10s,15s,30s" --mode decoder-har --output_dir coreml
+
+# 4. Build Swift binary
+cd swift && swift build -c release --product kokoro-bench && cd ..
+
+# 5. Prepare benchmark inputs
+uv run python scripts/bakeoff_harness.py prepare-inputs
+uv run python scripts/prepare_swift_bench_inputs.py
+```
+
+</details>
 
 ## Swift Package
 

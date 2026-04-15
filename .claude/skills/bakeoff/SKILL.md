@@ -30,39 +30,35 @@ machine" to "results are in performance-notes.md."
 
 ## Prerequisites
 
-Before running, verify these are in place:
+Everything is handled by the setup script. If this is a fresh machine
+(or you're not sure), run it first:
 
-1. **CoreML models downloaded:** `coreml/` directory has `.mlpackage` files.
-   If not: `uv run python scripts/download_models.py --coreml`
-2. **Python deps:** `uv sync` or `uv run python -m pytest tests/ -x` passes.
-3. **Swift binary built:** `swift/.build/release/kokoro-bench` exists.
-   If not: `cd swift && swift build -c release --product kokoro-bench`
-4. **Inputs prepared:** `outputs/bakeoff/input_manifest.json` and
-   `outputs/swift_bench_inputs/*.json` exist.
-   If not: `uv run python scripts/bakeoff_harness.py prepare-inputs` and
-   `uv run python scripts/prepare_swift_bench_inputs.py`
-5. **hn-nsf weights:** `outputs/swift_bench_inputs/hnsf_weights.json` exists.
-   Created by `prepare_swift_bench_inputs.py`.
+```bash
+bash scripts/setup_bakeoff.sh
+```
+
+This takes ~10 minutes and handles: Python deps, model downloads,
+all model exports (Duration [32-512], F0Ntrain, DecoderPre,
+GeneratorFromHar for buckets [3,7,10,15,30]s), Swift binary build,
+and benchmark input preparation. Use `--skip-download` if models
+are already local.
+
+If setup has already been run, verify quickly:
+
+```bash
+ls swift/.build/release/kokoro-bench && \
+ls outputs/bakeoff/input_manifest.json && \
+ls outputs/swift_bench_inputs/hnsf_weights.json && \
+echo "Ready"
+```
 
 ## Procedure
 
-### 1. Check prerequisites
-
-Run each check. Fix any that fail before proceeding.
+### 1. Run setup (if needed)
 
 ```bash
-# Models
-ls coreml/kokoro_duration.mlpackage/Manifest.json
-
-# Python
-uv run python -m pytest tests/ -x -q
-
-# Swift binary
-ls swift/.build/release/kokoro-bench || (cd swift && swift build -c release --product kokoro-bench)
-
-# Inputs
-ls outputs/bakeoff/input_manifest.json || uv run python scripts/bakeoff_harness.py prepare-inputs
-ls outputs/swift_bench_inputs/hnsf_weights.json || uv run python scripts/prepare_swift_bench_inputs.py
+bash scripts/setup_bakeoff.sh          # full setup (~10 min)
+bash scripts/setup_bakeoff.sh --skip-download  # skip HF download
 ```
 
 ### 2. Identify the machine
