@@ -517,6 +517,8 @@ def _run_config_a_timed(
         dec, vi, sec, asr_len, har_t, warn_geometry=False
     )
     t_har_builder_cpu = time.perf_counter() - t0
+    # Must match production function (synthesis_backends.py:197).
+    assert _t_check == T_f0, f"geometry mismatch: _t_check={_t_check} vs T_f0={T_f0}"
 
     # Stage 2b: CPU dict assembly (negligible but counted for completeness).
     t0 = time.perf_counter()
@@ -542,10 +544,11 @@ def _run_config_a_timed(
     canonical_dur = manifest_entry.get("canonical_duration_s", total_seconds)
     observed_dur = len(audio) / 24000.0
 
-    # Orchestration = wall - sum of measured stages.
-    t_orchestration = wall_time - (
+    # Orchestration = wall - sum of measured stages (clamped to 0; can go slightly
+    # negative due to perf_counter nesting granularity).
+    t_orchestration = max(0.0, wall_time - (
         t_prefix_extract + t_har_builder_cpu + t_decoder_pre_cpu + t_coreml_predict + t_trim
-    )
+    ))
 
     record.update(
         wall_time_s=round(wall_time, 6),
@@ -683,11 +686,7 @@ def _run_pytorch_timed(
     torch.manual_seed(0)
     wall_start = time.perf_counter()
     audio = _run_pytorch(ctx, text)
-
-    # MPS sync before stopping timer.
-    if ctx.device == "mps":
-        torch.mps.synchronize()
-
+    # _run_pytorch already calls torch.mps.synchronize() for MPS before returning.
     wall_end = time.perf_counter()
 
     if audio is None:
@@ -853,7 +852,9 @@ def cmd_run(args: argparse.Namespace) -> None:
         print("\nRunning Config A smoke check...")
         _smoke_check_config_a(contexts["a"], warmup_text)
 
-    # --- Timed iterations with counterbalanced order ---
+    # --- Timed iterations with independently shuffled config and input order ---
+    # Note: configs and inputs are shuffled separately per plan spec. All inputs
+    # for one config run before moving to the next config within a repetition.
     input_keys = list(manifest["inputs"].keys())
     results: list[dict] = []
     execution_order: list[dict] = []

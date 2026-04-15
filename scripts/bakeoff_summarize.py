@@ -92,7 +92,7 @@ def _format_table(headers: list[str], rows: list[list[str]], align: list[str] | 
     sep_parts = []
     for i, a in enumerate(align):
         if a == "r":
-            sep_parts.append("-" * (col_widths[i] - 1) + ":")
+            sep_parts.append("-" * max(1, col_widths[i] - 1) + ":")
         else:
             sep_parts.append("-" * col_widths[i])
     header_line = "| " + " | ".join(h.ljust(col_widths[i]) for i, h in enumerate(headers)) + " |"
@@ -255,13 +255,10 @@ def cmd_summarize(args: argparse.Namespace) -> None:
         if b_telemetry.get("median_mw") is not None and c_telemetry.get("median_mw") is not None:
             delta = b_telemetry["median_mw"] - c_telemetry["median_mw"]
             if delta > 10:
-                ane_participation = "yes"
                 lines.append(f"\n**ane_participation: yes** (ANE power delta {delta:.1f} mW > 10 mW threshold)\n")
             elif delta > 0:
-                ane_participation = "indeterminate"
                 lines.append(f"\n**ane_participation: indeterminate** (ANE power delta {delta:.1f} mW, within 0-10 mW range)\n")
             else:
-                ane_participation = "no"
                 lines.append(f"\n**ane_participation: no** (no ANE power increase for .all vs .cpuAndGPU)\n")
         else:
             # No telemetry -- use latency comparison.
