@@ -1,7 +1,7 @@
 # Swift Prefix Rewrite Plan
 
 **Date:** 2026-04-15
-**Status:** Implemented (Phases 0-4, 6 complete; Phase 5 deferred)
+**Status:** Implemented (Phases 0-4, 6 complete; Phase 5 deferred). Duration model expanded to enumerated sizes [32, 64, 128, 256, 512]. Bucket set expanded to [3, 7, 10, 15, 30]s. Bakeoff v4 collected with 3s/7s/15s/30s inputs.
 
 ## Executive Summary
 
