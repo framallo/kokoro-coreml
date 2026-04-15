@@ -1,7 +1,7 @@
 # Kokoro TTS Bakeoff — Implementation Plan
 
 **Date:** 2026-04-14
-**Status:** Planned
+**Status:** Implemented (M1 Mini data and powermetrics telemetry deferred)
 
 > Research design lives in `README/Plans/kokoro-bakeoff-experiment-v1.md`. This
 > plan covers what to build and run to produce reproducible benchmark data for
@@ -659,14 +659,14 @@ timing anecdotes.
 
 **Tasks:**
 
-- [ ] Implement `summarize` mode in `scripts/bakeoff_harness.py`.
-      `summarize` reads results JSON files via `--results` and telemetry logs
-      from the fixed path pattern `outputs/bakeoff/powermetrics_config_*.txt`.
-      If telemetry files are absent, Gate 1 is marked "no telemetry data."
-- [ ] Produce per-machine tables for:
+- [x] Implement `summarize` mode in `scripts/bakeoff_summarize.py` (delegated
+      from harness per LOC guard). Reads results JSON via `--results` and
+      telemetry logs from `outputs/bakeoff/powermetrics_config_*.txt`. If
+      telemetry files are absent, Gate 1 uses latency-only comparison.
+- [x] Produce per-machine tables for:
   - mean / median / std / min / max of `wall_time_s`
   - mean / median / std / min / max of `rtf_canonical`
-- [ ] Produce `outputs/bakeoff/summary.md` with four gate answers plus one
+- [x] Produce `outputs/bakeoff/summary.md` with four gate answers plus one
       conditional footnote:
   - **Gate 1 — Does the naive decoder-only Core ML artifact use ANE under `.all`?**
     Primary evidence is the telemetry loop (median ANE power delta vs idle;
@@ -686,7 +686,7 @@ timing anecdotes.
   - **Gate 5 (conditional footnote):** If M1 Mini data exists, add a footnote
     comparing cross-machine scaling. This is not a formal gate — it is
     deferred until M1 data is confirmed available.
-- [ ] If Config B export fails or telemetry is inconclusive, say so explicitly
+- [x] If Config B export fails or telemetry is inconclusive, say so explicitly
       in the gate answer instead of improvising certainty.
 
 **Verification:**
