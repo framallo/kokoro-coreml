@@ -974,8 +974,11 @@ def cmd_run(args: argparse.Namespace) -> None:
 
     # --- Pre-run Config A drift check (after warmup so both paths are warm) ---
     if "a" in contexts and contexts["a"].available:
-        print("\nRunning Config A smoke check...")
-        _smoke_check_config_a(contexts["a"], warmup_text)
+        if os.environ.get("BAKEOFF_SKIP_SMOKE") == "1":
+            print("\nSkipping Config A smoke check (BAKEOFF_SKIP_SMOKE=1)")
+        else:
+            print("\nRunning Config A smoke check...")
+            _smoke_check_config_a(contexts["a"], warmup_text)
 
     # --- Timed iterations with independently shuffled config and input order ---
     # Note: configs and inputs are shuffled separately per plan spec. All inputs

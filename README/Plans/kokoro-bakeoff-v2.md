@@ -711,22 +711,13 @@ timing anecdotes.
 
 **Tasks:**
 
-- [ ] Build a Swift CLI executable (``swift/Sources/KokoroBenchmark/main.swift``) that:
-  - Loads all CoreML models and hn-nsf weights
-  - Accepts a JSON input file (from ``prepare_swift_bench_inputs.py``) and produces JSON output with ``wall_time_s``, ``rtf_canonical``, and stage timings
-  - Uses the same ``voice=af_heart``, ``speed=1.0``, and frozen inputs as Configs A–E
-  - Warmup: 1 call per bucket before timed iterations
-- [ ] Add Config F to ``scripts/bakeoff_harness.py``:
-  - Call the compiled Swift binary as a subprocess for each (input, iteration) pair
-  - Parse JSON stdout to extract timing fields matching the existing results schema
-  - Include Config F in the counterbalanced config shuffle
-- [ ] Update ``scripts/bakeoff_summarize.py``:
-  - Add Config F columns to wall time, RTF, and speedup tables
-  - New **Gate 6 — How much faster is the Swift pipeline vs Python Config A?** Report per-input speedup with stage breakdown comparison.
-- [ ] Run: ``uv run python scripts/bakeoff_harness.py run --configs a,d,e,f --iterations 5 --order-seed 0`` on M2 Ultra
-  - Note: Configs B/C (decoder-only) omitted unless specifically requested — they measure ANE participation, not Swift pipeline speed
-- [ ] Produce ``outputs/bakeoff/results_m2_ultra_v3.json`` and updated ``outputs/bakeoff/summary_v3.md``
-- [ ] Update ``README/Notes/performance-notes.md`` with "Bakeoff v3" section
+- [x] Swift CLI: `swift/Sources/KokoroBenchmark/main.swift` — loads 5 CoreML models, accepts JSON input, outputs JSON timing. warmup for all models. JSON output via `--output` file to avoid E5RT noise.
+- [x] Config F in harness: `SwiftPipelineContext` + `_run_swift_timed` in `scripts/bakeoff_harness.py`. Calls kokoro-bench as subprocess per (input, iteration). Joins counterbalanced shuffle.
+- [ ] Update `scripts/bakeoff_summarize.py` with Config F columns — deferred (results recorded directly in performance-notes.md).
+- [x] Run: `--configs a,d,e,f --iterations 5 --order-seed 0` on M2 Ultra (80 records).
+- [x] Results: `outputs/bakeoff/results_m2_ultra_v3.json`
+- [x] Gate 6: F is 1.4-1.7x faster than A, 2.7-5.1x vs CPU, 18-51x RT.
+- [x] Performance notes updated with "Bakeoff v3" section.
 
 **Verification:**
 

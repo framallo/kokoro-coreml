@@ -434,6 +434,74 @@ Full plan: `README/Plans/swift-prefix-rewrite-v1.md`
 
 ---
 
+## Bakeoff v3: Swift pipeline (Config F) vs Python baselines
+
+**First collected:** 2026-04-15
+**Status:** Complete (M2 Ultra; M2 Air deferred to Phase 7)
+
+### Summary
+
+Controlled counterbalanced comparison of the Swift+CoreML pipeline (Config F) against Python HAR-post (Config A), PyTorch MPS (Config D), and PyTorch CPU (Config E). Same methodology as bakeoff v2: 4 frozen inputs, 5 counterbalanced repetitions, warm median. Config F is **1.4-1.7x faster than Python HAR-post** and **2.7-5.1x faster than PyTorch CPU**, achieving **18-51x realtime** on M2 Ultra.
+
+### End-to-end wall time (warm median, milliseconds)
+
+| Input | Audio | A (Python HAR) | D (MPS) | E (CPU) | F (Swift) |
+| --- | --- | --- | --- | --- | --- |
+| tiny | 1.55s | 122 ms | 127 ms | 233 ms | **86 ms** |
+| short | 2.80s | 136 ms | 190 ms | 358 ms | **84 ms** |
+| medium | 6.58s | 232 ms | 348 ms | 655 ms | **166 ms** |
+| long | 8.35s | 286 ms | 449 ms | 848 ms | **165 ms** |
+
+### RTF (wall time / audio duration)
+
+| Input | A (Python HAR) | D (MPS) | E (CPU) | F (Swift) |
+| --- | --- | --- | --- | --- |
+| tiny | 0.079 (13x RT) | 0.082 | 0.150 | **0.055 (18x RT)** |
+| short | 0.048 (21x RT) | 0.068 | 0.128 | **0.030 (34x RT)** |
+| medium | 0.035 (28x RT) | 0.053 | 0.099 | **0.025 (40x RT)** |
+| long | 0.034 (29x RT) | 0.054 | 0.102 | **0.020 (51x RT)** |
+
+### Speedup: Config F vs baselines
+
+| Input | F vs A (Python HAR) | F vs D (MPS) | F vs E (CPU) |
+| --- | --- | --- | --- |
+| tiny | 1.4x | 1.5x | 2.7x |
+| short | 1.6x | 2.3x | 4.3x |
+| medium | 1.4x | 2.1x | 3.9x |
+| long | 1.7x | 2.7x | 5.1x |
+
+### Gate 6: How much faster is the Swift pipeline vs Python Config A?
+
+**Answer:** Config F is **1.4-1.7x faster** than Config A across all inputs. The speedup is modest for short inputs (1.4x at tiny) but grows to 1.7x for longer inputs. The primary savings come from replacing PyTorch CPU inference (Duration model, F0Ntrain, DecoderPre) with CoreML and eliminating Python orchestration overhead. The hn-nsf Swift/Accelerate implementation adds ~14-46ms but removes Python interpreter overhead.
+
+The speedup is limited because Config A's CoreML GeneratorFromHar predict time (17-44ms) is irreducible and dominates the Swift pipeline's time budget. Config F's remaining bottleneck is the transpose + matrix ops (~30ms) from the Duration model's output layout.
+
+### Interpretation
+
+1. **Config F achieves 18-51x realtime.** The fastest result is `long` at 165ms for 8.35s audio = 51x realtime. Even `tiny` (86ms for 1.55s) is 18x realtime.
+
+2. **The speedup vs Config A is consistent (1.4-1.7x)** rather than scaling dramatically with input length. This is because both pipelines share the same GeneratorFromHar CoreML predict call, which is the floor.
+
+3. **Config F beats MPS everywhere.** While Config D (MPS) was competitive with Config A on short inputs in bakeoff v2, Config F decisively beats MPS across all input lengths (1.5-2.7x).
+
+4. **Config F vs CPU scales strongly with length.** 2.7x at tiny, 5.1x at long — because PyTorch CPU scales linearly with sequence length while the CoreML models scale sublinearly.
+
+### Provenance
+
+- Machine: Apple M2 Ultra, 64 GB
+- Git: current main branch
+- Swift: Apple Swift version 6.1
+- Torch: 2.6.0 / coremltools: 8.3.0
+- Order seed: 0, iterations: 5
+- Results: `outputs/bakeoff/results_m2_ultra_v3.json`
+
+### Plan reference
+
+Bakeoff plan Phase 6: `README/Plans/kokoro-bakeoff-v2.md`
+Swift pipeline plan: `README/Plans/swift-prefix-rewrite-v1.md`
+
+---
+
 ## Bakeoff v2: Controlled benchmark on M1 Mini
 
 **First collected:** 2026-04-15
