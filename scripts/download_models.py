@@ -38,16 +38,22 @@ VOICE_PATTERNS = [
     "kokoro.js/voices/*.bin",
 ]
 # Files to always skip (not model artifacts).
+# IMPORTANT: Do NOT add "*.json" here — it would exclude Manifest.json inside
+# .mlpackage directories, producing corrupt/incomplete packages.
 IGNORE_PATTERNS = [
     ".DS_Store",
     "*.py",
     "*.md",
     "*.txt",
-    "*.json",       # repo-level config, not model weights
     "*.yml",
     "*.yaml",
     "*.sh",
     "*.toml",
+    # Repo-level JSON (not inside .mlpackage dirs).
+    "config.json",
+    "package.json",
+    "package-lock.json",
+    "tsconfig.json",
     ".claude/**",
     ".github/**",
     ".gitignore",
@@ -152,7 +158,7 @@ def main() -> None:
         print(f"\nDownload failed: {exc}", file=sys.stderr)
         sys.exit(1)
 
-    # Verify key artifacts exist.
+    # Verify key artifacts exist and are complete (have Manifest.json).
     checks = [
         ("coreml/kokoro_duration.mlpackage", "Duration model"),
         ("coreml/kokoro_decoder_har_post_3s.mlpackage", "HAR-post 3s"),
@@ -161,16 +167,37 @@ def main() -> None:
     all_ok = True
     for rel_path, label in checks:
         p = _REPO_ROOT / rel_path
-        if p.exists():
-            print(f"  {label}: {rel_path}")
-        else:
+        manifest = p / "Manifest.json"
+        weights = p / "Data" / "com.apple.CoreML" / "weights" / "weight.bin"
+        if not p.exists():
             print(f"  MISSING: {label} ({rel_path})")
             all_ok = False
+        elif not manifest.exists():
+            print(f"  INCOMPLETE: {label} — missing Manifest.json")
+            all_ok = False
+        elif not weights.exists():
+            print(f"  INCOMPLETE: {label} — missing weight.bin")
+            all_ok = False
+        else:
+            print(f"  OK: {label}")
+
+    # Also check all .mlpackage dirs under coreml/ for completeness.
+    import glob as globmod
+    print("\nPackage integrity check:")
+    for pkg_dir in sorted(globmod.glob(str(_REPO_ROOT / "coreml" / "*.mlpackage"))):
+        pkg = Path(pkg_dir)
+        name = pkg.name
+        manifest = pkg / "Manifest.json"
+        if not manifest.exists():
+            print(f"  INCOMPLETE: {name} — missing Manifest.json")
+            all_ok = False
+        else:
+            print(f"  OK: {name}")
 
     if all_ok:
-        print("\nAll key models present. Pipeline is ready.")
+        print("\nAll models present and complete. Pipeline is ready.")
     else:
-        print("\nSome models missing. Check the download output above.")
+        print("\nSome models missing or incomplete. Check output above.")
         sys.exit(1)
 
 
