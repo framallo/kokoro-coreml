@@ -177,6 +177,16 @@ outputs/**
 # Local MPS / device debug samples (same idea as outputs/)
 outputs_mps/
 
+# CoreML model packages — downloaded from HF Hub, not stored in git.
+# Run: python scripts/download_models.py
+coreml/
+coreml_fp32/
+KokoroVocoder.mlpackage/
+.cache/
+
+# Voice embeddings — downloaded from HF Hub.
+kokoro.js/voices/*.bin
+
 # macOS
 .DS_Store
 

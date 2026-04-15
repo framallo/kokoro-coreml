@@ -57,6 +57,13 @@ def _coreml_assets_exist() -> bool:
 
 COREML_AVAILABLE = _coreml_assets_exist()
 
+if not COREML_AVAILABLE:
+    print(
+        "No CoreML models found. Download them from Hugging Face:\n"
+        "  python scripts/download_models.py\n"
+        "Pipeline will fall back to PyTorch-only mode."
+    )
+
 ct = None  # coremltools, when available
 if COREML_AVAILABLE:
     try:

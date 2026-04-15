@@ -1,6 +1,9 @@
-*.mlpackage/** filter=lfs diff=lfs merge=lfs -text
-*.mlmodel filter=lfs diff=lfs merge=lfs -text
-weight.bin filter=lfs diff=lfs merge=lfs -text
-*.pth filter=lfs diff=lfs merge=lfs -text
-*.mlmodel/** filter=lfs diff=lfs merge=lfs -text
-*.bin filter=lfs diff=lfs merge=lfs -text
+# LFS tracking removed — models now downloaded from Hugging Face Hub.
+# Run: python scripts/download_models.py
+#
+# Previous LFS patterns (kept as comments for reference):
+# *.mlpackage/** filter=lfs diff=lfs merge=lfs -text
+# *.mlmodel filter=lfs diff=lfs merge=lfs -text
+# weight.bin filter=lfs diff=lfs merge=lfs -text
+# *.pth filter=lfs diff=lfs merge=lfs -text
+# *.bin filter=lfs diff=lfs merge=lfs -text
