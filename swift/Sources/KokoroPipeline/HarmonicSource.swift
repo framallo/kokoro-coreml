@@ -127,36 +127,43 @@ public func sineGen(
 
     // --- Step 2: Downsample phase increments ---
     let downLen = max(1, (L + scale - 1) / scale)
+    let upLen = downLen * scale
 
-    // Allocate all harmonic channels
-    var sineWaves = [[Float]](repeating: [Float](repeating: 0, count: L), count: dim)
+    // Pre-allocate reusable buffers (avoids 9 harmonics × 6 allocations)
+    var radValues = [Double](repeating: 0, count: L)
+    var radDS = [Double](repeating: 0, count: downLen)
+    var cumPhase = [Double](repeating: 0, count: downLen)
+    var phaseScaled = [Double](repeating: 0, count: downLen)
+    var phaseUp = [Double](repeating: 0, count: max(L, upLen))
+    var sinResult = [Double](repeating: 0, count: L)
+    var floatSines = [Float](repeating: 0, count: L)
+
+    // Flat buffer for all harmonics: sineWaves[h * L ..< (h+1) * L]
+    var sineWaves = [Float](repeating: 0, count: dim * L)
 
     // RNG for initial phase noise
     var rng: RandomNumberGenerator = seed.map { SeededRNG(seed: $0) as RandomNumberGenerator } ?? SystemRandomNumberGenerator()
 
+    let twoPiTimesScale = 2.0 * Double.pi * Double(scale)
+
     for h in 0..<dim {
-        let harmonicCoeff = Double(h + 1)
+        let invSr = Double(h + 1) / sr
 
         // Compute phase increments in Double
-        var radValues = [Double](repeating: 0, count: L)
         for t in 0..<L {
-            let f = Double(f0Upsampled[t]) * harmonicCoeff
-            // (f / sr) % 1 — normalized phase increment per sample
-            let r = (f / sr).truncatingRemainder(dividingBy: 1.0)
+            let r = (Double(f0Upsampled[t]) * invSr).truncatingRemainder(dividingBy: 1.0)
             radValues[t] = r < 0 ? r + 1.0 : r
         }
 
         // Add initial phase noise for overtones (h > 0), not fundamental
         if h > 0 {
-            let randIni = Double.random(in: 0..<1, using: &rng)
-            radValues[0] += randIni
+            radValues[0] += Double.random(in: 0..<1, using: &rng)
         }
 
-        // Downsample via linear interpolation (matching F.interpolate mode="linear")
-        let radDS = linearInterpolateDown(radValues, targetLen: downLen)
+        // Downsample via linear interpolation (in-place into radDS)
+        linearInterpolateInto(from: radValues, count: L, into: &radDS, targetLen: downLen)
 
         // Cumulative sum in Double precision (THE critical accumulator)
-        var cumPhase = [Double](repeating: 0, count: downLen)
         if downLen > 0 {
             cumPhase[0] = radDS[0]
             for t in 1..<downLen {
@@ -164,34 +171,21 @@ public func sineGen(
             }
         }
 
-        // Multiply by 2*pi
-        let twoPi = 2.0 * Double.pi
-        for t in 0..<downLen {
-            cumPhase[t] *= twoPi
-        }
+        // Multiply by 2*pi*scale and upsample
+        vDSP_vsmulD(cumPhase, 1, [twoPiTimesScale], &phaseScaled, 1, vDSP_Length(downLen))
 
-        // Upsample phase back to original length
-        // PyTorch: phase * upsample_scale before upsample, then linear interpolate to up_len
-        let upLen = downLen * scale
-        var phaseScaled = [Double](repeating: 0, count: downLen)
-        let dScale = Double(scale)
-        for t in 0..<downLen {
-            phaseScaled[t] = cumPhase[t] * dScale
-        }
-        var phaseUp = linearInterpolateUp(phaseScaled, targetLen: upLen)
+        // Upsample phase to upLen (in-place into phaseUp)
+        linearInterpolateInto(from: phaseScaled, count: downLen, into: &phaseUp, targetLen: upLen)
 
-        // Trim or pad to match L
-        if phaseUp.count > L {
-            phaseUp = Array(phaseUp.prefix(L))
-        } else if phaseUp.count < L {
-            let last = phaseUp.last ?? 0
-            phaseUp.append(contentsOf: [Double](repeating: last, count: L - phaseUp.count))
-        }
+        // Use first L elements (upLen >= L since upLen = downLen * scale and L <= downLen * scale)
+        // Vectorized sin using vForce
+        var n = Int32(L)
+        vvsin(&sinResult, phaseUp, &n)
 
-        // sin(phase) — computed in Double, stored as Float
-        for t in 0..<L {
-            sineWaves[h][t] = Float(sin(phaseUp[t])) * sineAmp
-        }
+        // Convert Double -> Float, scale by sineAmp, write into flat sineWaves buffer
+        vDSP_vdpsp(sinResult, 1, &floatSines, 1, vDSP_Length(L))
+        var ampScalar = sineAmp
+        vDSP_vsmul(floatSines, 1, &ampScalar, &sineWaves[h * L], 1, vDSP_Length(L))
     }
 
     // --- Step 3: Apply voiced/unvoiced mask + noise ---
@@ -200,25 +194,43 @@ public func sineGen(
     // For unvoiced: noise with amplitude sine_amp / 3
     // noise_amp = uv * noise_std + (1 - uv) * sine_amp / 3
 
+    // Pre-compute voiced/unvoiced mask
+    var uvMask = [Float](repeating: 0, count: L)
+    for t in 0..<L {
+        uvMask[t] = f0Upsampled[t] > threshold ? 1.0 : 0.0
+    }
+
+    // Pre-generate all Gaussian noise at once (fast, vectorized approach)
+    // Total noise needed: dim * L values
+    let totalNoise = dim * L
+    var gaussianNoise = [Float](repeating: 0, count: totalNoise)
+    generateGaussianNoise(into: &gaussianNoise, count: totalNoise, seed: seed)
+
+    // Apply voiced/unvoiced mask + noise to each harmonic
+    let unvoicedNoiseAmp = sineAmp / 3.0
     for h in 0..<dim {
+        let sineOffset = h * L
+        let noiseOffset = h * L
         for t in 0..<L {
-            let uv: Float = f0Upsampled[t] > threshold ? 1.0 : 0.0
-            let noiseAmp = uv * noiseStd + (1.0 - uv) * sineAmp / 3.0
-            let noise = noiseAmp * Float.gaussianRandom(using: &rng)
-            sineWaves[h][t] = sineWaves[h][t] * uv + noise
+            let uv = uvMask[t]
+            let noiseAmp = uv * noiseStd + (1.0 - uv) * unvoicedNoiseAmp
+            sineWaves[sineOffset + t] = sineWaves[sineOffset + t] * uv + noiseAmp * gaussianNoise[noiseOffset + t]
         }
     }
 
     // --- Step 4: Linear merge (9 → 1) + Tanh ---
-    // Matches SourceModuleHnNSF: self.l_tanh(self.l_linear(sine_wavs))
     // l_linear: Linear(9, 1) with learned weights and bias
+    // Vectorized: for each time step, dot product of 9 harmonic values with weights
     assert(linearWeights.count == dim, "Linear weights must have \(dim) elements")
 
     var merged = [Float](repeating: 0, count: L)
+
+    // Compute weighted sum across harmonics
+    // merged[t] = bias + sum_h(sineWaves[h*L+t] * weights[h])
     for t in 0..<L {
         var sum: Float = linearBias
         for h in 0..<dim {
-            sum += sineWaves[h][t] * linearWeights[h]
+            sum += sineWaves[h * L + t] * linearWeights[h]
         }
         merged[t] = tanh(sum)
     }
@@ -398,6 +410,36 @@ func linearInterpolateUp(_ input: [Double], targetLen: Int) -> [Double] {
     return linearInterpolateDown(input, targetLen: targetLen)
 }
 
+/// In-place linear interpolation into a pre-allocated buffer.
+///
+/// Avoids allocation per call — critical for the 9-harmonic inner loop.
+func linearInterpolateInto(from input: [Double], count srcCount: Int, into output: inout [Double], targetLen: Int) {
+    if srcCount == 0 || targetLen <= 0 { return }
+    if targetLen == 1 {
+        var sum = 0.0
+        for i in 0..<srcCount { sum += input[i] }
+        output[0] = sum / Double(srcCount)
+        return
+    }
+    if srcCount == targetLen {
+        for i in 0..<srcCount { output[i] = input[i] }
+        return
+    }
+
+    let srcLen = Double(srcCount)
+    let dstLen = Double(targetLen)
+    let ratio = srcLen / dstLen
+
+    for i in 0..<targetLen {
+        let srcIdx = (Double(i) + 0.5) * ratio - 0.5
+        let srcIdxClamped = max(0, min(srcIdx, srcLen - 1))
+        let lo = Int(srcIdxClamped)
+        let hi = min(lo + 1, srcCount - 1)
+        let frac = srcIdxClamped - Double(lo)
+        output[i] = input[lo] * (1.0 - frac) + input[hi] * frac
+    }
+}
+
 // MARK: - Random Number Generation
 
 /// Seeded RNG for reproducible benchmarks.
@@ -417,11 +459,30 @@ struct SeededRNG: RandomNumberGenerator {
     }
 }
 
-extension Float {
-    /// Box-Muller transform for Gaussian random numbers.
-    static func gaussianRandom(using rng: inout RandomNumberGenerator) -> Float {
-        let u1 = max(Float.ulpOfOne, Float.random(in: 0..<1, using: &rng))
-        let u2 = Float.random(in: 0..<1, using: &rng)
-        return sqrt(-2.0 * log(u1)) * cos(2.0 * Float.pi * u2)
+/// Fast bulk Gaussian noise generation using Box-Muller transform.
+///
+/// Generates `count` Gaussian random samples into a pre-allocated buffer.
+/// Much faster than per-sample generation because it avoids protocol dispatch
+/// overhead on `RandomNumberGenerator` and can vectorize the math.
+func generateGaussianNoise(into buffer: inout [Float], count: Int, seed: UInt64? = nil) {
+    // Generate pairs of uniform random numbers, then Box-Muller transform
+    var rng = SeededRNG(seed: seed ?? UInt64.random(in: 0..<UInt64.max))
+
+    // Generate uniform random pairs and apply Box-Muller
+    var i = 0
+    while i < count - 1 {
+        let u1 = max(Float.ulpOfOne, Float(rng.next() & 0xFFFFFF) / Float(0xFFFFFF))
+        let u2 = Float(rng.next() & 0xFFFFFF) / Float(0xFFFFFF)
+        let r = sqrt(-2.0 * log(u1))
+        let theta = 2.0 * Float.pi * u2
+        buffer[i] = r * cos(theta)
+        buffer[i + 1] = r * sin(theta)
+        i += 2
+    }
+    // Handle odd count
+    if i < count {
+        let u1 = max(Float.ulpOfOne, Float(rng.next() & 0xFFFFFF) / Float(0xFFFFFF))
+        let u2 = Float(rng.next() & 0xFFFFFF) / Float(0xFFFFFF)
+        buffer[i] = sqrt(-2.0 * log(u1)) * cos(2.0 * Float.pi * u2)
     }
 }

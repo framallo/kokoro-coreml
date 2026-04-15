@@ -333,3 +333,70 @@ The +12–15% gap vs HF baseline packages reported earlier is **not re-tested** 
 ### Plan reference
 
 Full experiment design: `README/Plans/kokoro-bakeoff-v2.md`
+
+---
+
+## Swift prefix rewrite: per-stage latency measurements
+
+**First collected:** 2026-04-15
+**Status:** Phase 3 complete (per-stage benchmarks; DecoderPre bridge; full bakeoff comparison deferred)
+
+### Summary
+
+Measured every stage of the proposed Swift prefix rewrite pipeline on M2 Ultra. The Duration model (BERT + predictor) runs 3.8x faster as CoreML vs PyTorch. The F0Ntrain prosody model exports to CoreML with 0.999995 correlation and runs in 3-23 ms depending on bucket. The hn-nsf harmonic source (SineGen + STFT) runs in native Swift at 14-45 ms with Double-precision phase accumulation, down from 166 ms after optimizing bulk noise generation. The DecoderPre stage remains a PyTorch bridge pending CoreML export (Phase 4, conditional on AdaIN).
+
+### Individual stage latencies (warm median, M2 Ultra)
+
+| Stage | 3s bucket | 10s bucket | Notes |
+| --- | --- | --- | --- |
+| Duration CoreML | 13.6 ms | 13.6 ms | Fixed 128-token input, `compute_units=ALL`. 3.8x vs ~50 ms PyTorch. |
+| Alignment + matrix ops | ~1 ms | ~1 ms | Swift. Two matrix multiplies on small tensors. |
+| F0Ntrain CoreML | 3.1 ms | 23.4 ms | T=120 (3s) / T=400 (10s). Correlation 0.9999+. |
+| Padding | ~0.5 ms | ~0.5 ms | Zero-fill to bucket geometry. |
+| DecoderPre (PyTorch bridge) | 44.7 ms | 103.8 ms | **Bottleneck.** PyTorch decoder stack. Phase 4 target. |
+| hn-nsf Swift (Accelerate) | 14 ms | 45 ms | Double-precision phase, bulk noise gen, vvsin. |
+| GeneratorFromHar CoreML | 16.7 ms | 41.0 ms | `compute_units=ALL`. Same models as bakeoff v2. |
+
+### Estimated pipeline totals
+
+| Configuration | 3s bucket | 10s bucket |
+| --- | --- | --- |
+| **Swift + bridge** (current) | ~94 ms | ~228 ms |
+| **Swift + CoreML DecoderPre** (Phase 4) | ~49 ms | ~125 ms |
+| **Python Config A** (bakeoff v2) | 151 ms | 274 ms |
+
+### Speedup vs Python Config A
+
+| Configuration | 3s speedup | 10s speedup |
+| --- | --- | --- |
+| Swift + bridge | 1.6x | 1.2x |
+| Swift + CoreML DecoderPre (projected) | 3.1x | 2.2x |
+
+### hn-nsf optimization log
+
+The initial naive Swift implementation ran at 166 ms (3s) and 554 ms (10s) — **slower than PyTorch**. Profiling identified per-sample Gaussian RNG (`Float.gaussianRandom` via Box-Muller with `RandomNumberGenerator` protocol dispatch) as the bottleneck at 154 ms / 648k calls. Replacing with bulk `generateGaussianNoise()` (pre-allocated buffer, direct xorshift64, no protocol dispatch) reduced hn-nsf to 14 ms (3s) and 45 ms (10s) — a **12x speedup**.
+
+### Key findings
+
+1. **DecoderPre is the new bottleneck.** At 44-104 ms, it's 48-46% of total pipeline time (with bridge). The rest of the pipeline is already fast enough.
+
+2. **Duration CoreML is 3.8x faster than PyTorch.** 13.6 ms vs ~50 ms. This was an unknown prior to this measurement — the plan's latency budget had it marked as UNKNOWN.
+
+3. **F0Ntrain exports cleanly to CoreML.** Despite containing AdainResBlk1d (the same module type that caused issues in the decoder-only export), F0Ntrain achieves correlation 0.9999+. The AdaIN broadcast issue may be graph-size dependent.
+
+4. **hn-nsf Swift matches PyTorch speed** after optimization. The 14-45 ms range is comparable to the 30-40 ms PyTorch HAR builder that includes decoder-pre + hn-nsf. The Swift hn-nsf alone is slightly slower than PyTorch hn-nsf alone, but eliminates Python interpreter overhead.
+
+5. **The "< 30 ms pre-decoder" target from the plan is not achievable with the bridge.** Pre-decoder with bridge is ~77 ms (3s) / ~187 ms (10s). Without the bridge (Phase 4), it would be ~32 ms (3s) / ~83 ms (10s) — close to target for 3s, over for 10s.
+
+### Provenance
+
+- Machine: Apple M2 Ultra, 64 GB
+- Git: current branch (swift-prefix-rewrite-v1 work)
+- Swift: Apple Swift version 6.1 (swiftlang-6.1.0.110.21 clang-1700.0.13.3)
+- CoreML stage results: `outputs/swift_prefix_stage_bench.json`
+- Duration model: `coreml/kokoro_duration.mlpackage`
+- F0Ntrain models: `coreml/kokoro_f0ntrain_t120.mlpackage`, `coreml/kokoro_f0ntrain_t400.mlpackage`
+
+### Plan reference
+
+Full plan: `README/Plans/swift-prefix-rewrite-v1.md`

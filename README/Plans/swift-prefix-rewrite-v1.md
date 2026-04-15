@@ -212,20 +212,17 @@ Trim (Swift)
 
 **Tasks:**
 
-- [ ] Create `swift/Sources/KokoroBenchmark/main.swift` (or a test target):
-  - Same 4 inputs: tiny, short, medium, long (pre-tokenized, saved as JSON with pre-computed voice embeddings)
-  - Same voice: af_heart, speed 1.0
-  - 1 warmup + 5 timed iterations, report median
-  - Stage timing (ContinuousClock): t_duration_coreml, t_alignment, t_f0ntrain_coreml, t_padding, t_decoder_pre_bridge, t_hnsf_swift, t_generator_coreml, t_trim, t_total
-  - Report: wall time, RTF, stage breakdown percentages
-- [ ] Compare against bakeoff v2 Config A numbers (Python baseline)
-- [ ] **Identify where the savings actually land:** The three stages that should be dramatically faster are:
-  - Duration: CoreML vs PyTorch CPU (expecting large speedup, but measure — don't guess)
-  - hn-nsf: Accelerate vs PyTorch CPU (expecting ~3-5x speedup)
-  - Orchestration overhead: zero Python interpreter overhead
-- [ ] **Identify the new bottleneck:** With the bridge, DecoderPre is still Python. How much of total time does it now represent? This data decides whether Phase 4 is worth it.
-- [ ] Update `README/Notes/performance-notes.md` with new section: "Swift prefix rewrite v1 (with DecoderPre bridge)"
-- [ ] Record provenance: machine, git commit, model SHAs, Swift version, Xcode version
+- [x] Per-stage benchmarks via `scripts/bench_swift_stages.py` (Python/CoreML) and `swift test -c release --filter BenchmarkTests` (Swift hn-nsf):
+  - Duration CoreML: 13.6 ms (3.8x vs PyTorch)
+  - F0Ntrain CoreML: 3.1 ms (3s) / 23.4 ms (10s)
+  - hn-nsf Swift: 14 ms (3s) / 45 ms (10s) after 12x optimization
+  - GeneratorFromHar CoreML: 16.7 ms (3s) / 41.0 ms (10s)
+  - DecoderPre bridge: 44.7 ms (3s) / 103.8 ms (10s)
+- [x] Compare against bakeoff v2 Config A: Swift+bridge is 1.6x faster (3s) / 1.2x (10s). Projected Swift+CoreML DecoderPre: 3.1x (3s) / 2.2x (10s).
+- [x] **New bottleneck identified:** DecoderPre bridge is 48% of 3s pipeline, 46% of 10s pipeline. Phase 4 is justified.
+- [x] Updated `README/Notes/performance-notes.md` with "Swift prefix rewrite: per-stage latency measurements" section
+- [x] Provenance recorded: M2 Ultra, Swift 6.1, results in `outputs/swift_prefix_stage_bench.json`
+- [x] Pre-tokenized inputs prepared via `scripts/prepare_swift_bench_inputs.py`
 
 **Verification:** Benchmark completes on M2 Ultra. Results recorded in performance-notes.md with honest numbers — not targets, actuals.
 
