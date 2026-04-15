@@ -38,7 +38,7 @@ When **creating** a new **project** skill (checked into a repository), **always*
 
 Skip a path only when the user **explicitly** narrows scope (e.g. “Cursor only in this repo”).
 
-**kokoro-coreml:** `.cursor/skills` and `.agents/skills` are **symlinks** to `.claude/skills` (see `ls -la .cursor/skills .agents/skills`). **Edit only** under `.claude/skills/`—Cursor and Agents resolve the same files; do not maintain duplicate trees.
+**kokoro-coreml:** `.cursor/skills` and `.agents/skills` are **symlinks** to `.claude/skills` (see `ls -la .cursor/skills .agents/skills`). **Edit only** under `.claude/skills/`—Cursor and Agents resolve the same files; do not maintain duplicate trees. If either mirror is missing or wrong after a checkout, run **`scripts/ensure_repo_skill_symlinks.sh`** from the repo root.
 
 **Project skills** (repo) **do not** automatically go under `~/` unless the user asks. In **kokoro-coreml**, adding a skill means creating it under **`.claude/skills/`** only (Cursor/Agents paths are symlinks). In other repos, use the **triple mirror** above—**one** source of truth, identical copies or symlinks.
 
