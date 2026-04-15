@@ -364,13 +364,16 @@ Measured every stage of the proposed Swift prefix rewrite pipeline on M2 Ultra. 
 | **Swift + bridge** (current) | ~94 ms | ~228 ms |
 | **Swift + CoreML DecoderPre** (Phase 4) | ~49 ms | ~125 ms |
 | **Python Config A** (bakeoff v2) | 151 ms | 274 ms |
+| **PyTorch MPS** (bakeoff v2) | 215–287 ms | 351–436 ms |
 
-### Speedup vs Python Config A
+### Speedup vs baselines
 
-| Configuration | 3s speedup | 10s speedup |
+| Configuration | vs Python Config A (3s / 10s) | vs MPS (3s / 10s) |
 | --- | --- | --- |
-| Swift + bridge | 1.6x | 1.2x |
-| Swift + CoreML DecoderPre (projected) | 3.1x | 2.2x |
+| Swift + bridge | 1.6x / 1.2x | 2.3x / 1.5x |
+| Swift + CoreML DecoderPre | 3.1x / 2.2x | **4.4x / 2.8x** |
+
+MPS is the natural "just use the GPU" baseline. The Swift pipeline beats it by 2–4x because MPS suffers from `aten::angle` CPU fallback overhead and Python interpreter costs, while Swift+CoreML routes compute to the ANE with zero Python overhead.
 
 ### hn-nsf optimization log
 
@@ -421,12 +424,12 @@ The AdaIN export risk did NOT materialize. DecoderPre (F0_conv + N_conv + encode
 | GeneratorFromHar CoreML | 16.7 ms | 41.0 ms |
 | **Total** | **~51.5 ms** | **~131 ms** |
 
-**Speedup vs Python Config A (bakeoff v2):**
+**Speedup vs baselines (bakeoff v2):**
 
-| Bucket | Swift pipeline | Python Config A | Speedup |
-| --- | --- | --- | --- |
-| 3s | ~51.5 ms | 151 ms | 2.9x |
-| 10s | ~131 ms | 274 ms | 2.1x |
+| Bucket | Swift pipeline | Python Config A | Speedup vs A | MPS (Config D) | Speedup vs MPS |
+| --- | --- | --- | --- | --- | --- |
+| 3s | ~51.5 ms | 151 ms | 2.9x | 215–287 ms | **4.2–5.6x** |
+| 10s | ~131 ms | 274 ms | 2.1x | 351–436 ms | **2.7–3.3x** |
 
 ### Plan reference
 
@@ -441,7 +444,7 @@ Full plan: `README/Plans/swift-prefix-rewrite-v1.md`
 
 ### Summary
 
-Controlled counterbalanced comparison of the Swift+CoreML pipeline (Config F) against Python HAR-post (Config A), PyTorch MPS (Config D), and PyTorch CPU (Config E). Same methodology as bakeoff v2: 4 frozen inputs, 5 counterbalanced repetitions, warm median. Config F is **1.4-1.7x faster than Python HAR-post** and **2.7-5.1x faster than PyTorch CPU**, achieving **18-51x realtime** on M2 Ultra.
+Controlled counterbalanced comparison of the Swift+CoreML pipeline (Config F) against Python HAR-post (Config A), PyTorch MPS (Config D), and PyTorch CPU (Config E). Same methodology as bakeoff v2: 4 frozen inputs, 5 counterbalanced repetitions, warm median. Config F is **1.5-2.7x faster than PyTorch MPS**, **1.4-1.7x faster than Python HAR-post**, and **2.7-5.1x faster than PyTorch CPU**, achieving **18-51x realtime** on M2 Ultra.
 
 ### End-to-end wall time (warm median, milliseconds)
 
@@ -470,19 +473,19 @@ Controlled counterbalanced comparison of the Swift+CoreML pipeline (Config F) ag
 | medium | 1.4x | 2.1x | 3.9x |
 | long | 1.7x | 2.7x | 5.1x |
 
-### Gate 6: How much faster is the Swift pipeline vs Python Config A?
+### Gate 6: How much faster is the Swift pipeline vs MPS and Python?
 
-**Answer:** Config F is **1.4-1.7x faster** than Config A across all inputs. The speedup is modest for short inputs (1.4x at tiny) but grows to 1.7x for longer inputs. The primary savings come from replacing PyTorch CPU inference (Duration model, F0Ntrain, DecoderPre) with CoreML and eliminating Python orchestration overhead. The hn-nsf Swift/Accelerate implementation adds ~14-46ms but removes Python interpreter overhead.
+**vs MPS (the "just use the GPU" baseline):** Config F is **1.5-2.7x faster** than PyTorch MPS. MPS suffers from `aten::angle` CPU fallback and Python interpreter overhead. The Swift+CoreML path routes compute to the ANE with zero Python overhead. The gap grows with input length because MPS scales linearly while CoreML scales sublinearly.
 
-The speedup is limited because Config A's CoreML GeneratorFromHar predict time (17-44ms) is irreducible and dominates the Swift pipeline's time budget. Config F's remaining bottleneck is the transpose + matrix ops (~30ms) from the Duration model's output layout.
+**vs Python HAR-post:** Config F is **1.4-1.7x faster** than Config A. The speedup is modest because both pipelines share the same GeneratorFromHar CoreML predict call — the irreducible floor. The savings come from replacing PyTorch CPU inference (Duration, F0Ntrain, DecoderPre) with CoreML and eliminating Python orchestration overhead.
 
 ### Interpretation
 
-1. **Config F achieves 18-51x realtime.** The fastest result is `long` at 165ms for 8.35s audio = 51x realtime. Even `tiny` (86ms for 1.55s) is 18x realtime.
+1. **Config F beats MPS by 1.5-2.7x everywhere.** This is the key result. MPS is what a developer reaches for first on Apple Silicon ("just use the GPU"), and the Swift+CoreML pipeline decisively beats it across all input lengths. The gap grows with duration because MPS scales linearly while CoreML scales sublinearly.
 
-2. **The speedup vs Config A is consistent (1.4-1.7x)** rather than scaling dramatically with input length. This is because both pipelines share the same GeneratorFromHar CoreML predict call, which is the floor.
+2. **Config F achieves 18-51x realtime.** The fastest result is `long` at 165ms for 8.35s audio = 51x realtime. Even `tiny` (86ms for 1.55s) is 18x realtime.
 
-3. **Config F beats MPS everywhere.** While Config D (MPS) was competitive with Config A on short inputs in bakeoff v2, Config F decisively beats MPS across all input lengths (1.5-2.7x).
+3. **The speedup vs Python HAR-post is consistent (1.4-1.7x)** rather than scaling dramatically with input length. Both pipelines share the same GeneratorFromHar CoreML predict call, which is the irreducible floor.
 
 4. **Config F vs CPU scales strongly with length.** 2.7x at tiny, 5.1x at long — because PyTorch CPU scales linearly with sequence length while the CoreML models scale sublinearly.
 
@@ -548,13 +551,13 @@ Extended the bakeoff to cover the full range of practical audio durations: 3s, 7
 
 ### Interpretation
 
-1. **Config F scales sublinearly with duration.** 3s audio -> 65 ms, 30s audio -> 349 ms. A 10x increase in audio duration costs only 5.4x more wall time. At 30s, Config F achieves 79x realtime.
+1. **F vs MPS grows from 2.6x to 3.6x with duration.** This is the headline result. MPS is the natural "just use the GPU" baseline, and the Swift+CoreML pipeline beats it decisively — and the gap widens with longer inputs. At 30s, MPS takes 1.25s vs Swift's 349ms. The `aten::angle` CPU fallback on MPS and Python interpreter overhead are the primary reasons MPS falls behind.
 
-2. **The F vs A speedup is largest at short durations (2.5x at 3s)** where Python orchestration overhead dominates. At 15s the gap narrows to 1.1x — both pipelines are CoreML-predict-bound at that point.
+2. **Config F scales sublinearly with duration.** 3s audio -> 65 ms, 30s audio -> 349 ms. A 10x increase in audio duration costs only 5.4x more wall time. At 30s, Config F achieves 79x realtime. MPS and CPU both scale linearly.
 
-3. **F vs MPS grows with duration (2.6x -> 3.6x).** MPS scales roughly linearly (like CPU but ~1.7x faster). At 30s, MPS takes 1.25s vs Swift's 349ms. The `aten::angle` CPU fallback on MPS continues to be a drag on PyTorch GPU performance.
+3. **F vs A (Python HAR-post) is largest at short durations (2.5x at 3s)** where Python orchestration overhead dominates. At 15s the gap narrows to 1.1x — both pipelines are CoreML-predict-bound at that point.
 
-4. **F vs CPU scales strongly with duration (5.0x -> 6.2x).** PyTorch CPU scales linearly with audio length; the Swift+CoreML pipeline does not. At 30s, CPU takes 2.2 seconds vs Swift's 349 ms.
+4. **F vs CPU scales strongly with duration (5.0x -> 6.2x).** At 30s, CPU takes 2.2 seconds vs Swift's 349 ms.
 
 5. **The 30s input (476 tokens) validates the Duration model expansion.** The T=512 Duration model handles 476 tokens correctly. Without the enumerated model export, this input would have been impossible (old T=128 model only supported ~120 real tokens after BOS/EOS).
 
@@ -888,6 +891,15 @@ TBD — fill after running `$bakeoff` on M1 Mini.
 | medium | ___ ms | 521 ms | 232 ms |
 | long | ___ ms | 513 ms | 286 ms |
 
+### Config D (MPS) across machines
+
+| Input | M1 Mini | M2 Air | M2 Ultra |
+| --- | --- | --- | --- |
+| tiny | ___ ms | 194 ms | 127 ms |
+| short | ___ ms | 329 ms | 190 ms |
+| medium | ___ ms | 682 ms | 348 ms |
+| long | ___ ms | 860 ms | 449 ms |
+
 ### Config F speedup vs Config A per machine
 
 | Input | M1 Mini | M2 Air | M2 Ultra |
@@ -897,12 +909,21 @@ TBD — fill after running `$bakeoff` on M1 Mini.
 | medium | ___x | ___x | 1.4x |
 | long | ___x | ___x | 1.7x |
 
+### Config F speedup vs MPS per machine
+
+| Input | M1 Mini | M2 Air | M2 Ultra |
+| --- | --- | --- | --- |
+| tiny | ___x | ___x | 1.5x |
+| short | ___x | ___x | 2.3x |
+| medium | ___x | ___x | 2.1x |
+| long | ___x | ___x | 2.7x |
+
 ### Scaling: relative to M2 Ultra
 
-| Machine | Config F (tiny) | Config F (long) | Config A (tiny) | Config A (long) |
+| Machine | Config F (tiny) | Config F (long) | Config D MPS (tiny) | Config D MPS (long) |
 | --- | --- | --- | --- | --- |
-| M2 Ultra | 1.0x (86 ms) | 1.0x (165 ms) | 1.0x (122 ms) | 1.0x (286 ms) |
-| M2 Air | ___x | ___x | 2.7x (329 ms) | 1.8x (513 ms) |
+| M2 Ultra | 1.0x (86 ms) | 1.0x (165 ms) | 1.0x (127 ms) | 1.0x (449 ms) |
+| M2 Air | ___x | ___x | 1.5x (194 ms) | 1.9x (860 ms) |
 | M1 Mini | ___x | ___x | ___x | ___x |
 
 ### Interpretation
@@ -910,9 +931,9 @@ TBD — fill after running `$bakeoff` on M1 Mini.
 TBD — fill after collecting M1 Mini and M2 Air data.
 
 Key questions this section answers:
-1. Does the Swift pipeline speedup (1.4-1.7x vs Python) hold on lower-end hardware, or does it shrink/invert as CoreML predict becomes the bottleneck?
-2. How does the M1 Mini's 16-core ANE compare to the M2 Air's 16-core ANE for these models?
-3. Is there a hardware tier where the Python pipeline is actually faster (e.g., if CoreML model loading dominates on constrained RAM)?
+1. Does the Swift pipeline speedup vs MPS hold on lower-end hardware, or does MPS become competitive as the GPU handles more of the work?
+2. On the M2 Air where MPS was competitive with Config A on short inputs (bakeoff v2), does Config F still win?
+3. How does the M1 Mini's 8-core GPU (MPS) compare to its 16-core ANE (Swift+CoreML)?
 
 ### Plan reference
 
