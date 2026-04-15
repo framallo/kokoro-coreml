@@ -66,9 +66,9 @@ Cross-referencing the [CoreML Compute Unit Scheduling Guide](../Guides/apple-sil
 
 ## Fresh Baseline (Current State)
 
-- **`AdaIN1d.fc`:** `nn.Linear` in `kokoro/istftnet.py` (`AdaIN1d.__init__`).
-- **Generator trace:** Six `AdaIN1d` calls per `AdaINResBlock1` × (resblocks + noise_res) — large linear count in MIL.
-- **ANE timing baseline:** From bakeoff manifest / harness when available; else document fallback measurement method and hardware.
+- **`AdaIN1d.fc`:** `nn.Conv1d(..., kernel_size=1)` in `kokoro/istftnet.py` (`AdaIN1d.__init__`) + Linear checkpoint pre-hook.
+- **Generator trace:** Six `AdaIN1d` calls per `AdaINResBlock1` × (resblocks + noise_res); MIL uses `conv` primitives for style projection (post–Phase 1 export).
+- **ANE timing:** Bakeoff `t_coreml_predict_s` when harness exists; else `scripts/bench_decoder_har_post_predict.py` (fallback median ms on this machine).
 
 ## Solution Overview
 
@@ -148,7 +148,7 @@ Verify the callback arity against PyTorch docs for the **pinned** export stack (
 
 - [x] Export: `uv run python -m export_synth.main --mode decoder-har --buckets 3s,10s -o coreml` (2026-04-15).
 - [x] **Export gates:** Traced vs Core ML finite on export geometry for both buckets.
-- [x] **Explicit validation:** `scripts/compare_decoder_har_post_waveforms.py` — baseline packages copied to `/tmp/kokoro_har_post_baseline_{3s,10s}.mlpackage` pre-export; `HybridTTSPipeline(force_engine="pytorch")`, text `"Hello from Kokoro."`, voice `af_heart`, speed `1.0`, `torch.manual_seed(0)`. Pearson **> 0.99**, SNR **> 40 dB**, max abs Δ **< 1e-2** for 3s and 10s. *(Optional npz freeze skipped — script reproduces inputs deterministically from the same seed/text/voice.)*
+- [x] **Explicit validation:** `scripts/compare_decoder_har_post_waveforms.py` — baseline packages copied to `/tmp/...` pre-export when comparing pre/post Conv1d; full `HybridTTSPipeline()` so `_select_bucket_seconds` matches production; same text/voice/speed/`torch.manual_seed(0)`. Pearson **> 0.99**, SNR **> 40 dB**, max abs Δ **< 1e-2** for 3s and 10s.
 - [x] `uv run pytest tests/test_mlpackage_exports.py -q` — pass.
 
 **Verification:** Both packages save; smoke path works; Pearson **> 0.99**, **SNR ≥ 40 dB**, **max abs Δ ≤ 1e-2** (float32 metric tensors) on real tensors.
@@ -170,11 +170,11 @@ Verify the callback arity against PyTorch docs for the **pinned** export stack (
 
 Use until `scripts/bakeoff_harness.py` exists:
 
-- [ ] Same machine, same OS build, same `MLModelConfiguration.computeUnits` as baseline doc.
-- [ ] Time Core ML `predict` in a tight loop (warmup + median of N iterations) for old vs new `kokoro_decoder_har_post_3s` (and optionally `10s`) with **identical** `MLDictionaryFeatureProvider` inputs from frozen numpy/torch saves.
-- [ ] Optional: `powermetrics` / Instruments Core ML template to confirm ANE participation (see compute-unit guide).
-- [ ] Record methodology and numbers in `outputs/bakeoff/ane_optimization_results.json` with field `"benchmark_mode": "fallback_loop"` vs `"bakeoff_harness"`.
-- [ ] **Scope note:** The fallback loop measures only Core ML `predict()` wall time (equivalent to `t_coreml_predict_s` in bakeoff schema). This isolates the Conv1d impact on the Core ML subgraph, but total hybrid pipeline improvement may be smaller because CPU-side stages (`t_prefix_extract_s`, `t_har_builder_cpu_s`) are unchanged. Do not over-claim full-pipeline speedup from predict-only numbers.
+- [x] Same machine / default Core ML compute units (`MLComputeUnits.all` via coremltools load) — document OS/build in JSON when publishing numbers.
+- [x] **`scripts/bench_decoder_har_post_predict.py`** — warmup + median of N `predict()` calls; tensors from `build_decoder_har_post_inputs_np` (identical path to production). Optional `--baseline /path/to/old.mlpackage` for A/B median ms and `%` speedup.
+- [ ] Optional: `powermetrics` / Instruments / `MLComputePlan` (still recommended for ANE placement proof).
+- [x] Results merged into `outputs/bakeoff/ane_optimization_results.json` with `"benchmark_mode": "fallback_loop"` (gitignored); harness will use `"bakeoff_harness"`.
+- [x] **Scope note:** Fallback measures **predict-only** wall time (maps to `t_coreml_predict_s`); full hybrid RTF still dominated by CPU stages — do not over-claim end-to-end speedup from this script alone.
 
 **Verification:** Documented improvement meeting the **merge rule** in Open Questions, **or** documented revert. **Phase 3 DoD:** Include **placement evidence** (`MLComputePlan` / Instruments summary) **or** explicit `placement_evidence: unavailable` in the results JSON with reliance on wall-clock only.
 
@@ -193,11 +193,11 @@ Use until `scripts/bakeoff_harness.py` exists:
 - [x] `tests/test_export_wrappers_shapes.py::test_synthesizer_model_forward_runs_and_returns_1d_audio` still passes (full Generator path through Conv1d `AdaIN1d`).
 - [x] `kokoro_decoder_har_post_3s` and `_10s` re-exported; smoke + `compare_decoder_har_post_waveforms.py` gates pass (Pearson, SNR, max Δ).
 - [x] Decoder smoke test (`tests/test_adain1d_decoder_smoke.py`) passes.
-- [x] Benchmark result logged: MIL + waveform (`ane_optimization_results.json`); predict-only loop **not** run (harness absent).
+- [x] Benchmark result logged: MIL + waveform + **fallback** `t_coreml_predict_median_ms` via `scripts/bench_decoder_har_post_predict.py` (`ane_optimization_results.json`); bakeoff harness still future work.
 
 ### Definition of Done
 
-- [x] Phases 0–3 complete with logs (**Phase 3:** MIL + waveform + results JSON; harness / fallback **predict loop** and optional powermetrics still unchecked until someone runs them).
+- [x] Phases 0–3 complete with logs (**Phase 3:** MIL + waveform + fallback predict benchmark + results JSON; bakeoff harness + optional powermetrics / `MLComputePlan` still open).
 - [x] No stale `torch.cat` removal claims.
 - [x] Plan references: harness command remains documented as **when file exists**; fallback + MIL path used here.
 - [x] Re-export performed from clean `mlpackage` sources (no stale `.mlmodelc` in repo).
@@ -214,8 +214,8 @@ Use until `scripts/bakeoff_harness.py` exists:
 
 ### Unresolved
 
-- **Does MIL already map legacy `linear` to ANE-optimal paths?** Unknown without `MLComputePlan` / Instruments on target silicon — Phase 3 recorded `placement_evidence: unavailable`; wall-clock **(a)** not measured (no harness).
-- **Merge rule (closed for this PR):** Hard requirements + waveform gates passed; **(b)** satisfied — `linear` MIL ops **48 → 0** on `3s` (taxonomy: `op.type` from `scripts/count_mil_ops.py`). **(a)** deferred until `scripts/bakeoff_harness.py` exists. **Revert procedure** unchanged if a future benchmark shows regressions without MIL benefit.
+- **Does MIL already map legacy `linear` to ANE-optimal paths?** Unknown without `MLComputePlan` / Instruments — `placement_evidence: unavailable`. **Wall-clock:** fallback median `predict` ms is in `ane_optimization_results.json`; bakeoff **`t_coreml_predict_s`** and optional `--baseline` A/B still the publication path.
+- **Merge rule (closed for this PR):** Hard requirements + waveform gates passed; **(b)** satisfied — `linear` MIL ops **48 → 0** on `3s` (taxonomy: `op.type` from `scripts/count_mil_ops.py`). **(a)** Controlled `predict()` median is logged via `scripts/bench_decoder_har_post_predict.py` (re-run with `--baseline` on a saved pre–Conv1d `.mlpackage` for strict before/after %). Full bakeoff **`t_coreml_predict_s`** still deferred until `scripts/bakeoff_harness.py` exists. **Revert procedure** unchanged if a future benchmark shows regressions without MIL benefit.
 
 ## References
 
@@ -250,7 +250,8 @@ Use until `scripts/bakeoff_harness.py` exists:
 | ---- | ------ |
 | `kokoro/istftnet.py` | `AdaIN1d`: Conv1d + hook + update class docstring (`Linear` → `Conv1d`) |
 | `scripts/count_mil_ops.py` | **New** MIL op-type histogram (Phase 0 required deliverable) |
-| `scripts/compare_decoder_har_post_waveforms.py` | **New** baseline vs candidate waveform gates |
+| `scripts/compare_decoder_har_post_waveforms.py` | Baseline vs candidate waveform gates |
+| `scripts/bench_decoder_har_post_predict.py` | Phase 3 fallback: median `predict()` ms |
 | `tests/test_adain1d_linear_vs_conv1d.py` | **New** equivalence test + hook round-trip (2D→3D and 3D→3D) |
 | `tests/test_adain1d_decoder_smoke.py` | **New** `AdainResBlk1d` fan-in smoke |
 | `coreml/kokoro_decoder_har_post_3s.mlpackage` | Rebuild |
@@ -264,4 +265,4 @@ When the optimization PR merges, **append a row here** (or replace the placehold
 | Run | git SHA | coremltools | Hardware | `t_coreml_predict_s` or fallback median (ms) | Pearson (3s / 10s) | Max abs Δ / SNR | MIL note (linear→conv?) |
 | --- | --- | --- | --- | --- | --- | --- | --- |
 | Baseline (pre–Phase 2 export) | parent of Conv1d commit | 8.3.0 | dev machine | not measured | — | — | 3s: `linear` **48**, `conv` 51 |
-| After Conv1d | see `ane_optimization_results.json` | 8.3.0 | dev machine | not measured (no harness) | 0.999995 / 0.999995 | Δ~2e-3, SNR~50 dB | 3s: `linear` **0**, `conv` **99** |
+| After Conv1d | see `ane_optimization_results.json` | 8.3.0 | dev machine | ~19 ms median `predict` (3s, fallback script; not harness) | ~0.999996 / ~0.999995 | Δ~2e-3, SNR~50 dB | 3s: `linear` **0**, `conv` **99** |
