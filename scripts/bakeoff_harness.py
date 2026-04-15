@@ -86,7 +86,7 @@ BAKEOFF_INPUTS: dict[str, str] = {
 MAX_CANONICAL_DURATION_S = 9.0
 
 # Headline config IDs valid for ``run --configs``.
-HEADLINE_CONFIGS = {"a", "b", "c", "d", "e"}
+HEADLINE_CONFIGS = {"a", "b", "c", "d", "e", "f"}
 # Diagnostic config valid only for ``telemetry-loop --config``.
 DIAGNOSTIC_CONFIGS = {"bcpu"}
 ALL_CONFIGS = HEADLINE_CONFIGS | DIAGNOSTIC_CONFIGS
@@ -454,6 +454,127 @@ class PyTorchContext:
         torch.manual_seed(0)
         _run_pytorch(self, text)
 
+class SwiftPipelineContext:
+    """Config F: Swift + CoreML pipeline via kokoro-bench subprocess."""
+
+    def __init__(self) -> None:
+        self.config_id = "f"
+        self.available = True
+        self.unavailable_reason = ""
+        self.artifacts: dict[str, dict] = {}
+
+        # Locate the built Swift binary
+        self._swift_binary = _REPO_ROOT / "swift" / ".build" / "release" / "kokoro-bench"
+        self._models_dir = _REPO_ROOT / "coreml"
+        self._inputs_dir = _REPO_ROOT / "outputs" / "swift_bench_inputs"
+        self._hnsf_weights = self._inputs_dir / "hnsf_weights.json"
+
+        if not self._swift_binary.exists():
+            self.available = False
+            self.unavailable_reason = (
+                f"Swift binary not found at {self._swift_binary}. "
+                "Build with: cd swift && swift build -c release --product kokoro-bench"
+            )
+            return
+
+        if not self._hnsf_weights.exists():
+            self.available = False
+            self.unavailable_reason = (
+                f"hn-nsf weights not found at {self._hnsf_weights}. "
+                "Run: uv run python scripts/prepare_swift_bench_inputs.py"
+            )
+            return
+
+    def warmup(self, text: str) -> None:
+        """Warmup by running one input through the Swift binary."""
+        import subprocess
+        import tempfile
+        out_file = tempfile.NamedTemporaryFile(suffix=".json", delete=False)
+        out_file.close()
+        try:
+            subprocess.run(
+                [
+                    str(self._swift_binary),
+                    "--models-dir", str(self._models_dir),
+                    "--inputs-dir", str(self._inputs_dir),
+                    "--hnsf-weights", str(self._hnsf_weights),
+                    "--input-key", "tiny",
+                    "--output", out_file.name,
+                    "--seed", "0",
+                ],
+                check=True,
+                capture_output=True,
+                timeout=120,
+            )
+        except Exception as exc:
+            print(f"  Swift warmup failed: {exc}")
+        finally:
+            os.unlink(out_file.name)
+
+
+def _run_swift_timed(
+    ctx: SwiftPipelineContext, input_key: str, manifest_entry: dict
+) -> dict[str, Any]:
+    """Run Config F via Swift subprocess."""
+    import subprocess
+    import tempfile
+
+    record: dict[str, Any] = {
+        "config": "f",
+        "input_key": input_key,
+        "status": "ok",
+        "error": None,
+    }
+
+    # Check that the pre-tokenized input exists
+    input_json = ctx._inputs_dir / f"{input_key}.json"
+    if not input_json.exists():
+        record.update(status="input_missing", error=f"No pre-tokenized input for {input_key}")
+        return record
+
+    out_file = tempfile.NamedTemporaryFile(suffix=".json", delete=False)
+    out_file.close()
+
+    try:
+        result = subprocess.run(
+            [
+                str(ctx._swift_binary),
+                "--models-dir", str(ctx._models_dir),
+                "--inputs-dir", str(ctx._inputs_dir),
+                "--hnsf-weights", str(ctx._hnsf_weights),
+                "--input-key", input_key,
+                "--output", out_file.name,
+                "--seed", "42",
+            ],
+            capture_output=True,
+            timeout=120,
+        )
+        if result.returncode != 0:
+            record.update(
+                status="swift_error",
+                error=result.stderr.decode("utf-8", errors="replace")[:500],
+            )
+            return record
+
+        swift_result = json.loads(Path(out_file.name).read_text())
+        record.update(swift_result)
+        record["config"] = "f"  # Ensure config ID is correct
+        record["input_key"] = input_key
+        return record
+
+    except subprocess.TimeoutExpired:
+        record.update(status="timeout", error="Swift binary timed out after 120s")
+        return record
+    except Exception as exc:
+        record.update(status="exception", error=str(exc))
+        return record
+    finally:
+        try:
+            os.unlink(out_file.name)
+        except OSError:
+            pass
+
+
 # ---------------------------------------------------------------------------
 # Per-config run functions
 # ---------------------------------------------------------------------------
@@ -819,6 +940,10 @@ def cmd_run(args: argparse.Namespace) -> None:
         print("\nLoading Config E (PyTorch CPU)...")
         contexts["e"] = PyTorchContext("cpu", "e")
 
+    if "f" in requested:
+        print("\nLoading Config F (Swift + CoreML pipeline)...")
+        contexts["f"] = SwiftPipelineContext()
+
     # --- Print availability summary ---
     print("\n" + "-" * 40)
     print("Config availability:")
@@ -902,6 +1027,8 @@ def cmd_run(args: argparse.Namespace) -> None:
                         rec = _run_decoder_only_timed(ctx, text, entry_with_key)
                     elif cfg_id in ("d", "e"):
                         rec = _run_pytorch_timed(ctx, text, entry_with_key)
+                    elif cfg_id == "f":
+                        rec = _run_swift_timed(ctx, ik, entry_with_key)
                     else:
                         rec = {"config": cfg_id, "status": "unknown_config", "error": cfg_id}
                 except Exception as exc:
