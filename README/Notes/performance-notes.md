@@ -516,53 +516,56 @@ Extended the bakeoff to cover the full range of practical audio durations: 3s, 7
 - **Inputs:** Renamed from tiny/short/medium/long to 3s/7s/15s/30s targeting specific audio durations
 - **Duration model:** Per-size exports [32, 64, 128, 256, 512] (E5RT can't handle RangeDim/EnumeratedShapes)
 - **New bucket models:** 7s, 15s, 30s for F0Ntrain, DecoderPre, and GeneratorFromHar (all pass 0.99+ correlation)
-- **Config D (MPS) omitted** — not needed for the duration scaling question
+- **New bucket models:** 7s, 15s, 30s for F0Ntrain, DecoderPre, and GeneratorFromHar (all pass 0.99+ correlation)
+- **Config D (MPS)** added in a separate pass with `PYTORCH_ENABLE_MPS_FALLBACK=1`
 
 ### End-to-end wall time (warm median, milliseconds)
 
-| Input | Audio | Bucket | A (Python HAR) | E (CPU) | F (Swift) |
-| --- | --- | --- | --- | --- | --- |
-| 3s | 2.80s | 3s | 161 ms | 324 ms | **65 ms** |
-| 7s | 6.75s | 7s | 219 ms | 588 ms | **142 ms** |
-| 15s | 13.90s | 15s | 276 ms | 1133 ms | **254 ms** |
-| 30s | 27.38s | 30s | 435 ms | 2162 ms | **349 ms** |
+| Input | Audio | Bucket | A (Python HAR) | D (MPS) | E (CPU) | F (Swift) |
+| --- | --- | --- | --- | --- | --- | --- |
+| 3s | 2.80s | 3s | 161 ms | 171 ms | 324 ms | **65 ms** |
+| 7s | 6.75s | 7s | 219 ms | 320 ms | 588 ms | **142 ms** |
+| 15s | 13.90s | 15s | 276 ms | 611 ms | 1133 ms | **254 ms** |
+| 30s | 27.38s | 30s | 435 ms | 1247 ms | 2162 ms | **349 ms** |
 
 ### RTF and realtime factor
 
-| Input | Audio | A RTF | E RTF | F RTF | F realtime |
-| --- | --- | --- | --- | --- | --- |
-| 3s | 2.80s | 0.058 | 0.116 | **0.023** | **43x RT** |
-| 7s | 6.75s | 0.032 | 0.087 | **0.021** | **48x RT** |
-| 15s | 13.90s | 0.020 | 0.082 | **0.018** | **55x RT** |
-| 30s | 27.38s | 0.016 | 0.079 | **0.013** | **79x RT** |
+| Input | Audio | A RTF | D RTF | E RTF | F RTF | F realtime |
+| --- | --- | --- | --- | --- | --- | --- |
+| 3s | 2.80s | 0.058 | 0.061 | 0.116 | **0.023** | **43x RT** |
+| 7s | 6.75s | 0.032 | 0.047 | 0.087 | **0.021** | **48x RT** |
+| 15s | 13.90s | 0.020 | 0.044 | 0.082 | **0.018** | **55x RT** |
+| 30s | 27.38s | 0.016 | 0.046 | 0.079 | **0.013** | **79x RT** |
 
 ### Speedup: Config F vs baselines
 
-| Input | F vs A (Python HAR) | F vs E (CPU) |
-| --- | --- | --- |
-| 3s | **2.5x** | **5.0x** |
-| 7s | **1.5x** | **4.1x** |
-| 15s | **1.1x** | **4.5x** |
-| 30s | **1.2x** | **6.2x** |
+| Input | F vs A (Python HAR) | F vs D (MPS) | F vs E (CPU) |
+| --- | --- | --- | --- |
+| 3s | **2.5x** | **2.6x** | **5.0x** |
+| 7s | **1.5x** | **2.3x** | **4.1x** |
+| 15s | **1.1x** | **2.4x** | **4.5x** |
+| 30s | **1.2x** | **3.6x** | **6.2x** |
 
 ### Interpretation
 
-1. **Config F scales sublinearly with duration.** 3s audio → 65 ms, 30s audio → 349 ms. A 10x increase in audio duration costs only 5.4x more wall time. At 30s, Config F achieves 79x realtime.
+1. **Config F scales sublinearly with duration.** 3s audio -> 65 ms, 30s audio -> 349 ms. A 10x increase in audio duration costs only 5.4x more wall time. At 30s, Config F achieves 79x realtime.
 
 2. **The F vs A speedup is largest at short durations (2.5x at 3s)** where Python orchestration overhead dominates. At 15s the gap narrows to 1.1x — both pipelines are CoreML-predict-bound at that point.
 
-3. **F vs CPU scales strongly with duration (5.0x → 6.2x).** PyTorch CPU scales linearly with audio length; the Swift+CoreML pipeline does not. At 30s, CPU takes 2.2 seconds vs Swift's 349 ms.
+3. **F vs MPS grows with duration (2.6x -> 3.6x).** MPS scales roughly linearly (like CPU but ~1.7x faster). At 30s, MPS takes 1.25s vs Swift's 349ms. The `aten::angle` CPU fallback on MPS continues to be a drag on PyTorch GPU performance.
 
-4. **The 30s input (476 tokens) validates the Duration model expansion.** The T=512 Duration model handles 476 tokens correctly. Without the enumerated model export, this input would have been impossible (old T=128 model only supported ~120 real tokens after BOS/EOS).
+4. **F vs CPU scales strongly with duration (5.0x -> 6.2x).** PyTorch CPU scales linearly with audio length; the Swift+CoreML pipeline does not. At 30s, CPU takes 2.2 seconds vs Swift's 349 ms.
+
+5. **The 30s input (476 tokens) validates the Duration model expansion.** The T=512 Duration model handles 476 tokens correctly. Without the enumerated model export, this input would have been impossible (old T=128 model only supported ~120 real tokens after BOS/EOS).
 
 ### Provenance
 
 - Machine: Apple M2 Ultra, 64 GB
 - Git: current main branch
 - Swift: Apple Swift version 6.1
-- Configs: A, E, F (D omitted)
+- Configs: A, E, F (5 reps each), D (5 reps, separate pass with MPS fallback)
 - Order seed: 0, iterations: 5
-- Results: `outputs/bakeoff/results_m2_ultra_v4.json`
+- Results: `outputs/bakeoff/results_m2_ultra_v4.json`, `outputs/bakeoff/results_m2_ultra_v4_mps.json`
 
 ---
 
