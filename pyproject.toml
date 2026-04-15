@@ -18,6 +18,7 @@ classifiers = [
 ]
 requires-python = ">=3.10, <3.13"
 dependencies = [
+    "coremltools==8.3.0",
     "huggingface_hub",
     "loguru",
     "misaki[en]>=0.9.4",

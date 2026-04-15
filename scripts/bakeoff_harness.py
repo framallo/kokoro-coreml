@@ -494,6 +494,16 @@ class SwiftPipelineContext:
             )
             return
 
+        # Read manifest to get the first input key for warmup
+        manifest_path = _REPO_ROOT / "outputs" / "bakeoff" / "input_manifest.json"
+        if manifest_path.exists():
+            import json as _json
+            with open(manifest_path) as f:
+                _manifest = _json.load(f)
+            self._first_input_key = next(iter(_manifest["inputs"]))
+        else:
+            self._first_input_key = "3s"  # fallback
+
     def warmup(self, text: str) -> None:
         """Warmup by running one input through the Swift binary."""
         import subprocess
@@ -507,13 +517,13 @@ class SwiftPipelineContext:
                     "--models-dir", str(self._models_dir),
                     "--inputs-dir", str(self._inputs_dir),
                     "--hnsf-weights", str(self._hnsf_weights),
-                    "--input-key", "tiny",
+                    "--input-key", self._first_input_key,
                     "--output", out_file.name,
                     "--seed", "0",
                 ],
                 check=True,
                 capture_output=True,
-                timeout=120,
+                timeout=300,
             )
         except Exception as exc:
             print(f"  Swift warmup failed: {exc}")
@@ -556,7 +566,7 @@ def _run_swift_timed(
                 "--seed", "42",
             ],
             capture_output=True,
-            timeout=120,
+            timeout=300,
         )
         if result.returncode != 0:
             record.update(
@@ -572,7 +582,7 @@ def _run_swift_timed(
         return record
 
     except subprocess.TimeoutExpired:
-        record.update(status="timeout", error="Swift binary timed out after 120s")
+        record.update(status="timeout", error="Swift binary timed out after 300s")
         return record
     except Exception as exc:
         record.update(status="exception", error=str(exc))

@@ -84,6 +84,20 @@ wheels = [
 ]
 
 [[package]]
+name = "cattrs"
+version = "25.2.0"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "attrs" },
+    { name = "exceptiongroup", marker = "python_full_version < '3.11'" },
+    { name = "typing-extensions" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/e3/42/988b3a667967e9d2d32346e7ed7edee540ef1cee829b53ef80aa8d4a0222/cattrs-25.2.0.tar.gz", hash = "sha256:f46c918e955db0177be6aa559068390f71988e877c603ae2e56c71827165cc06", size = 506531, upload-time = "2025-08-31T20:41:59.301Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/20/a5/b3771ac30b590026b9d721187110194ade05bfbea3d98b423a9cafd80959/cattrs-25.2.0-py3-none-any.whl", hash = "sha256:539d7eedee7d2f0706e4e109182ad096d608ba84633c32c75ef3458f1d11e8f1", size = 70040, upload-time = "2025-08-31T20:41:57.543Z" },
+]
+
+[[package]]
 name = "certifi"
 version = "2025.1.31"
 source = { registry = "https://pypi.org/simple" }
@@ -218,6 +232,33 @@ wheels = [
 ]
 
 [[package]]
+name = "coremltools"
+version = "8.3.0"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "attrs" },
+    { name = "cattrs" },
+    { name = "numpy" },
+    { name = "packaging" },
+    { name = "protobuf" },
+    { name = "pyaml" },
+    { name = "sympy" },
+    { name = "tqdm" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/93/f1/322d8cb29c59b8710375927a6d776887ed4c6caafd036cf4fbe14dcdb767/coremltools-8.3.0.tar.gz", hash = "sha256:c95a6051606b71273d669b107b5f32d3191f595e6821b8db04baf49d52d0704f", size = 1642701, upload-time = "2025-04-28T20:14:06.235Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/2a/9e/b9070c8d44c7d5e3a552d5b19ebe07fd9814b72ce7be452138596bdcbc18/coremltools-8.3.0-cp310-none-macosx_10_15_x86_64.whl", hash = "sha256:730831927cde3ba39ae6f80b72c5fbff8820393f2f97ec1c98ab33ec08094c4e", size = 2767146, upload-time = "2025-04-28T20:13:28.763Z" },
+    { url = "https://files.pythonhosted.org/packages/63/ad/6293617987fc4de90030d0556ede0fcb7fc0c17e9907146e18f400efe482/coremltools-8.3.0-cp310-none-macosx_11_0_arm64.whl", hash = "sha256:5f95af47531fb2f01a501ae5fad01e7dfb1cc0b70b035fbed6d788201cbc9a56", size = 2740012, upload-time = "2025-04-28T20:13:31.996Z" },
+    { url = "https://files.pythonhosted.org/packages/c4/c9/f602c2a7861a9e8a2555a083d9558d37d8811515bacd597eb3b40ba7757d/coremltools-8.3.0-cp310-none-manylinux1_x86_64.whl", hash = "sha256:e505c2b89b5bd1b1425466a8d45cc6edd75c81b0c3834403992a575a1c134c34", size = 2292024, upload-time = "2025-04-28T20:13:35.214Z" },
+    { url = "https://files.pythonhosted.org/packages/72/a6/31dc762e0317d26b2d21919e12c42644ecab8401ff2aa6f00215156a45ee/coremltools-8.3.0-cp311-none-macosx_10_15_x86_64.whl", hash = "sha256:59ff68ec62bf2c0421041142117e37ef679f46e6304653aea64cbe8a39a5f9bc", size = 2770927, upload-time = "2025-04-28T20:13:37.598Z" },
+    { url = "https://files.pythonhosted.org/packages/69/32/847810ade6b7105fcf810188f41dc4bb25e2278f505f8a08185bd8787cbb/coremltools-8.3.0-cp311-none-macosx_11_0_arm64.whl", hash = "sha256:5f843f5a6be740d84eb7c80c49766da0b9bd67e86a9cb1dbfce838ab5366feb3", size = 2743785, upload-time = "2025-04-28T20:13:39.291Z" },
+    { url = "https://files.pythonhosted.org/packages/36/9c/a6fbc66e300e176f94ab6f90530d33c703868126572fb9119cc952b8ecc6/coremltools-8.3.0-cp311-none-manylinux1_x86_64.whl", hash = "sha256:3d6d5828688347b5f6e31f1ce522b5df5733246611dbcb09fbc94687ff0fc16a", size = 2293270, upload-time = "2025-04-28T20:13:41.847Z" },
+    { url = "https://files.pythonhosted.org/packages/94/74/0fea61f7644dda226fe8da364c9e68df3f1f7c6f59e6e8646215581af3d0/coremltools-8.3.0-cp312-none-macosx_10_15_x86_64.whl", hash = "sha256:2bfb57173a9fcbeb1f5bd3bfc90169c817ee04882564eafb79deafa494f96523", size = 2770175, upload-time = "2025-04-28T20:13:43.523Z" },
+    { url = "https://files.pythonhosted.org/packages/56/2b/a06357e7881bacc92a4d125064202bf48acfe63368c781f49d688bca3b51/coremltools-8.3.0-cp312-none-macosx_11_0_arm64.whl", hash = "sha256:e8a70ca3b34676cbcb61f70e1192593062eb85a9a64e29e03268d6f280b2c86e", size = 2740828, upload-time = "2025-04-28T20:13:45.189Z" },
+    { url = "https://files.pythonhosted.org/packages/a2/52/6c15580d9049930dc6319d70cc065622e569afc1307d177bf45cb9f82076/coremltools-8.3.0-cp312-none-manylinux1_x86_64.whl", hash = "sha256:36ee21f1ab35bd45500ce006b366d45f4210a86882283d6cf2e603faeaaf791c", size = 2292484, upload-time = "2025-04-28T20:13:47.288Z" },
+]
+
+[[package]]
 name = "csvw"
 version = "3.5.1"
 source = { registry = "https://pypi.org/simple" }
@@ -335,6 +376,18 @@ wheels = [
 ]
 
 [[package]]
+name = "exceptiongroup"
+version = "1.3.1"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "typing-extensions", marker = "python_full_version < '3.12'" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/50/79/66800aadf48771f6b62f7eb014e352e5d06856655206165d775e675a02c9/exceptiongroup-1.3.1.tar.gz", hash = "sha256:8b412432c6055b0b7d14c310000ae93352ed6754f70fa8f7c34141f91c4e3219", size = 30371, upload-time = "2025-11-21T23:01:54.787Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/8a/0e/97c33bf5009bdbac74fd2beace167cab3f978feb69cc36f1ef79360d6c4e/exceptiongroup-1.3.1-py3-none-any.whl", hash = "sha256:a7a39a3bd276781e98394987d3a5701d0c4edffb633bb7a5144577f82c773598", size = 16740, upload-time = "2025-11-21T23:01:53.443Z" },
+]
+
+[[package]]
 name = "filelock"
 version = "3.17.0"
 source = { registry = "https://pypi.org/simple" }
@@ -441,6 +494,7 @@ name = "kokoro"
 version = "0.9.4"
 source = { editable = "." }
 dependencies = [
+    { name = "coremltools" },
     { name = "huggingface-hub" },
     { name = "loguru" },
     { name = "misaki", extra = ["en"] },
@@ -451,6 +505,7 @@ dependencies = [
 
 [package.metadata]
 requires-dist = [
+    { name = "coremltools", specifier = "==8.3.0" },
     { name = "huggingface-hub" },
     { name = "loguru" },
     { name = "misaki", extras = ["en"], specifier = ">=0.9.4" },
@@ -978,6 +1033,33 @@ wheels = [
     { url = "https://files.pythonhosted.org/packages/f3/52/48eefe876a3841c5850bd955daf145d0e408567c8f46a997bce136dc259d/preshed-3.0.9-cp312-cp312-manylinux_2_17_aarch64.manylinux2014_aarch64.whl", hash = "sha256:4a55091d0e395f1fdb62ab43401bb9f8b46c7d7794d5b071813c29dc1ab22fd0", size = 149220, upload-time = "2023-09-15T15:44:04.808Z" },
     { url = "https://files.pythonhosted.org/packages/55/ea/9e6c1a7b1d623f6340379290d603a3b8a71ce52a93f842fbf7547f7f1812/preshed-3.0.9-cp312-cp312-manylinux_2_5_x86_64.manylinux1_x86_64.manylinux_2_17_x86_64.manylinux2014_x86_64.whl", hash = "sha256:7de8f5138bcac7870424e09684dc3dd33c8e30e81b269f6c9ede3d8c7bb8e257", size = 156809, upload-time = "2023-09-15T15:44:06.153Z" },
     { url = "https://files.pythonhosted.org/packages/db/e4/d074efb7e8a8873d346d2fb8dd43e19b1eae0697351c0d79cff947cba46e/preshed-3.0.9-cp312-cp312-win_amd64.whl", hash = "sha256:24229c77364628743bc29c5620c5d6607ed104f0e02ae31f8a030f99a78a5ceb", size = 122428, upload-time = "2023-09-15T15:44:07.466Z" },
+]
+
+[[package]]
+name = "protobuf"
+version = "7.34.1"
+source = { registry = "https://pypi.org/simple" }
+sdist = { url = "https://files.pythonhosted.org/packages/6b/6b/a0e95cad1ad7cc3f2c6821fcab91671bd5b78bd42afb357bb4765f29bc41/protobuf-7.34.1.tar.gz", hash = "sha256:9ce42245e704cc5027be797c1db1eb93184d44d1cdd71811fb2d9b25ad541280", size = 454708, upload-time = "2026-03-20T17:34:47.036Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/ec/11/3325d41e6ee15bf1125654301211247b042563bcc898784351252549a8ad/protobuf-7.34.1-cp310-abi3-macosx_10_9_universal2.whl", hash = "sha256:d8b2cc79c4d8f62b293ad9b11ec3aebce9af481fa73e64556969f7345ebf9fc7", size = 429247, upload-time = "2026-03-20T17:34:37.024Z" },
+    { url = "https://files.pythonhosted.org/packages/eb/9d/aa69df2724ff63efa6f72307b483ce0827f4347cc6d6df24b59e26659fef/protobuf-7.34.1-cp310-abi3-manylinux2014_aarch64.whl", hash = "sha256:5185e0e948d07abe94bb76ec9b8416b604cfe5da6f871d67aad30cbf24c3110b", size = 325753, upload-time = "2026-03-20T17:34:38.751Z" },
+    { url = "https://files.pythonhosted.org/packages/92/e8/d174c91fd48e50101943f042b09af9029064810b734e4160bbe282fa1caa/protobuf-7.34.1-cp310-abi3-manylinux2014_s390x.whl", hash = "sha256:403b093a6e28a960372b44e5eb081775c9b056e816a8029c61231743d63f881a", size = 340198, upload-time = "2026-03-20T17:34:39.871Z" },
+    { url = "https://files.pythonhosted.org/packages/53/1b/3b431694a4dc6d37b9f653f0c64b0a0d9ec074ee810710c0c3da21d67ba7/protobuf-7.34.1-cp310-abi3-manylinux2014_x86_64.whl", hash = "sha256:8ff40ce8cd688f7265326b38d5a1bed9bfdf5e6723d49961432f83e21d5713e4", size = 324267, upload-time = "2026-03-20T17:34:41.1Z" },
+    { url = "https://files.pythonhosted.org/packages/85/29/64de04a0ac142fb685fd09999bc3d337943fb386f3a0ec57f92fd8203f97/protobuf-7.34.1-cp310-abi3-win32.whl", hash = "sha256:34b84ce27680df7cca9f231043ada0daa55d0c44a2ddfaa58ec1d0d89d8bf60a", size = 426628, upload-time = "2026-03-20T17:34:42.536Z" },
+    { url = "https://files.pythonhosted.org/packages/4d/87/cb5e585192a22b8bd457df5a2c16a75ea0db9674c3a0a39fc9347d84e075/protobuf-7.34.1-cp310-abi3-win_amd64.whl", hash = "sha256:e97b55646e6ce5cbb0954a8c28cd39a5869b59090dfaa7df4598a7fba869468c", size = 437901, upload-time = "2026-03-20T17:34:44.112Z" },
+    { url = "https://files.pythonhosted.org/packages/88/95/608f665226bca68b736b79e457fded9a2a38c4f4379a4a7614303d9db3bc/protobuf-7.34.1-py3-none-any.whl", hash = "sha256:bb3812cd53aefea2b028ef42bd780f5b96407247f20c6ef7c679807e9d188f11", size = 170715, upload-time = "2026-03-20T17:34:45.384Z" },
+]
+
+[[package]]
+name = "pyaml"
+version = "26.2.1"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "pyyaml" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/38/fb/2b9590512a9d7763620d87171c7531d5295678ce96e57393614b91da8998/pyaml-26.2.1.tar.gz", hash = "sha256:489dd82997235d4cfcf76a6287fce2f075487d77a6567c271e8d790583690c68", size = 30653, upload-time = "2026-02-06T13:49:30.769Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/5d/f3/1f8651f23101e6fae41d0d504414c9722b0140bf0fc6acf87ac52e18aa41/pyaml-26.2.1-py3-none-any.whl", hash = "sha256:6261c2f0a2f33245286c794ad6ec234be33a73d2b05427079fd343e2812a87cf", size = 27211, upload-time = "2026-02-06T13:49:29.652Z" },
 ]
 
 [[package]]

@@ -572,6 +572,128 @@ Extended the bakeoff to cover the full range of practical audio durations: 3s, 7
 
 ---
 
+## Bakeoff v4: Extended duration range (3s-30s) on M2 MacBook Air
+
+**First collected:** 2026-04-15
+**Status:** Complete
+
+### Summary
+
+Same bakeoff v4 harness and frozen inputs as the M2 Ultra run, now on a base M2 MacBook Air (8-core CPU, 8-core GPU, 16-core ANE, 24 GB). Config A (Python HAR-post) remains the fastest pipeline on the M2 Air at longer durations, while Config F (Swift + CoreML) is faster only at short inputs (3s: 1.3x, 7s: 1.4x). At 15s and 30s, Config F is **slower** than Config A — a reversal of the M2 Ultra result. The bottleneck is GeneratorFromHar `predict()` via Swift's `MLModel.prediction()`, which runs **7.4x slower** than the equivalent Python `coremltools` call on the same 30s model.
+
+### What was measured
+
+- **Config A:** Shipping Python HAR-post hybrid (PyTorch prefix + CoreML decoder)
+- **Config D:** PyTorch end-to-end on MPS (`PYTORCH_ENABLE_MPS_FALLBACK=1`)
+- **Config E:** PyTorch end-to-end on CPU
+- **Config F:** Swift + CoreML pipeline (5 models + Swift hn-nsf DSP)
+
+All configs used identical frozen inputs, `voice=af_heart`, `speed=1.0`, `torch.manual_seed(0)`.
+
+### Method
+
+`scripts/bakeoff_harness.py` with `run --configs a,d,e,f --iterations 5 --order-seed 0`. Counterbalanced ordering, models preloaded and warmed. `PYTORCH_ENABLE_MPS_FALLBACK=1` set. Config F ran in a separate pass due to warmup key fix; all models warmed before timed runs.
+
+### End-to-end wall time (warm median, milliseconds)
+
+| Input | Audio | Bucket | A (Python HAR) | D (MPS) | E (CPU) | F (Swift) |
+| --- | --- | --- | --- | --- | --- | --- |
+| 3s | 2.80s | 3s | 322 ms | 334 ms | 759 ms | **256 ms** |
+| 7s | 6.75s | 7s | 507 ms | 689 ms | 1920 ms | **371 ms** |
+| 15s | 13.90s | 15s | **554 ms** | 1362 ms | 3966 ms | 833 ms |
+| 30s | 27.38s | 30s | **854 ms** | 2880 ms | 8098 ms | 2280 ms |
+
+### RTF and realtime factor
+
+| Input | Audio | A RTF | D RTF | E RTF | F RTF | F realtime |
+| --- | --- | --- | --- | --- | --- | --- |
+| 3s | 2.80s | 0.115 | 0.119 | 0.271 | **0.091** | **11x RT** |
+| 7s | 6.75s | 0.075 | 0.102 | 0.285 | **0.055** | **18x RT** |
+| 15s | 13.90s | **0.040** | 0.098 | 0.285 | 0.060 | 17x RT |
+| 30s | 27.38s | **0.031** | 0.105 | 0.296 | 0.083 | 12x RT |
+
+### Speedup: Config F vs baselines
+
+| Input | F vs A (Python HAR) | F vs D (MPS) | F vs E (CPU) |
+| --- | --- | --- | --- |
+| 3s | **1.3x** | **1.3x** | **3.0x** |
+| 7s | **1.4x** | **1.9x** | **5.2x** |
+| 15s | 0.7x (A wins) | **1.6x** | **4.8x** |
+| 30s | 0.4x (A wins) | **1.3x** | **3.6x** |
+
+### Config F stage breakdown (warm median, ms)
+
+| Stage | 3s | 7s | 15s | 30s |
+| --- | --- | --- | --- | --- |
+| Duration CoreML | 12 ms | 20 ms | 51 ms | 105 ms |
+| Matrix ops | 21 ms | 40 ms | 88 ms | 4 ms |
+| F0Ntrain CoreML | 4 ms | 26 ms | 25 ms | 26 ms |
+| Padding | 0.1 ms | 0.1 ms | 0.3 ms | 0.7 ms |
+| DecoderPre CoreML | 3 ms | 7 ms | 13 ms | 31 ms |
+| hn-nsf Swift | 16 ms | 37 ms | 75 ms | 161 ms |
+| GeneratorFromHar CoreML | 204 ms | 261 ms | 681 ms | 1971 ms |
+
+### Cross-machine comparison (Config F)
+
+| Input | M2 Ultra | M2 Air | Air/Ultra ratio |
+| --- | --- | --- | --- |
+| 3s | 65 ms | 256 ms | 3.9x slower |
+| 7s | 142 ms | 371 ms | 2.6x slower |
+| 15s | 254 ms | 833 ms | 3.3x slower |
+| 30s | 349 ms | 2280 ms | 6.5x slower |
+
+### Cross-machine comparison (Config A)
+
+| Input | M2 Ultra | M2 Air | Air/Ultra ratio |
+| --- | --- | --- | --- |
+| 3s | 161 ms | 322 ms | 2.0x slower |
+| 7s | 219 ms | 507 ms | 2.3x slower |
+| 15s | 276 ms | 554 ms | 2.0x slower |
+| 30s | 435 ms | 854 ms | 2.0x slower |
+
+### The GeneratorFromHar anomaly
+
+The headline finding is that Config F's GeneratorFromHar `predict()` is dramatically slower on M2 Air than Config A's call to the *same* model at the same bucket size:
+
+| Bucket | Config A (Python coremltools) | Config F (Swift MLModel) | Ratio |
+| --- | --- | --- | --- |
+| 30s | 259 ms | 1971 ms | **7.6x** |
+
+Both call the same `kokoro_decoder_har_post_30s.mlpackage`. The difference is the API layer:
+- Config A: Python `coremltools.models.MLModel.predict()` 
+- Config F: Swift `MLModel.prediction()` via subprocess
+
+Possible explanations:
+1. **Compute unit routing:** The Swift binary may not be requesting `computeUnits: .all` (ANE), forcing CPU/GPU fallback.
+2. **Model compilation caching:** Each Swift subprocess may not benefit from the macOS model compilation cache the way a long-lived Python process does.
+3. **Memory pressure:** The M2 Air's 24GB vs M2 Ultra's 64GB may cause memory-constrained scheduling differences.
+
+This anomaly does **not** appear on M2 Ultra (Config F is 1.2x faster than A at 30s), suggesting it's specific to constrained hardware.
+
+### Interpretation
+
+1. **Config F wins at short durations (3s-7s) but loses at long durations (15s-30s) on M2 Air.** The crossover point is around 10s. This is the opposite of M2 Ultra where Config F wins everywhere.
+
+2. **Config A scales consistently: 2.0x slower on Air vs Ultra** across all durations. This is expected given the ~2x difference in memory bandwidth and core count between M2 and M2 Ultra.
+
+3. **Config F scales inconsistently: 2.6-6.5x slower on Air vs Ultra.** The GeneratorFromHar anomaly causes the gap to widen dramatically at longer durations (6.5x at 30s vs 2.6x at 7s).
+
+4. **Config F still beats MPS (1.3-1.9x) and CPU (3.0-5.2x) everywhere.** The Swift pipeline is never the worst option — it just loses to the shipping Python HAR-post path at longer inputs on constrained hardware.
+
+5. **For M2 Air deployment, use Config A for inputs > 10s.** Config F is only beneficial for short inputs. A hybrid routing strategy would be optimal.
+
+### Provenance
+
+- Machine: Apple M2 MacBook Air, 24 GB, macOS 15.5
+- Git: current main branch
+- Swift: Apple Swift version 6.1
+- Torch: 2.6.0 / coremltools: 8.3.0
+- Order seed: 0, iterations: 5
+- Results: `outputs/bakeoff/results_m2_air_v4.json` (A, D, E), `outputs/bakeoff/results_m2_air_v4_f.json` (F)
+- Config F timeout: 300s (increased from 120s for M2 Air model compilation time)
+
+---
+
 ## Bakeoff v2: Controlled benchmark on M1 Mini
 
 **First collected:** 2026-04-15
