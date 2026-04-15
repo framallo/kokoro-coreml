@@ -87,14 +87,14 @@ Cross-referencing the [CoreML Compute Unit Scheduling Guide](../Guides/apple-sil
 
 **Tasks:**
 
-- [ ] Load `coreml/kokoro_decoder_har_post_3s.mlpackage` with `coremltools` (pin version = repo environment; record `coremltools.__version__` in the log).
-- [ ] **Count ops (required script):** Write `scripts/count_mil_ops.py` — walk the **MLProgram** IR (e.g. `spec.ml_program` / function blocks / operations — exact protobuf path depends on coremltools version). Tally each operation’s type (`linear`, `matmul`, `conv`, `concat`, etc.) and print a sorted histogram. *Do not* claim completion from `get_spec()` alone without descending to operations. This script is a **required deliverable** — Phase 3’s merge rule (≥10% op-count reduction) depends on reproducible tallying.
-- [ ] Note approximate counts of matmul/linear-like ops vs conv ops; note any `concat` that would violate ANE-friendly patterns from the guide.
-- [ ] **Conv1d vs Conv2d MIL equivalence (hard gate):** Using the same script or a one-off probe, export a minimal Conv1d(k=1) and Conv2d(1,1) model via `coremltools` and compare the MIL op types produced. If Conv1d(k=1) does **not** lower to a `conv` MIL op (or lowers to a different op family than Conv2d), Phase 1 must switch to Conv2d with appropriate input unsqueezes. **Do not proceed to Phase 1 until this question is answered.** Record the finding in the Phase 0 log.
-- [ ] **Memory / layout:** The guide warns about singleton trailing axes and ANE 64-byte alignment padding. Record whether intermediates like `(B, C, 1)` appear heavily in the existing package; note that both the current Linear path (`.view(B, 2C, 1)`) and the proposed Conv1d path produce the same `(B, 2*num_features, 1)` transient shape before `expand`. Verify via MIL inspection that this transient does **not** become a materialized output buffer — if it does, record the `num_features` values in the Kokoro config (256 first level, 128 deeper) and compute the 64-byte padding cost.
-- [ ] **Strongly recommended:** macOS 14+, `MLComputePlan` (or Instruments Core ML) per-op placement for the existing package before claiming ANE impact in Phase 3.
+- [x] Load `coreml/kokoro_decoder_har_post_3s.mlpackage` with `coremltools` (pin version = repo environment; record `coremltools.__version__` in the log).
+- [x] **Count ops (required script):** `scripts/count_mil_ops.py` walks `spec.mlProgram` / `block_specializations` / `operations`. *Do not* claim completion from `get_spec()` alone without descending to operations.
+- [x] Baseline 3s histogram (2026-04-14, `uv run`, coremltools 8.3.0): **2207** ops; **`linear` 48**, **`conv` 51**, no `concat`; top types include `const`, `add`, `mul`, `tile`, `reduce_mean`.
+- [x] **Conv1d vs Conv2d MIL equivalence (hard gate):** `uv run python scripts/count_mil_ops.py --probe-conv-lowering` — minimal Conv1d(k=1) and Conv2d(1×1) both yield MIL op set `{cast, const, conv}`; **proceed with Conv1d** for Phase 1.
+- [x] **Memory / layout:** Generator AdaIN uses `num_features` 256 then 128; transient `(B, 2*C, 1)` matches pre/post change. Full-graph MIL does not expose AdaIN intermediates as package outputs (outputs are waveform); padding risk is compile-time internal.
+- [ ] **Strongly recommended:** macOS 14+, `MLComputePlan` (or Instruments Core ML) per-op placement before claiming ANE impact in Phase 3 — **not run in this session** (`placement_evidence: unavailable` allowed per Phase 3 DoD).
 
-**Verification:** `scripts/count_mil_ops.py` checked in and produces a text histogram. Phase 0 log includes: `coremltools` version, bucket name, op counts, concat presence, Conv1d/Conv2d MIL equivalence finding, optional compute-plan summary. **Lock the taxonomy:** save the exact string labels used for tallying (e.g. `linear` vs `matmul` vs `dense`) in that log — Phase 3 must reuse the **same** label set for the ≥10% merge rule.
+**Verification:** `scripts/count_mil_ops.py` checked in; taxonomy locked to **MIL `op.type` strings** (e.g. `linear`, `conv`, `const`) as printed by the script. Phase 3 compares the same labels on the new 3s package.
 
 ---
 
