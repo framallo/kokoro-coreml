@@ -99,16 +99,29 @@ def main():
 
         ref_s_list = ref_s.cpu().numpy().flatten().tolist()
 
-        # Compute canonical duration via extract_vocoder_inputs (ground truth)
+        # Compute canonical duration via extract_vocoder_inputs (ground truth).
+        # Try the bakeoff input manifest first to avoid loading all CoreML models.
         canonical_dur = None
-        # Try the bakeoff manifest first
+        manifest_path = _ROOT / "outputs" / "bakeoff" / "input_manifest.json"
+        if manifest_path.exists():
+            import json as _json
+            manifest = _json.loads(manifest_path.read_text())
+            # The manifest uses different input keys; search by text match.
+            for _ik, _iv in manifest.get("inputs", {}).items():
+                if _iv.get("text") == text:
+                    canonical_dur = _iv["canonical_duration_s"]
+                    break
         if canonical_dur is None:
-            from kokoro.coreml_pipeline import HybridTTSPipeline
-            pipe = HybridTTSPipeline()
-            vi = pipe.extract_vocoder_inputs(text, VOICE, SPEED)
-            if vi is not None:
-                T_f0 = int(vi["f0_curve"].shape[-1])
-                canonical_dur = T_f0 / 80.0
+            # Fallback: use HybridTTSPipeline. Skip if SKIP_VOCODER_INPUTS is set
+            # (avoids loading all CoreML models on memory-constrained machines).
+            import os as _os
+            if _os.environ.get("SKIP_VOCODER_INPUTS") != "1":
+                from kokoro.coreml_pipeline import HybridTTSPipeline
+                pipe = HybridTTSPipeline()
+                vi = pipe.extract_vocoder_inputs(text, VOICE, SPEED)
+                if vi is not None:
+                    T_f0 = int(vi["f0_curve"].shape[-1])
+                    canonical_dur = T_f0 / 80.0
 
         entry = {
             "key": key,

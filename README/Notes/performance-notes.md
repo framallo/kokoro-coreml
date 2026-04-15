@@ -1050,9 +1050,66 @@ TBD — fill after running `$bakeoff` on M1 Mini.
 
 ### Interpretation
 
-TBD — fill after collecting M1 Mini and M2 Air data.
+### M1 Mini data (2026-04-15)
 
-Key questions this section answers:
+Config A (HAR-post), D (MPS), E (CPU) collected. Config F (Swift) not available — input manifest used legacy keys (`tiny/short/medium/long`) incompatible with Swift benchmark's `3s/7s/15s/30s` inputs. Requires re-running `prepare-inputs` with updated harness to align input keys.
+
+#### End-to-end wall time (warm median, milliseconds)
+
+| Input | Audio | A (HAR-post) | D (MPS) | E (CPU) |
+| --- | --- | --- | --- | --- |
+| `tiny` | `1.55s` | `232 ms` | `292 ms` | `521 ms` |
+| `short` | `2.80s` | `245 ms` | `468 ms` | `843 ms` |
+| `medium` | `6.58s` | `573 ms` | `980 ms` | `2122 ms` |
+| `long` | `8.35s` | `604 ms` | `1215 ms` | `2736 ms` |
+
+#### RTF (canonical audio duration / wall time)
+
+| Input | A (HAR-post) | D (MPS) | E (CPU) |
+| --- | --- | --- | --- |
+| `tiny` | `0.149` (7x RT) | `0.188` (5x RT) | `0.336` (3x RT) |
+| `short` | `0.087` (11x RT) | `0.167` (6x RT) | `0.301` (3x RT) |
+| `medium` | `0.087` (11x RT) | `0.149` (7x RT) | `0.323` (3x RT) |
+| `long` | `0.072` (14x RT) | `0.146` (7x RT) | `0.328` (3x RT) |
+
+#### Speedup: Config A vs PyTorch baselines
+
+| Input | Audio | A vs E (CPU) | A vs D (MPS) |
+| --- | --- | --- | --- |
+| `tiny` | `1.55s` | `2.2x` | `1.3x` |
+| `short` | `2.80s` | `3.4x` | `1.9x` |
+| `medium` | `6.58s` | `3.7x` | `1.7x` |
+| `long` | `8.35s` | `4.5x` | `2.0x` |
+
+#### Config A stage breakdown (warm median)
+
+| Input | Bucket | Prefix extract | HAR builder (CPU) | CoreML predict | Orchestration | Total |
+| --- | --- | --- | --- | --- | --- | --- |
+| `tiny` | `3s` | `61.2 ms` (26%) | `64.0 ms` (28%) | `101.3 ms` (44%) | `2.2 ms` | `232 ms` |
+| `short` | `3s` | `78.4 ms` (32%) | `63.7 ms` (26%) | `101.6 ms` (41%) | `2.1 ms` | `245 ms` |
+| `medium` | `10s` | `121.5 ms` (21%) | `148.3 ms` (26%) | `298.4 ms` (52%) | `2.0 ms` | `573 ms` |
+| `long` | `10s` | `148.4 ms` (25%) | `151.1 ms` (25%) | `301.2 ms` (50%) | `2.3 ms` | `604 ms` |
+
+#### Interpretation
+
+1. **Config A is 7–14x realtime on M1 Mini.** Consistent with the earlier bakeoff v2 M1 Mini results (6-14x RT), confirming the M1 Mini as a viable benchmark target.
+
+2. **MPS is consistently slower than Config A.** Unlike the M2 Air where MPS beat Config A on `tiny`, the M1 Mini's 8-core GPU never outperforms the hybrid CoreML path. Config A's advantage is 1.3–2.0x across all inputs.
+
+3. **Speedup vs CPU scales with duration.** The 2.2x speedup at `tiny` grows to 4.5x at `long` — consistent with M2 Ultra and M2 Air scaling patterns.
+
+4. **CoreML predict is ~100 ms on the 3s bucket and ~300 ms on the 10s bucket.** Same pattern as the earlier v2 run, confirming stable predict-time behavior on this machine.
+
+#### Provenance
+
+- Machine: Apple M1 Mac Mini, 16 GB
+- Git: `97c394526f69`
+- Torch: `2.6.0` / coremltools: `9.0` / numpy: `1.26.4`
+- Order seed: `0`, iterations: `5`
+- Results: `outputs/bakeoff/results_m1_mini.json`
+- Note: Config F (Swift) unavailable due to input key mismatch between manifest and Swift benchmark. Non-essential models stashed during run to fit in 16 GB.
+
+Key questions this section will answer when Config F data is collected:
 1. Does the Swift pipeline speedup vs MPS hold on lower-end hardware, or does MPS become competitive as the GPU handles more of the work?
 2. On the M2 Air where MPS was competitive with Config A on short inputs (bakeoff v2), does Config F still win?
 3. How does the M1 Mini's 8-core GPU (MPS) compare to its 16-core ANE (Swift+CoreML)?
