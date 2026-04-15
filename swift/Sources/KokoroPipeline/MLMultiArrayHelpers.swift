@@ -146,6 +146,42 @@ public func zeroPad1D(source: [Float], targetLength: Int) -> [Float] {
     return result
 }
 
+// MARK: - Transpose
+
+/// Transpose a 3D MLMultiArray from (1, A, B) to (1, B, A).
+///
+/// Used when Duration model outputs (1, tokens, hidden) but downstream
+/// matmul expects (1, hidden, tokens).
+/// ``dim1`` is B (the inner dimension of source, outer of result).
+/// ``dim2`` is A (the outer dimension of source, inner of result).
+public func transpose3D(source: MLMultiArray, dim1: Int, dim2: Int) throws -> MLMultiArray {
+    // source is (1, dim2, dim1) in row-major — we want (1, dim1, dim2)
+    let result = try makeZeroArray3D(channels: dim1, time: dim2)
+    let dstPtr = result.dataPointer.assumingMemoryBound(to: Float.self)
+
+    // Check if source is contiguous (fast path)
+    let strides = source.strides.map { $0.intValue }
+    let isContiguous = strides.count >= 3 && strides[2] == 1 && strides[1] == dim1
+
+    if isContiguous {
+        // Fast path: direct pointer transpose
+        let srcPtr = source.dataPointer.assumingMemoryBound(to: Float.self)
+        for i in 0..<dim2 {
+            for j in 0..<dim1 {
+                dstPtr[j * dim2 + i] = srcPtr[i * dim1 + j]
+            }
+        }
+    } else {
+        // Safe path: subscript access for non-contiguous layouts
+        for i in 0..<dim2 {
+            for j in 0..<dim1 {
+                dstPtr[j * dim2 + i] = source[[0, i, j] as [NSNumber]].floatValue
+            }
+        }
+    }
+    return result
+}
+
 // MARK: - Shape Introspection
 
 /// Extract input shapes from a CoreML model spec.

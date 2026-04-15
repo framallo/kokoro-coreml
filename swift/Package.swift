@@ -11,11 +11,17 @@ let package = Package(
     ],
     products: [
         .library(name: "KokoroPipeline", targets: ["KokoroPipeline"]),
+        .executable(name: "kokoro-bench", targets: ["KokoroBenchmark"]),
     ],
     targets: [
         .target(
             name: "KokoroPipeline",
             path: "Sources/KokoroPipeline"
+        ),
+        .executableTarget(
+            name: "KokoroBenchmark",
+            dependencies: ["KokoroPipeline"],
+            path: "Sources/KokoroBenchmark"
         ),
         .testTarget(
             name: "KokoroPipelineTests",

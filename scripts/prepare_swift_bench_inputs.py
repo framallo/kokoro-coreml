@@ -88,6 +88,23 @@ def main():
 
         ref_s_list = ref_s.cpu().numpy().flatten().tolist()
 
+        # Get canonical duration from the bakeoff manifest if available
+        manifest_path = _ROOT / "outputs" / "bakeoff" / "input_manifest.json"
+        canonical_dur = None
+        if manifest_path.exists():
+            manifest = json.loads(manifest_path.read_text())
+            if key in manifest.get("inputs", {}):
+                canonical_dur = manifest["inputs"][key].get("canonical_duration_s")
+
+        # If no manifest, compute from extract_vocoder_inputs
+        if canonical_dur is None:
+            from kokoro.coreml_pipeline import HybridTTSPipeline
+            pipe = HybridTTSPipeline()
+            vi = pipe.extract_vocoder_inputs(text, VOICE, SPEED)
+            if vi is not None:
+                T_f0 = int(vi["f0_curve"].shape[-1])
+                canonical_dur = T_f0 / 80.0
+
         entry = {
             "key": key,
             "text": text,
@@ -97,6 +114,7 @@ def main():
             "input_ids": padded_ids,
             "attention_mask": attention_mask,
             "ref_s": ref_s_list,
+            "canonical_duration_s": canonical_dur,
             "num_tokens": len(input_ids),
         }
 
