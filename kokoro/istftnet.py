@@ -95,42 +95,6 @@ def get_padding(kernel_size, dilation=1):
     return int((kernel_size*dilation - dilation)/2)
 
 
-def _adain_fc_linear_weights_to_conv1d(
-    module,
-    state_dict,
-    prefix,
-    local_metadata,
-    strict,
-    missing_keys,
-    unexpected_keys,
-    error_msgs,
-):
-    """Migrate a legacy nn.Linear 'fc' weight (2D) into nn.Conv1d shape (3D) on checkpoint load.
-
-    Registered via the *public* register_load_state_dict_pre_hook, so 'module' is the
-    first positional argument (8-param signature).  Do NOT swap to the private
-    _register_load_state_dict_pre_hook (7 params, no 'module'): that would silently
-    land 'state_dict' in the 'module' slot and corrupt every key lookup.
-
-    Behaviour:
-      - fc.weight dim == 2  (legacy Linear)   → unsqueeze(-1) in state_dict  [2D→3D]
-      - fc.weight dim == 3  (already Conv1d)  → no-op                        [identity]
-      - key absent or None                    → no-op                        [strict=False safe]
-
-    fc.bias: shape (out_channels,) is identical for both nn.Linear and nn.Conv1d.
-    No bias transform is needed here — do not add one.
-
-    'prefix' is the full dotted path to this AdaIN1d instance within its parent
-    (e.g. 'norm1.' when loaded through AdainResBlk1d), so prefix + "fc.weight"
-    resolves to the correct key in the full module state dict.
-    """
-    key = prefix + "fc.weight"
-    tensor = state_dict.get(key)
-    if tensor is not None and tensor.dim() == 2:
-        state_dict[key] = tensor.unsqueeze(-1)
-    # fc.bias: (out_channels,) is identical for Linear and Conv1d — no transform needed.
-
-
 class AdaIN1d(nn.Module):
     # Adaptive Instance Normalization for 1D sequences with style conditioning.
     #
@@ -140,7 +104,7 @@ class AdaIN1d(nn.Module):
     #
     # Mathematical Operation:
     # 1. Instance normalization: x_norm = InstanceNorm(x)
-    # 2. Style-dependent parameters: gamma, beta = Conv1d(kernel_size=1)(style)
+    # 2. Style-dependent parameters: gamma, beta = Linear(style)
     # 3. Adaptive transformation: output = (1 + gamma) * x_norm + beta
     #
     # Manual channel-wise normalization (no nn.InstanceNorm1d) avoids exporter
@@ -160,8 +124,7 @@ class AdaIN1d(nn.Module):
         # Keep num_features for gamma/beta projection sizing.
         self.num_features = num_features
         self.eps = 1e-5
-        self.fc = nn.Conv1d(style_dim, num_features * 2, kernel_size=1)
-        self.register_load_state_dict_pre_hook(_adain_fc_linear_weights_to_conv1d)
+        self.fc = nn.Linear(style_dim, num_features * 2)
 
     def forward(self, x, s):
         # Apply adaptive instance normalization with style conditioning.
@@ -179,8 +142,8 @@ class AdaIN1d(nn.Module):
         # at runtime.  The old slice/pad branch (torch.cat with zeros) was dead code
         # and would have poisoned the ANE trace with a banned concat op (Orion #1).
         assert C == self.num_features, f"AdaIN1d channel mismatch: got {C}, expected {self.num_features}"
-        h = self.fc(s.unsqueeze(-1))
-        gamma, beta = torch.chunk(h, 2, dim=1)
+        h = self.fc(s).view(B, 2 * self.num_features, 1)
+        gamma, beta = torch.chunk(h, chunks=2, dim=1)
         # Expand across time to avoid implicit broadcasting pitfalls
         gamma_exp = gamma.expand(B, C, T)
         beta_exp = beta.expand(B, C, T)

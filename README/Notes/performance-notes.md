@@ -1,162 +1,219 @@
 # Performance Notes
 
-This note captures one thing only: **how the current repo `coreml/` HAR-post packages compare to the baseline packages downloaded from [mattmireles/kokoro-coreml on Hugging Face](https://huggingface.co/mattmireles/kokoro-coreml)**.
+This note tracks the performance numbers that matter for users: **end-to-end wall time for one `pipe.synthesize(...)` request** using the current repo HAR-post packages versus the baseline packages downloaded from [mattmireles/kokoro-coreml on Hugging Face](https://huggingface.co/mattmireles/kokoro-coreml).
 
-## Baseline
+## What was measured
 
 - **Candidate:** local repo packages in `coreml/`
 - **Baseline:** downloaded HF packages in `outputs/hf_baseline/coreml/`
 - **Artifacts compared:** `kokoro_decoder_har_post_3s.mlpackage` and `kokoro_decoder_har_post_10s.mlpackage`
+- **Metric:** full wall clock around `pipe.synthesize(text, voice="af_heart", speed=1.0)`
+
+These numbers include:
+
+- text processing / `extract_vocoder_inputs()`
+- CPU-side tensor prep
+- Core ML dispatch and waiting inside the HAR-post call
+- trim and Python orchestration
+- final waveform returned to the caller
+
+These numbers do **not** include:
+
+- process startup
+- model download
+- application-level audio playback
 
 ## Method
 
-- Measured **Core ML `predict()` median wall time only**
-- Used the same input generation path for both sides:
-  `HybridTTSPipeline` + `build_decoder_har_post_inputs_np`
-- Verified that input/output **names and shapes** match between local and HF HAR-post packages
-- Benchmark settings:
-  - `warmup = 3`
-  - `iterations = 21`
-  - `torch.manual_seed(0)`
-  - voice `af_heart`
-  - speed `1.0`
+- Forced the synthesis path to `decoder_har_post_bucket_impl` only
+- Swapped only the HAR-post Core ML packages between local repo and HF download
+- Used identical text, voice, speed, and pipeline code on both sides
+- `torch.manual_seed(0)` before each timed call
+- Measured:
+  - **cold call:** first `synthesize()` after pipeline construction
+  - **warm call:** median of 5 additional `synthesize()` calls
 
-This is **not** an end-to-end RTF comparison. It does **not** include prefix extraction, CPU orchestration, trimming, or full pipeline wall clock.
+Inputs used:
 
-## Results
+- `tiny`: `"Hello world!"`
+- `long`: bakeoff-style longer sentence routed to the 10s HAR-post bucket
 
-| Preset | Bucket | Approx F0 span | Local repo median | HF median | Result |
-| --- | --- | --- | --- | --- | --- |
-| `tiny` | 3s | `~1.55s` | `18.56 ms` | `17.11 ms` | Repo is `~8.5%` slower |
-| `long` | 10s | `~9.48s` | `43.00 ms` | `41.01 ms` | Repo is `~4.9%` slower |
+## End-to-end latency
+
+| Preset | Audio returned | Repo warm median | HF warm median | Repo vs HF |
+| --- | --- | --- | --- | --- |
+| `tiny` | `1.5s` | `121 ms` | `108 ms` | Repo is `12.5%` slower |
+| `long` | `5.0s` | `303 ms` | `262 ms` | Repo is `15.4%` slower |
+
+Equivalent steady-state RTF from the same run:
+
+| Preset | Repo warm RTF | HF warm RTF |
+| --- | --- | --- |
+| `tiny` | `0.081` | `0.072` |
+| `long` | `0.061` | `0.052` |
+
+## First-call latency
+
+These are the first measured `synthesize()` calls after the pipeline object was created:
+
+| Preset | Repo cold wall | HF cold wall |
+| --- | --- | --- |
+| `tiny` | `529 ms` | `337 ms` |
+| `long` | `529 ms` | `574 ms` |
+
+Treat these as directional only. The `long` case was measured after the `tiny` case in the same session, so it is not a pure fresh-process cold start.
+
+## Pipeline init in this harness
+
+Python-side pipeline construction in this benchmark took:
+
+- repo init: `198.3s`
+- HF init: `190.6s`
+
+This is real for this script, but it should **not** be treated as the final app-level startup number without a separate startup-focused benchmark.
 
 ## Takeaway
 
-On this run, the **downloaded Hugging Face baseline was slightly faster** than the new local repo HAR-post packages on raw `predict()` time.
+For the metric we actually care about, **the current local HAR-post packages are slower than the HF baseline** on both tested end-to-end requests.
 
-The gap is small. Treat this as a **single-run micro-benchmark**, not a final end-to-end performance verdict.
+- `tiny`: local `121 ms` vs HF `108 ms`
+- `long`: local `303 ms` vs HF `262 ms`
 
-## Artifact
+So the current answer is: **the new version is not faster in end-to-end latency on this run**.
 
-- Results JSON: `outputs/bakeoff/local_vs_hf_har_post_predict.json`
-# Performance notes (bakeoff-aligned)
+## Where the slowdown shows up
 
-Institutional memory for **benchmark targets**, **reported timings**, and **how to interpret** RTF / stage splits. Canonical experiment design lives in the bakeoff plan; this file extracts what matters for performance work without duplicating the full procedure.
+To explain the latency gap, I reran the same local-vs-HF comparison with stage timing around the HAR-post path:
 
-**Source of truth:** [kokoro-bakeoff-v2.md](../Plans/kokoro-bakeoff-v2.md) (implementation plan, schemas, gates).
+1. `extract_vocoder_inputs()`
+2. bucket pick
+3. CPU tensor build via `build_decoder_har_post_inputs_np`
+4. Core ML `predict()`
+5. trim
+6. residual / orchestration remainder
 
-**Related:** [learnings.md](../learnings.md) (older CPU/MPS RTF tables from ad hoc runs), [debug-notes.md](debug-notes.md) (export/quality; not primary perf baseline).
+This stage replay uses the same pipeline code and package swap, but times the HAR-post path directly instead of only wrapping `pipe.synthesize(...)`.
 
-**Pre-built packages (distribution):** [mattmireles/kokoro-coreml on Hugging Face](https://huggingface.co/mattmireles/kokoro-coreml) — same family of `.mlpackage` files; the model card’s RTF table (5s/15s/30s buckets, ~0.057 RTF on ~23.7s audio, stage breakdown) is **not** the same thing as Config A HAR-post-only timing below.
+### Warm stage breakdown: `tiny`
 
----
+| Stage | Repo | HF | Delta |
+| --- | --- | --- | --- |
+| extract vocoder inputs | `49.9 ms` | `41.5 ms` | repo `+8.4 ms` |
+| bucket pick | `0.021 ms` | `0.020 ms` | noise |
+| build inputs | `36.0 ms` | `33.7 ms` | repo `+2.3 ms` |
+| Core ML `predict()` | `19.9 ms` | `19.1 ms` | repo `+0.8 ms` |
+| trim | `0.016 ms` | `0.013 ms` | noise |
+| residual | `0.001 ms` | `0.001 ms` | noise |
+| total | `107.9 ms` | `94.0 ms` | repo `+13.9 ms` |
 
-## Shipping path and scope
+### Warm stage breakdown: `long`
 
-- **Config A (production hybrid):** `HybridTTSPipeline.extract_vocoder_inputs()` plus HAR-post Core ML only: `coreml/kokoro_decoder_har_post_3s.mlpackage` and `coreml/kokoro_decoder_har_post_10s.mlpackage`. No longer-valid baseline: legacy `Decoder_HAR` 5s/15s/30s RTF numbers.
-- **Bakeoff non-goals:** Do not benchmark utterances **longer** than the shipping **10s** HAR-post bucket; do not treat deprecated `Decoder_HAR` multi-bucket paths as Config A.
+| Stage | Repo | HF | Delta |
+| --- | --- | --- | --- |
+| extract vocoder inputs | `128.6 ms` | `119.4 ms` | repo `+9.2 ms` |
+| bucket pick | `0.022 ms` | `0.021 ms` | noise |
+| build inputs | `77.0 ms` | `83.8 ms` | repo `-6.8 ms` |
+| Core ML `predict()` | `43.9 ms` | `42.0 ms` | repo `+1.9 ms` |
+| trim | `0.015 ms` | `0.015 ms` | noise |
+| residual | `0.001 ms` | `0.002 ms` | noise |
+| total | `250.6 ms` | `244.6 ms` | repo `+6.0 ms` |
 
----
+### Interpretation
 
-## Fresh baseline (from bakeoff plan)
+The slowdown is **not** coming from one massive regression inside Core ML. On these runs:
 
-These are **anecdotes and placeholders** until `scripts/bakeoff_harness.py` exists and writes manifests under `outputs/bakeoff/`.
+- The largest repeated penalty is **`extract_vocoder_inputs()`**:
+  - about `+8.4 ms` on `tiny`
+  - about `+9.2 ms` on `long`
+- There is also a smaller but real **Core ML `predict()`** penalty:
+  - about `+0.8 ms` on `tiny`
+  - about `+1.9 ms` on `long`
+- The CPU-side HAR-post tensor build is:
+  - a little slower on `tiny`
+  - actually faster on `long`
 
-| Item | Value / note |
-| --- | --- |
-| Historical long-form (non-shipping) | Older `Decoder_HAR` path: RTF **~0.057** on **~23.7s** utterance — **not** Config A baseline. |
-| HAR-post smoke (repo note) | **~0.374s** wall, **~1.36s** audio, RTF **~0.27** — paired PyTorch comparison used **different** duration; **not** a clean A/B. |
-| Example results JSON sketch | `t_coreml_predict_s`: **~0.09** (illustrative per-iteration field in plan). |
-| Known gaps | No frozen input manifest, no run manifest with artifact hashes, no sustained telemetry loop for naive Core ML, no counterbalanced ordering in one harness yet. |
+So the current regression appears to be **mostly in the shared prefix path**, with a smaller contribution from the Core ML inference itself.
 
----
+## Artifacts
 
-## Headline configs (what each row measures)
-
-| Config | Meaning |
-| --- | --- |
-| **A** | Shipping hybrid HAR-post (explicit 3s/10s loads). |
-| **B** | Same naive decoder-only **10s** artifact, `ComputeUnit.ALL`. |
-| **C** | Same artifact as B, `CPU_AND_GPU`. |
-| **D** | PyTorch E2E on **MPS** (requires `PYTORCH_ENABLE_MPS_FALLBACK=1` for intended baseline). |
-| **E** | PyTorch E2E on **CPU** (canonical duration for inputs comes from this path in `prepare-inputs`). |
-
-Diagnostic **Bcpu** (`CPU_ONLY`) may appear in telemetry / Gate 1; it is not a headline matrix row.
-
----
-
-## Inputs and guardrails
-
-- **Named keys:** `tiny`, `short`, `medium`, `long` — target audio **~1s / ~3s / ~6s / ~9s** (see plan Phase 0).
-- **Voice / speed (planned):** `af_heart`, `1.0`.
-- **Hard rule:** `prepare-inputs` must **fail** if any canonical duration **> 9.0s** (headroom under 10s ceiling; avoid silent edge truncation).
-- **Manifest:** `outputs/bakeoff/input_manifest.json` — text, canonical duration, expected Config A bucket (`3s` or `10s`), text `sha256`.
-
----
-
-## Bucket selection (Config A)
-
-Implementation: `HybridTTSPipeline._select_bucket_seconds()` — **smallest loaded bucket ≥ `ceil(total_seconds)`**, where `total_seconds` is derived from the vocoder F0 span (e.g. `T_f0 / 80` in the bench script).
-
-With only **{3s, 10s}** HAR-post buckets:
-
-- Utterances with duration **> 3s** (e.g. **~3.25s**) require the **10s** package, not 3s.
-- Presets that mirror bakeoff **short** (~3s target) may still **route to 10s** if measured duration rounds up past 3s.
+- End-to-end results: `outputs/bakeoff/local_vs_hf_har_post_e2e.json`
+- Older `predict()`-only micro-bench: `outputs/bakeoff/local_vs_hf_har_post_predict.json`
+- Stage breakdown: `outputs/bakeoff/local_vs_hf_har_post_stage_breakdown.json`
 
 ---
 
-## Results schema (performance fields)
+## ANE optimization experiment: nn.Linear → nn.Conv1d in AdaIN1d — Resolved (reverted)
 
-Per-iteration records (when harness exists) should include at least:
+**First spotted:** 2026-04-14
+**Resolved:** 2026-04-14
+**Status:** Resolved — hypothesis disproved, Conv1d change reverted, dead code cleanup kept
 
-- **`wall_time_s`**, **`canonical_audio_duration_s`**, **`observed_audio_duration_s`**
-- **`rtf_canonical`**, **`rtf_observed`**, **`speed_vs_realtime_canonical`**
-- **`bucket_used`** (`3s` / `10s`)
-- **Config A stage splits:** `t_prefix_extract_s`, `t_decoder_pre_cpu_s`, `t_har_builder_cpu_s`, **`t_coreml_predict_s`**, `t_trim_s`, `t_orchestration_s`
+### Summary
 
-**Timer discipline (plan):** Load/compile/warmup **out of band**; wall clock for full pipeline includes prefix through final waveform; MPS stops timer after `torch.mps.synchronize()`.
+Cross-referenced the [CoreML Compute Unit Scheduling Guide](../Guides/apple-silicon/CoreML-Compute-Unit-Scheduling-guide.md) against the production `GeneratorFromHar` ANE path. The Orion reverse-engineering project (Constraint #17) claims matmul executes 3x slower than 1x1 convolution on the ANE. We replaced `nn.Linear` with `nn.Conv1d(kernel_size=1)` in `AdaIN1d.fc` — dozens of instances in the hot ANE path. **Result: no improvement.** Core ML `predict()` time was unchanged or marginally worse. CoreML's MIL compiler already lowers `linear` ops to conv internally, making the source-level change redundant. The real latency gap (vs HF baseline packages) lives in `extract_vocoder_inputs()`, the PyTorch CPU prefix path — not the ANE decoder at all.
 
----
+### What we did
 
-## Decoder HAR-post `predict()` micro-bench (today)
+1. **Audited the GeneratorFromHar traced graph** for ANE-incompatible ops per the scheduling guide:
+   - `torch.cat` (Orion Constraint #1: banned on ANE) — found in `AdaIN1d.forward()` at `istftnet.py:154-155`, but confirmed it was **dead code**: the padding branch only fires when `C != num_features`, which never happens because `AdaIN1d` is always constructed with `num_features == channels`.
+   - `nn.Linear` (Orion Constraint #17: matmul 3x slower than Conv on ANE) — found in `AdaIN1d.fc` at `istftnet.py:129`. Each `AdaINResBlock1` has 6 `AdaIN1d` instances. The Generator has `num_upsamples * num_kernels` resblocks plus `num_upsamples` noise_res blocks — dozens of Linear forward calls on the ANE per inference.
+   - No `nn.GELU` (clean — uses LeakyReLU and Snake activations).
+   - Tensor layout already `(B, C, T)` mapping to ANE's preferred `(B, C, 1, S)`.
 
-Pending the full harness, median Core ML `predict()` time for HAR-post packages can be measured with:
+2. **Removed dead `torch.cat` code** in `AdaIN1d.forward()` — replaced the slice/pad branch with `assert C == self.num_features`. This cleanup is kept (not reverted) because it removes code that could never execute and would have introduced an ANE-banned concat op if it somehow did.
 
-```bash
-uv run python scripts/bench_decoder_har_post_predict.py --preset long --warmup 1 --iterations 11
-uv run python scripts/bench_decoder_har_post_predict.py --all-presets
-```
+3. **Replaced `nn.Linear` with `nn.Conv1d(kernel_size=1)`** in `AdaIN1d.__init__`:
+   ```python
+   # Before
+   self.fc = nn.Linear(style_dim, num_features * 2)
+   # After
+   self.fc = nn.Conv1d(style_dim, num_features * 2, kernel_size=1)
+   ```
+   Adjusted `forward()` to unsqueeze style input for Conv1d. Added `register_load_state_dict_pre_hook` to reshape pretrained Linear weights `(out, in)` → `(out, in, 1)` for checkpoint compatibility.
 
-That script maps to the bakeoff field **`t_coreml_predict_s`** (it prints milliseconds; divide by 1000 for seconds). It uses bakeoff-style presets defined in-script; **bucket and package path are inferred** from the pipeline.
+4. **Re-exported decoder HAR post buckets** (3s, 10s) with the Conv1d-based AdaIN1d.
 
-A/B against the HF drop (same script, `--baseline` pointing at downloaded packages):
+5. **Benchmarked** local repo packages vs HF baseline packages (which still use nn.Linear) using identical text, voice, and pipeline code.
 
-```bash
-uv run python scripts/bench_decoder_har_post_predict.py \
-  --package coreml/kokoro_decoder_har_post_3s.mlpackage \
-  --baseline outputs/hf_baseline/coreml/kokoro_decoder_har_post_3s.mlpackage \
-  --preset tiny
-```
+### What we learned
 
----
+**Core ML predict() — no improvement:**
 
-## Measured: repo `coreml/` vs Hugging Face HAR-post `predict()`
+| Input | Repo (Conv1d) | HF (Linear) | Delta |
+| --- | --- | --- | --- |
+| tiny | 19.9 ms | 19.1 ms | +0.8 ms (worse) |
+| long | 43.9 ms | 42.0 ms | +1.9 ms (worse) |
 
-**What was compared:** Median Core ML **`predict()`** wall time only — not full hybrid RTF, not the model card’s end-to-end story.
+**Conclusion:** CoreML's MIL compiler already optimizes `linear` → conv internally during the `.mlpackage` compilation/specialization step. The source-level Conv1d change is redundant — the compiled ANE graph is the same either way. Orion Constraint #17 applies to **direct ANE programming** (bypassing CoreML), not to the CoreML conversion pipeline.
 
-**Method (one local run):** Identical inputs from `HybridTTSPipeline` / `build_decoder_har_post_inputs_np`; Core ML **input/output names and shapes** for `kokoro_decoder_har_post_{3,10}s` matched between [repo `coreml/`](../../coreml) and a `snapshot_download` of [mattmireles/kokoro-coreml](https://huggingface.co/mattmireles/kokoro-coreml) under `outputs/hf_baseline/coreml/` (weights/graph differ by export). **Candidate** = repo tree; **baseline** = HF files. Warmup **3**, iterations **21**, `torch.manual_seed(0)`, voice `af_heart`, speed `1.0`.
+**The real regression is in the PyTorch CPU prefix:**
 
-| Preset | Bucket | ~F0 span (s) | Repo median (ms) | HF median (ms) | Repo vs HF |
-| --- | --- | --- | --- | --- | --- |
-| `tiny` | 3s | ~1.55 | ~18.6 | ~17.1 | Repo **~8.5% slower** |
-| `long` | 10s | ~9.48 | ~43.0 | ~41.0 | Repo **~4.9% slower** |
+| Input | Stage | Repo | HF | Delta |
+| --- | --- | --- | --- | --- |
+| tiny | extract_vocoder_inputs | 49.9 ms | 41.5 ms | +8.4 ms |
+| long | extract_vocoder_inputs | 128.6 ms | 119.4 ms | +9.2 ms |
 
-**Artifact:** `outputs/bakeoff/local_vs_hf_har_post_predict.json` (regenerate after re-download; typically gitignored).
+This +8-9ms penalty is consistent across inputs and dwarfs the Core ML predict delta. It lives in the shared PyTorch path (duration model + alignment + hn-nsf), which the Conv1d change does not touch. The cause is not yet identified — may be a codebase drift between the HF-published packages and the current repo state.
 
-**Interpretation:** Differences are small; another machine, OS build, or thermal state can flip them. For a stronger claim, repeat runs, pin compute units if needed, and add full-pipeline / bakeoff harness timings.
+### Key takeaways for future work
 
----
+1. **Don't optimize what CoreML already optimizes.** The MIL compiler's internal lowering passes handle Linear → Conv conversion. Source-level changes to match Orion constraints only matter when programming the ANE directly (bypassing CoreML).
+2. **Profile before optimizing.** The stage breakdown showed the bottleneck was in the PyTorch prefix, not the ANE decoder. Without the breakdown, we'd have spent more time on the wrong problem.
+3. **The dead `torch.cat` removal was valid.** Even though it was dead code, removing it prevents future accidental activation and eliminates an ANE-banned op from the source.
+4. **The `extract_vocoder_inputs()` regression is the real target.** A +8-9ms consistent penalty across inputs points to something in the duration model, alignment, or hn-nsf CPU path that changed between the HF baseline and the current repo.
 
-## Gates (summary)
+### Related Guides
 
-Bakeoff **summarize** mode is expected to enforce (among others): no NaN RTF; Config A never uses a bucket beyond `10s`; frozen inputs stay under the duration guardrail with margin. See the plan for full Gate 1 / telemetry requirements (`powermetrics`, sustained loops).
+- [CoreML Compute Unit Scheduling Guide](../Guides/apple-silicon/CoreML-Compute-Unit-Scheduling-guide.md) — Orion Constraints #1 (concat) and #17 (matmul vs conv); verification techniques
+- [Apple: Deploying Transformers on the ANE](https://machinelearning.apple.com/research/neural-engine-transformers) — Linear-to-Conv2d recommendation (applies to direct ANE, not CoreML pipeline)
+- [Orion paper](https://arxiv.org/abs/2603.06728) — reverse-engineered ANE constraints
+
+### Files changed (then reverted)
+
+- `kokoro/istftnet.py:129` — `AdaIN1d.fc`: Linear → Conv1d (reverted)
+- `kokoro/istftnet.py:131-152` — `AdaIN1d.forward`: input reshape for Conv1d (reverted)
+- `kokoro/istftnet.py:146-155` — dead `torch.cat` padding branch removed (kept)
+
+### Plan reference
+
+Full experiment design: `README/Plans/ane-optimization-v1.md`
