@@ -32,6 +32,89 @@ TextBackend = Callable[[Any, str, str, float], np.ndarray | None]
 ViBackend = Callable[[Any, dict], np.ndarray | None]
 
 
+def build_decoder_har_post_inputs_np(
+    dec: torch.nn.Module,
+    vi: dict,
+    sec: int,
+    asr_len: int,
+    har_t: int,
+    *,
+    warn_geometry: bool = True,
+) -> tuple[np.ndarray, np.ndarray, np.ndarray, int, int]:
+    """Build ``x_pre`` / ``ref_s`` / ``har`` numpy tensors for ``kokoro_decoder_har_post_*s``.
+
+    Single source of truth for geometry shared with ``decoder_har_post_bucket_impl`` and
+    ``scripts/compare_decoder_har_post_waveforms.py``.
+
+    Returns:
+        ``x_pre`` (float32), ``ref_s`` (float32), ``har`` (float32), ``T_f0`` (int),
+        ``frame_count`` (int; decoder time dim before Core ML padding to ``asr_len``).
+    """
+    gen = dec.generator
+    f0_samples_per_step = int(round(float(gen.f0_upsamp.scale_factor)))
+    bucket_samples = sec * 24000
+    full_f0_len = int(round(bucket_samples / float(f0_samples_per_step)))
+    frame_count = conv1d_output_length_from_module(full_f0_len, dec.F0_conv)
+    if warn_geometry and frame_count != asr_len:
+        print(
+            f"decoder_har_post: bucket geometry frame_count {frame_count} != Core ML x_pre length {asr_len}"
+        )
+
+    T_f0 = int(vi["f0_curve"].shape[-1])
+    asr = vi["asr"].astype(np.float32)
+    f0 = vi["f0_curve"].astype(np.float32)
+    n = vi["n"].astype(np.float32)
+    ref_s = vi["ref_s"].astype(np.float32)
+
+    asr_pad = np.zeros((1, 512, frame_count), dtype=np.float32)
+    t_asr = min(frame_count, asr.shape[-1])
+    asr_pad[:, :, :t_asr] = asr[:, :, :t_asr]
+    f0_pad = np.zeros((1, full_f0_len), dtype=np.float32)
+    n_pad = np.zeros((1, full_f0_len), dtype=np.float32)
+    t_f0 = min(full_f0_len, f0.shape[-1])
+    f0_pad[:, :t_f0] = f0[:, :t_f0]
+    n_pad[:, :t_f0] = n[:, :t_f0]
+
+    with torch.no_grad():
+        ref_t = torch.from_numpy(ref_s)
+        s = ref_t[:, :128]
+        asr_t = torch.from_numpy(asr_pad)
+        F0 = dec.F0_conv(torch.from_numpy(f0_pad).unsqueeze(1))
+        N = dec.N_conv(torch.from_numpy(n_pad).unsqueeze(1))
+        x = torch.cat([asr_t, F0, N], dim=1)
+        x = dec.encode(x, s)
+        asr_res = dec.asr_res(asr_t)
+        res = True
+        for block in dec.decode:
+            if res:
+                x = torch.cat([x, asr_res, F0, N], dim=1)
+            x = block(x, s)
+            if block.upsample_type != "none":
+                res = False
+        x_pre = x
+        f0_up = gen.f0_upsamp(torch.from_numpy(f0_pad)[:, None]).transpose(1, 2)
+        har_source, _, _ = gen.m_source(f0_up)
+        har_source = har_source.transpose(1, 2).squeeze(1)
+        har_spec, har_phase = gen.stft.transform(har_source)
+        har = torch.cat([har_spec, har_phase], dim=1)
+        har_np = har.numpy().astype(np.float32)
+
+    x_pre_np = x_pre.cpu().numpy().astype(np.float32)
+    if x_pre_np.shape[-1] != asr_len:
+        aligned = np.zeros((x_pre_np.shape[0], x_pre_np.shape[1], asr_len), dtype=np.float32)
+        c = min(x_pre_np.shape[-1], asr_len)
+        aligned[:, :, :c] = x_pre_np[:, :, :c]
+        x_pre_np = aligned
+
+    if har_np.shape[-1] != har_t:
+        h_new = np.zeros((har_np.shape[0], har_np.shape[1], har_t), dtype=np.float32)
+        cpy = min(har_np.shape[-1], har_t)
+        h_new[:, :, :cpy] = har_np[:, :, :cpy]
+        har_np = h_new
+
+    return x_pre_np, ref_s, har_np, T_f0, frame_count
+
+
 def synth_bucket_impl(pipe: HybridTTSPipeline, text: str, voice: str = "af_heart", speed: float = 1.0) -> np.ndarray | None:
     """Single-shot bucketed synthesis using CoreML synthesizer model."""
     if not getattr(pipe, "coreml_synth_buckets", None):
@@ -108,66 +191,10 @@ def decoder_har_post_bucket_impl(
     har_t = int(har_shape[-1])
 
     dec = pipe.pytorch_model.decoder
-    gen = dec.generator
-    f0_samples_per_step = int(round(float(gen.f0_upsamp.scale_factor)))
-    bucket_samples = sec * 24000
-    full_f0_len = int(round(bucket_samples / float(f0_samples_per_step)))
-    frame_count = conv1d_output_length_from_module(full_f0_len, dec.F0_conv)
-    if frame_count != asr_len:
-        print(
-            f"⚠️ decoder_har_post: bucket geometry frame_count {frame_count} != Core ML x_pre length {asr_len}"
-        )
-
-    asr = vi["asr"].astype(np.float32)
-    f0 = vi["f0_curve"].astype(np.float32)
-    n = vi["n"].astype(np.float32)
-    ref_s = vi["ref_s"].astype(np.float32)
-
-    asr_pad = np.zeros((1, 512, frame_count), dtype=np.float32)
-    t_asr = min(frame_count, asr.shape[-1])
-    asr_pad[:, :, :t_asr] = asr[:, :, :t_asr]
-    f0_pad = np.zeros((1, full_f0_len), dtype=np.float32)
-    n_pad = np.zeros((1, full_f0_len), dtype=np.float32)
-    t_f0 = min(full_f0_len, f0.shape[-1])
-    f0_pad[:, :t_f0] = f0[:, :t_f0]
-    n_pad[:, :t_f0] = n[:, :t_f0]
-
-    with torch.no_grad():
-        ref_t = torch.from_numpy(ref_s)
-        s = ref_t[:, :128]
-        asr_t = torch.from_numpy(asr_pad)
-        F0 = dec.F0_conv(torch.from_numpy(f0_pad).unsqueeze(1))
-        N = dec.N_conv(torch.from_numpy(n_pad).unsqueeze(1))
-        x = torch.cat([asr_t, F0, N], dim=1)
-        x = dec.encode(x, s)
-        asr_res = dec.asr_res(asr_t)
-        res = True
-        for block in dec.decode:
-            if res:
-                x = torch.cat([x, asr_res, F0, N], dim=1)
-            x = block(x, s)
-            if block.upsample_type != "none":
-                res = False
-        x_pre = x
-        f0_up = gen.f0_upsamp(torch.from_numpy(f0_pad)[:, None]).transpose(1, 2)
-        har_source, _, _ = gen.m_source(f0_up)
-        har_source = har_source.transpose(1, 2).squeeze(1)
-        har_spec, har_phase = gen.stft.transform(har_source)
-        har = torch.cat([har_spec, har_phase], dim=1)
-        har_np = har.numpy().astype(np.float32)
-
-    x_pre_np = x_pre.cpu().numpy().astype(np.float32)
-    if x_pre_np.shape[-1] != asr_len:
-        aligned = np.zeros((x_pre_np.shape[0], x_pre_np.shape[1], asr_len), dtype=np.float32)
-        c = min(x_pre_np.shape[-1], asr_len)
-        aligned[:, :, :c] = x_pre_np[:, :, :c]
-        x_pre_np = aligned
-
-    if har_np.shape[-1] != har_t:
-        h_new = np.zeros((har_np.shape[0], har_np.shape[1], har_t), dtype=np.float32)
-        cpy = min(har_np.shape[-1], har_t)
-        h_new[:, :, :cpy] = har_np[:, :, :cpy]
-        har_np = h_new
+    x_pre_np, ref_s, har_np, _t_check, _fc = build_decoder_har_post_inputs_np(
+        dec, vi, sec, asr_len, har_t, warn_geometry=True
+    )
+    assert _t_check == T_f0
 
     print(
         f"🍎 Decoder_HAR post bucket {sec}s: Core ML post-har "

@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 """Compare two decoder-har-post .mlpackage outputs on identical PyTorch-built inputs.
 
-Mirrors tensor prep in ``kokoro.synthesis_backends.decoder_har_post_bucket_impl``.
-Uses plan guardrails: Pearson r, SNR, max abs Δ on float32 (see ane-optimization-v1.md).
+Uses :func:`kokoro.synthesis_backends.build_decoder_har_post_inputs_np` so geometry
+matches production ``decoder_har_post_bucket_impl``.
 
 Example::
 
@@ -21,8 +21,8 @@ import torch
 
 import coremltools as ct
 
-from kokoro.conv_length import conv1d_output_length_from_module
 from kokoro.coreml_pipeline import HybridTTSPipeline
+from kokoro.synthesis_backends import build_decoder_har_post_inputs_np
 
 
 def _predict_waveform(model: ct.models.MLModel, inputs: dict) -> np.ndarray:
@@ -58,79 +58,37 @@ def main() -> int:
     args = p.parse_args()
 
     torch.manual_seed(0)
-    # Pipeline loads KModel + optional Core ML; we only need PyTorch for x_pre/har.
-    pipe = HybridTTSPipeline(force_engine="pytorch")
-    sec = args.bucket_sec
+    pipe = HybridTTSPipeline()
     base = ct.models.MLModel(args.baseline)
     cand = ct.models.MLModel(args.candidate)
     spec_b = base.get_spec()
     shapes = {i.name: list(i.type.multiArrayType.shape) for i in spec_b.description.input}
-    x_pre_shape = shapes["x_pre"]
-    har_shape = shapes["har"]
-    asr_len = int(x_pre_shape[-1])
-    har_t = int(har_shape[-1])
+    asr_len = int(shapes["x_pre"][-1])
+    har_t = int(shapes["har"][-1])
 
     vi = pipe.extract_vocoder_inputs(args.text, args.voice, args.speed)
     if vi is None:
         print("extract_vocoder_inputs failed", file=sys.stderr)
         return 1
     T_f0 = int(vi["f0_curve"].shape[-1])
+    total_seconds = T_f0 / 80.0
+    selected = pipe._select_bucket_seconds(total_seconds)
+    if selected is None or selected not in pipe.coreml_decoder_har_post_buckets:
+        print("no decoder_har_post bucket for this utterance / pipeline", file=sys.stderr)
+        return 1
+    if selected != args.bucket_sec:
+        print(
+            f"error: pipeline selects {selected}s for this text; use --bucket-sec {selected}",
+            file=sys.stderr,
+        )
+        return 3
+    sec = selected
+
     dec = pipe.pytorch_model.decoder
-    gen = dec.generator
-    f0_samples_per_step = int(round(float(gen.f0_upsamp.scale_factor)))
-    bucket_samples = sec * 24000
-    full_f0_len = int(round(bucket_samples / float(f0_samples_per_step)))
-    frame_count = conv1d_output_length_from_module(full_f0_len, dec.F0_conv)
-
-    asr = vi["asr"].astype(np.float32)
-    f0 = vi["f0_curve"].astype(np.float32)
-    n = vi["n"].astype(np.float32)
-    ref_s = vi["ref_s"].astype(np.float32)
-
-    asr_pad = np.zeros((1, 512, frame_count), dtype=np.float32)
-    t_asr = min(frame_count, asr.shape[-1])
-    asr_pad[:, :, :t_asr] = asr[:, :, :t_asr]
-    f0_pad = np.zeros((1, full_f0_len), dtype=np.float32)
-    n_pad = np.zeros((1, full_f0_len), dtype=np.float32)
-    t_f0 = min(full_f0_len, f0.shape[-1])
-    f0_pad[:, :t_f0] = f0[:, :t_f0]
-    n_pad[:, :t_f0] = n[:, :t_f0]
-
-    with torch.no_grad():
-        ref_t = torch.from_numpy(ref_s)
-        s = ref_t[:, :128]
-        asr_t = torch.from_numpy(asr_pad)
-        F0 = dec.F0_conv(torch.from_numpy(f0_pad).unsqueeze(1))
-        N = dec.N_conv(torch.from_numpy(n_pad).unsqueeze(1))
-        x = torch.cat([asr_t, F0, N], dim=1)
-        x = dec.encode(x, s)
-        asr_res = dec.asr_res(asr_t)
-        res = True
-        for block in dec.decode:
-            if res:
-                x = torch.cat([x, asr_res, F0, N], dim=1)
-            x = block(x, s)
-            if block.upsample_type != "none":
-                res = False
-        x_pre = x
-        f0_up = gen.f0_upsamp(torch.from_numpy(f0_pad)[:, None]).transpose(1, 2)
-        har_source, _, _ = gen.m_source(f0_up)
-        har_source = har_source.transpose(1, 2).squeeze(1)
-        har_spec, har_phase = gen.stft.transform(har_source)
-        har = torch.cat([har_spec, har_phase], dim=1)
-        har_np = har.numpy().astype(np.float32)
-
-    x_pre_np = x_pre.cpu().numpy().astype(np.float32)
-    if x_pre_np.shape[-1] != asr_len:
-        aligned = np.zeros((x_pre_np.shape[0], x_pre_np.shape[1], asr_len), dtype=np.float32)
-        c = min(x_pre_np.shape[-1], asr_len)
-        aligned[:, :, :c] = x_pre_np[:, :, :c]
-        x_pre_np = aligned
-    if har_np.shape[-1] != har_t:
-        h_new = np.zeros((har_np.shape[0], har_np.shape[1], har_t), dtype=np.float32)
-        cpy = min(har_np.shape[-1], har_t)
-        h_new[:, :, :cpy] = har_np[:, :, :cpy]
-        har_np = h_new
+    x_pre_np, ref_s, har_np, T_f0_b, _fc = build_decoder_har_post_inputs_np(
+        dec, vi, sec, asr_len, har_t, warn_geometry=True
+    )
+    assert T_f0_b == T_f0
 
     inputs = {"x_pre": x_pre_np, "ref_s": ref_s, "har": har_np}
     w0 = _predict_waveform(base, inputs)

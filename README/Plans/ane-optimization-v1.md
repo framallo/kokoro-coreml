@@ -192,12 +192,12 @@ Use until `scripts/bakeoff_harness.py` exists:
 - [x] New pytest for Linear/Conv equivalence; full suite passes in project venv (`uv run pytest`).
 - [x] `tests/test_export_wrappers_shapes.py::test_synthesizer_model_forward_runs_and_returns_1d_audio` still passes (full Generator path through Conv1d `AdaIN1d`).
 - [x] `kokoro_decoder_har_post_3s` and `_10s` re-exported; smoke + `compare_decoder_har_post_waveforms.py` gates pass (Pearson, SNR, max Δ).
-- [ ] Decoder smoke test (`tests/test_adain1d_decoder_smoke.py` or equivalent) passes.
+- [x] Decoder smoke test (`tests/test_adain1d_decoder_smoke.py`) passes.
 - [x] Benchmark result logged: MIL + waveform (`ane_optimization_results.json`); predict-only loop **not** run (harness absent).
 
 ### Definition of Done
 
-- [x] Phases 0–3 complete with logs (Phase 3 harness timing explicitly deferred).
+- [x] Phases 0–3 complete with logs (**Phase 3:** MIL + waveform + results JSON; harness / fallback **predict loop** and optional powermetrics still unchecked until someone runs them).
 - [x] No stale `torch.cat` removal claims.
 - [x] Plan references: harness command remains documented as **when file exists**; fallback + MIL path used here.
 - [x] Re-export performed from clean `mlpackage` sources (no stale `.mlmodelc` in repo).
@@ -210,11 +210,12 @@ Use until `scripts/bakeoff_harness.py` exists:
 - **Does `GeneratorFromHar` trace include concat from old AdaIN padding?** No — padding branch removed; assert-only path in `AdaIN1d`.
 - **Does `IdentityAdaIN` affect this plan?** It replaces `AdainResBlk1d` norms on the shared `kmodel` for **every** export `--mode` before trace, but those layers **do not appear** in the **`decoder-har`** JIT graph (only `GeneratorFromHar` does). This plan does not change that policy.
 - **Checkpoint compatibility?** Yes, via pre-hook `fc.weight` unsqueeze from 2D checkpoints; tensors already 3D are left unchanged.
+- **Conv1d(k=1) vs Conv2d(1×1) MIL lowering?** Phase 0 `--probe-conv-lowering`: both minimal traces yield the same MIL type set `{cast, const, conv}` — **Conv1d retained** for `AdaIN1d`.
 
 ### Unresolved
 
-- **Does Conv1d(k=1) lower to the same MIL `conv` op as Conv2d(1,1)?** Phase 0 hard gate. The scheduling guide prescribes Conv2d for ANE; we use Conv1d because `AdaIN1d` operates on 3D tensors. If MIL lowering differs, Phase 1 switches to Conv2d with input unsqueezes. See Phase 0 task list.
-- **Does MIL already map `linear` to ANE-optimal paths?** Phase 0 + Phase 3 determine. **Merge rule:** ship the Conv1d change if hard requirements (tests, Pearson + SNR/delta gates, clean export) pass **and** either **(a)** measurable improvement: `t_coreml_predict_s` or fallback median predict time **≥ 5% faster** than baseline on the same machine, **or** **(b)** MIL tally (via `scripts/count_mil_ops.py`) shows **≥ 10% fewer** ops tagged `linear` / `matmul` / `dense` (count the same taxonomy as Phase 0) in the new `3s` package **and** package metrics pass. Otherwise document and **revert** the module change. **Revert procedure:** revert `kokoro/istftnet.py` **and** restore prior `.mlpackage` artifacts from git (`git checkout HEAD~N -- coreml/kokoro_decoder_har_post_3s.mlpackage coreml/kokoro_decoder_har_post_10s.mlpackage`). Do not leave reverted Python code with post-Conv1d packages or vice versa.
+- **Does MIL already map legacy `linear` to ANE-optimal paths?** Unknown without `MLComputePlan` / Instruments on target silicon — Phase 3 recorded `placement_evidence: unavailable`; wall-clock **(a)** not measured (no harness).
+- **Merge rule (closed for this PR):** Hard requirements + waveform gates passed; **(b)** satisfied — `linear` MIL ops **48 → 0** on `3s` (taxonomy: `op.type` from `scripts/count_mil_ops.py`). **(a)** deferred until `scripts/bakeoff_harness.py` exists. **Revert procedure** unchanged if a future benchmark shows regressions without MIL benefit.
 
 ## References
 
