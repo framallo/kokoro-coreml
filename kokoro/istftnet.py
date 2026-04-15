@@ -138,21 +138,14 @@ class AdaIN1d(nn.Module):
         var = x.var(dim=2, unbiased=False, keepdim=True)
         x_norm = (x - mean) / torch.sqrt(var + self.eps)
 
-        # Project style to gamma/beta: (B, 2C_fixed) -> (B, C_fixed, 1)
+        # Project style to gamma/beta: (B, 2C) -> (B, C, 1)
+        # AdaIN1d is always constructed with num_features == channels for the
+        # convs it normalizes (AdaINResBlock1, AdainResBlk1d), so C == num_features
+        # at runtime.  The old slice/pad branch (torch.cat with zeros) was dead code
+        # and would have poisoned the ANE trace with a banned concat op (Orion #1).
+        assert C == self.num_features, f"AdaIN1d channel mismatch: got {C}, expected {self.num_features}"
         h = self.fc(s).view(B, 2 * self.num_features, 1)
         gamma, beta = torch.chunk(h, chunks=2, dim=1)
-        # If actual channel count differs from configured num_features,
-        # slice or pad to match x's channels to avoid broadcast shape bugs during export.
-        if C != self.num_features:
-            if self.num_features > C:
-                gamma = gamma[:, :C, :]
-                beta = beta[:, :C, :]
-            else:
-                pad_ch = C - self.num_features
-                if pad_ch > 0:
-                    pad = gamma.new_zeros((B, pad_ch, 1))
-                    gamma = torch.cat([gamma, pad], dim=1)
-                    beta = torch.cat([beta, pad], dim=1)
         # Expand across time to avoid implicit broadcasting pitfalls
         gamma_exp = gamma.expand(B, C, T)
         beta_exp = beta.expand(B, C, T)

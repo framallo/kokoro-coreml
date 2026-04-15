@@ -1,5 +1,9 @@
 # Execute Plan References
 
+**Git cadence:** phase **commits** repeat per completed phase; **`git push`**
+and the **`git-push`** skill run **once after all phases** (see parent
+`SKILL.md`). Do not push after each phase unless the user explicitly overrides.
+
 Canonical docs for `execute-plan` live under **`README/Skills/`**:
 
 - `README/Skills/plan-workflow-skills-guide.md`  

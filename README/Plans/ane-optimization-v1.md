@@ -1,0 +1,274 @@
+# ANE Graph Optimization Plan
+
+**Date:** 2026-04-14  
+**Status:** Planned  
+**Plan audit:** 2026-04-14 — revised after multi-agent audits: bakeoff schema (`t_coreml_predict_s`), export mutation semantics, MIL depth, hook API, Pearson + secondary metric, `3s`/`10s` shipping set. Second audit pass: Conv1d/Conv2d MIL gate, hook round-trip test, op-count script requirement, bias docs, rollback procedure, reproducible validation inputs, fallback scope note.
+
+> **Prerequisite (baseline numbers):** Prefer completing [Bakeoff Plan](kokoro-bakeoff-v2.md) so `scripts/bakeoff_harness.py` exists and Config A results (manifest + stage timings) are reproducible. Compare Phase 3 against the **bakeoff v2 schema** — e.g. `t_coreml_predict_s` for the Core ML predict stage in Config A (see `kokoro-bakeoff-v2.md` results JSON example), not the informal `t_ane_predict` name from older notes. **If the harness is not in-tree yet,** use [§ Benchmark fallback (pre-harness)](#benchmark-fallback-pre-harness) — do not block Phase 1–2 on the harness.
+
+## Executive Summary
+
+Cross-referencing the [CoreML Compute Unit Scheduling Guide](../Guides/apple-silicon/CoreML-Compute-Unit-Scheduling-guide.md) against our production `GeneratorFromHar` ANE path supports one high-impact optimization: many `nn.Linear` layers inside the traced Core ML graph (from `AdaIN1d.fc` inside `AdaINResBlock1`) may be replaced with 1×1 convolution primitives so the stack aligns with ANE-favorable conv ops (Orion Constraint 17: 1×1 Conv executes ~3× faster than equivalent matmul on ANE matrix ALUs). Whether Core ML already lowers some `linear` MIL ops internally is **unknown** until Phase 0 and Phase 3.
+
+**Conv1d vs Conv2d decision:** The scheduling guide prescribes `nn.Conv2d` with 4D layout `(B, C, 1, S)` for ANE alignment. This plan uses `nn.Conv1d(kernel_size=1)` because `AdaIN1d` operates on 3D tensors `(B, C, T)` — adding a spurious spatial dimension via Conv2d would require reshape ops that may themselves trigger ANE fallback. **Phase 0 must verify** that Conv1d(k=1) lowers to an equivalent MIL `conv` op as Conv2d(1,1) — if it does not, Phase 1 switches to Conv2d with the necessary unsqueezes. See Phase 0 task list.
+
+**Export pipeline nuance (read before implementing):** `export_synth/convert.py` replaces `AdainResBlk1d.norm1/norm2` with `IdentityAdaIN` **once** on the shared `SynthesizerModel(kmodel)` **before** the per-bucket loop — for **every** `--mode` (`decoder`, `decoder-har`, `full`). That mutates the in-memory decoder tree even when the traced artifact is generator-only. Only the **JIT subgraph** matters for each package: **`decoder-har` traces `GeneratorFromHar(generator)`**, so **`AdainResBlk1d` never appears in that `.mlpackage`**; the Generator’s `AdaINResBlock1` / `AdaIN1d` layers are **not** swapped to identity. The **`decoder-har` subgraph does not include `AdainResBlk1d`** (Decoder encode/decode stacks); it starts at `x_pre` + `har` after PyTorch has already run the decoder front. This plan targets the real `AdaIN1d` modules on the HAR-post hot path. (Reload a fresh `kmodel` after export if you need unmodified `AdainResBlk1d` in the same Python process.)
+
+**Fan-in:** `AdaIN1d` is shared by `AdaINResBlock1` (Generator) and `AdainResBlk1d` (Decoder). Any change must keep **PyTorch** `Decoder` / training checkpoints valid, not only the HAR-post Core ML package.
+
+## Problem Statement
+
+- **Symptom:** ANE decoder predict time on the order of ~0.25–0.31s (anecdotal / model-card class numbers; re-measure per baseline doc) may leave throughput on the table.
+- **Root cause hypothesis:** Each `AdaINResBlock1` holds six `AdaIN1d` instances; each uses `nn.Linear(style_dim, num_features * 2)`. On ANE, dense linear stacks may be less favorable than explicit 1×1 convolutions (see guide + Apple transformer-on-ANE references).
+- **Impact:** `num_upsamples * num_kernels` resblocks plus `num_upsamples` `noise_res` blocks each contribute multiple `AdaIN1d` forwards per inference — a large count of linear projections on the traced graph.
+
+## Goals and Non-Goals
+
+### Goals
+
+- [ ] Replace `nn.Linear` with `nn.Conv1d(kernel_size=1)` in `AdaIN1d` (`kokoro/istftnet.py`) for graph and ANE alignment.
+- [ ] Verify numerical parity: same weights → `AdaIN1d` output matches pre-change reference within tolerance (unit test + optional package-level check).
+- [ ] Pretrained checkpoints load without retraining (`register_load_state_dict_pre_hook` reshapes `fc.weight` from 2D → 3D when needed).
+- [ ] Re-export **in-repo shipping** decoder HAR-post buckets and measure latency vs baseline (harness when available; fallback otherwise).
+- [ ] Add a **checked-in** pytest for Linear-vs-Conv1d equivalence and run `pytest` in the project venv (not bare system Python).
+
+### Non-Goals
+
+- Changing full-`Decoder` Core ML export as the primary deliverable (deprecated path for this iteration).
+- Replacing `nn.Linear` in `SourceModuleHnNSF` (hn-nsf stays on CPU in the hybrid design).
+- Modifying the DurationModel.
+- Reworking **`AdainResBlk1d` / `IdentityAdaIN`** for **`decoder-har`** (those blocks are **not** in the traced `GeneratorFromHar` graph). **`IdentityAdaIN` is still applied in-process to `kmodel` for all modes** before trace — see nuance above; this plan does not change that policy.
+- Full Generator architecture rework.
+- Auditing the full Orion constraint catalog (20 constraints) beyond Constraints 1 (concat) and 17 (matmul vs conv). Other constraints (e.g., IOSurface 24 KB minimum, multi-input uniform allocation, GELU rejection) are not expected to interact with this change but are out of scope for this iteration.
+
+### Already done in this repo (do not re-track as work)
+
+- **Dead `torch.cat` in `AdaIN1d`:** Removed; `AdaIN1d.forward` uses `assert C == self.num_features` and documents why (no concat on the live path). Do not list “remove torch.cat” in Definition of Done.
+
+## Scope and Constraints
+
+- **Scope:** `AdaIN1d` in `kokoro/istftnet.py`, checkpoint hook, tests, re-export `coreml/kokoro_decoder_har_post_{3s,10s}.mlpackage`, benchmark log.
+- **Shipping buckets:** Aligned with [kokoro-bakeoff-v2.md](kokoro-bakeoff-v2.md): checked-in HAR-post artifacts are **`3s` and `10s` only**. The exporter accepts any `--buckets` list — **3s/10s is policy**, not an enforced code gate. Optional additional buckets (e.g. `5s` for [Hugging Face distribution](https://huggingface.co/mattmireles/kokoro-coreml)) are **out of scope for bakeoff Config A** unless repo policy changes — if exported, document them separately from “shipping Config A.”
+- **Guardrails:** Perceptual quality preserved. **Package-level:** Pearson **r > 0.99** on **comparable** runs (same bucket, same frozen inputs, same `waveform` length / crop rules). Use **real** `x_pre` / `har` / `ref_s` from PyTorch. **Secondary gates (hard):** After casting both waveforms to **float32** for the metric only — **SNR ≥ 40 dB** (signal = reference waveform) **and** **max absolute sample delta ≤ 1e-2**. **Near-silent reference** (RMS < **1e-4** on float32 waveform): skip Pearson; require max abs Δ only + optional listen. **Gate order:** export/smoke finiteness → Pearson (unless skipped) → SNR/delta → merge rule. **Unit:** `torch.allclose` on `AdaIN1d` outputs with tight atol/rtol as in new test.
+
+## Ground Truth Contracts (Do Not Violate)
+
+- **Weight compatibility:** `nn.Linear(in, out)` weight shape `(out, in)`. `nn.Conv1d(in, out, kernel_size=1)` weight shape `(out, in, 1)`. Transform: `conv.weight = linear.weight.unsqueeze(-1)`. Bias shape `(out,)` is identical for both `nn.Linear` and `nn.Conv1d` — no transformation needed; the load hook does **not** touch `fc.bias`.
+- **Functional equivalence:** For `s` of shape `(B, style_dim)`, `nn.Linear(style_dim, out)(s)` yields `(B, out)`, then the current code `view`s to `(B, out, 1)` for chunking. With `nn.Conv1d(style_dim, out, 1)`, use `self.fc(s.unsqueeze(-1))` to obtain `(B, out, 1)` in one step; keep `torch.chunk(..., dim=1)` unchanged for `gamma` / `beta`.
+- **No retraining:** Inference-time module swap + load hook only.
+
+## Already Shipped (Do Not Re-Solve)
+
+- **`GeneratorFromHar`:** `export_synth/wrappers.py` — class `GeneratorFromHar` (vocoder tail for `decoder-har`).
+- **`AdaIN1d` normalization:** Manual mean/var (export-friendly).
+- **CustomSTFT / vocoder STFT path:** As currently used in export.
+- **Decoder HAR post (git):** `coreml/kokoro_decoder_har_post_3s.mlpackage`, `coreml/kokoro_decoder_har_post_10s.mlpackage`.
+
+## Fresh Baseline (Current State)
+
+- **`AdaIN1d.fc`:** `nn.Linear` in `kokoro/istftnet.py` (`AdaIN1d.__init__`).
+- **Generator trace:** Six `AdaIN1d` calls per `AdaINResBlock1` × (resblocks + noise_res) — large linear count in MIL.
+- **ANE timing baseline:** From bakeoff manifest / harness when available; else document fallback measurement method and hardware.
+
+## Solution Overview
+
+| Phase | Purpose |
+| ----- | ------- |
+| 0 | MIL / op audit on existing `kokoro_decoder_har_post_3s.mlpackage` (and optionally `10s`) |
+| 1 | `AdaIN1d`: Linear → `Conv1d(1)`, `register_load_state_dict_pre_hook`, pytest |
+| 2 | Re-export HAR-post buckets (`3s,10s`); export gate + Pearson on real tensors |
+| 3 | Benchmark vs baseline; re-audit MIL |
+
+## Implementation Phases
+
+### Phase 0: MIL and op audit
+
+**Goal:** Enumerate MIL operation types in the **existing** traced HAR-post package — not just open the protobuf shell.
+
+**Tasks:**
+
+- [ ] Load `coreml/kokoro_decoder_har_post_3s.mlpackage` with `coremltools` (pin version = repo environment; record `coremltools.__version__` in the log).
+- [ ] **Count ops (required script):** Write `scripts/count_mil_ops.py` — walk the **MLProgram** IR (e.g. `spec.ml_program` / function blocks / operations — exact protobuf path depends on coremltools version). Tally each operation’s type (`linear`, `matmul`, `conv`, `concat`, etc.) and print a sorted histogram. *Do not* claim completion from `get_spec()` alone without descending to operations. This script is a **required deliverable** — Phase 3’s merge rule (≥10% op-count reduction) depends on reproducible tallying.
+- [ ] Note approximate counts of matmul/linear-like ops vs conv ops; note any `concat` that would violate ANE-friendly patterns from the guide.
+- [ ] **Conv1d vs Conv2d MIL equivalence (hard gate):** Using the same script or a one-off probe, export a minimal Conv1d(k=1) and Conv2d(1,1) model via `coremltools` and compare the MIL op types produced. If Conv1d(k=1) does **not** lower to a `conv` MIL op (or lowers to a different op family than Conv2d), Phase 1 must switch to Conv2d with appropriate input unsqueezes. **Do not proceed to Phase 1 until this question is answered.** Record the finding in the Phase 0 log.
+- [ ] **Memory / layout:** The guide warns about singleton trailing axes and ANE 64-byte alignment padding. Record whether intermediates like `(B, C, 1)` appear heavily in the existing package; note that both the current Linear path (`.view(B, 2C, 1)`) and the proposed Conv1d path produce the same `(B, 2*num_features, 1)` transient shape before `expand`. Verify via MIL inspection that this transient does **not** become a materialized output buffer — if it does, record the `num_features` values in the Kokoro config (256 first level, 128 deeper) and compute the 64-byte padding cost.
+- [ ] **Strongly recommended:** macOS 14+, `MLComputePlan` (or Instruments Core ML) per-op placement for the existing package before claiming ANE impact in Phase 3.
+
+**Verification:** `scripts/count_mil_ops.py` checked in and produces a text histogram. Phase 0 log includes: `coremltools` version, bucket name, op counts, concat presence, Conv1d/Conv2d MIL equivalence finding, optional compute-plan summary. **Lock the taxonomy:** save the exact string labels used for tallying (e.g. `linear` vs `matmul` vs `dense`) in that log — Phase 3 must reuse the **same** label set for the ≥10% merge rule.
+
+---
+
+### Phase 1: Replace Linear with Conv1d in AdaIN1d
+
+**Goal:** Same semantics, Conv1d for export; checkpoints load.
+
+**Tasks:**
+
+- [ ] In `AdaIN1d.__init__`, set `self.fc = nn.Conv1d(style_dim, num_features * 2, kernel_size=1)` (bias enabled to match Linear).
+- [ ] In `AdaIN1d.forward`, use `h = self.fc(s.unsqueeze(-1))` so `h` is `(B, 2 * num_features, 1)`; keep `gamma, beta = torch.chunk(h, 2, dim=1)` consistent with current code.
+- [ ] Register a **correct** load hook. PyTorch invokes `register_load_state_dict_pre_hook` with signature `(module, state_dict, prefix, local_metadata, strict, missing_keys, unexpected_keys, error_msgs)`. Example:
+
+```python
+def _adain_fc_linear_weights_to_conv1d(
+    module,
+    state_dict,
+    prefix,
+    local_metadata,
+    strict,
+    missing_keys,
+    unexpected_keys,
+    error_msgs,
+):
+    key = prefix + "fc.weight"
+    tensor = state_dict.get(key)
+    if tensor is not None and tensor.dim() == 2:
+        state_dict[key] = tensor.unsqueeze(-1)
+
+# In AdaIN1d.__init__, after super().__init__():
+self.register_load_state_dict_pre_hook(_adain_fc_linear_weights_to_conv1d)
+```
+
+Verify the callback arity against PyTorch docs for the **pinned** export stack (`torch==2.5.0` in `requirements-export.txt`).
+
+- [ ] Do **not** reintroduce `torch.cat` padding; keep the existing channel assertion.
+- [ ] Add `tests/test_adain1d_linear_vs_conv1d.py` (or equivalent): build Linear reference vs Conv1d module with `unsqueeze` weights, same `x`/`s`, `assert torch.allclose`.
+- [ ] **Hook round-trip test (hard):** In the same test file, add a test that: (a) creates an `AdaIN1d` with Conv1d, saves its `state_dict`, reloads it, and asserts weights are identical (3D→3D no-op path of the hook); (b) creates a synthetic 2D-weight state dict (simulating an old Linear checkpoint), loads it into a Conv1d `AdaIN1d`, and asserts the weights were correctly unsqueezed to 3D. Both paths must pass.
+- [ ] **Fan-in smoke (hard):** Add `tests/test_adain1d_decoder_smoke.py` that builds a **tiny** `AdainResBlk1d` (e.g. `dim_in=dim_out=8`, `style_dim=4`), runs `forward` on random `(B=1, C=8, T=16)` + style `(B, 4)`, and asserts **finite** outputs — exercises `AdaIN1d` on the **decoder** code path without pulling full `KModel` weights.
+- [ ] Run `pytest` using the project’s venv (`uv run pytest` or documented env).
+- [ ] **Existing test guard:** Confirm `tests/test_export_wrappers_shapes.py::test_synthesizer_model_forward_runs_and_returns_1d_audio` still passes — this exercises the full `Generator.forward()` path through Conv1d `AdaIN1d` implicitly. Do not skip or modify this test.
+
+**Verification:** New tests pass; hook round-trip covers both 2D→3D upgrade and 3D→3D no-op; full `tests/` green in venv.
+
+---
+
+### Phase 2: Re-export decoder HAR post buckets
+
+**Goal:** Rebuild **3s** and **10s** packages (in-repo shipping set).
+
+**Tasks:**
+
+- [ ] Export (canonical CLI per bakeoff plan):
+
+```bash
+python -m export_synth.main --mode decoder-har --buckets 3s,10s -o coreml
+```
+
+(`export_synthesizers.py` is a thin entry; either form is fine.)
+
+- [ ] **Understand export gates:** For `decoder-har`, `export_synth/convert.py` requires **traced** output finite; Core ML waveform on **synthetic** bounded random inputs may be non-finite under FP16 — exporter prints a warning. **Do not** treat that alone as failure if production-shaped tensors are finite.
+- [ ] **Explicit validation:** Feed **real** `x_pre`, `har`, `ref_s` from a short PyTorch run through **old vs new** packages of the **same bucket**; flatten waveforms to 1D of **equal length**; compute Pearson **r**; target **> 0.99**. **Reproducible inputs:** Use text `"Hello from Kokoro."`, voice `af_heart`, speed `1.0`, `torch.manual_seed(0)` before `extract_vocoder_inputs()`. Save frozen numpy arrays for **both** buckets: `outputs/bakeoff/frozen_inputs_3s.npz` and `outputs/bakeoff/frozen_inputs_10s.npz` (gitignored). Record SHA256 of each in the Phase 2 log so any re-run uses identical inputs. Record git SHA of the code that produced them.
+- [ ] Run the existing integration test as a smoke check: `uv run pytest tests/test_mlpackage_exports.py -q` (validates the re-exported packages load and produce finite output).
+
+**Verification:** Both packages save; smoke path works; Pearson **> 0.99**, **SNR ≥ 40 dB**, **max abs Δ ≤ 1e-2** (float32 metric tensors) on real tensors.
+
+---
+
+### Phase 3: Benchmark and compare
+
+**Goal:** Quantify wall or ANE-segment improvement vs baseline.
+
+**Tasks (harness path — preferred once landed):**
+
+- [ ] Run [kokoro-bakeoff-v2.md](kokoro-bakeoff-v2.md) harness Config A with new HAR-post artifacts; compare **`t_coreml_predict_s`** (and any sibling stage fields in the v2 results schema) to the stored baseline manifest — not legacy `t_ane_predict` naming.
+- [ ] Re-run Phase 0 MIL tally on **new** packages; compare linear/matmul vs conv counts.
+- [ ] Append results to `outputs/bakeoff/ane_optimization_results.json` (gitignored) with provenance: SHA, artifact paths, coremltools version, hardware.
+- [ ] **Committed paper trail:** Fill in [§ Results log (commit this)](#results-log-commit-this) in the same PR as the code change so reviewers are not blocked by gitignored JSON alone.
+
+#### Benchmark fallback (pre-harness)
+
+Use until `scripts/bakeoff_harness.py` exists:
+
+- [ ] Same machine, same OS build, same `MLModelConfiguration.computeUnits` as baseline doc.
+- [ ] Time Core ML `predict` in a tight loop (warmup + median of N iterations) for old vs new `kokoro_decoder_har_post_3s` (and optionally `10s`) with **identical** `MLDictionaryFeatureProvider` inputs from frozen numpy/torch saves.
+- [ ] Optional: `powermetrics` / Instruments Core ML template to confirm ANE participation (see compute-unit guide).
+- [ ] Record methodology and numbers in `outputs/bakeoff/ane_optimization_results.json` with field `"benchmark_mode": "fallback_loop"` vs `"bakeoff_harness"`.
+- [ ] **Scope note:** The fallback loop measures only Core ML `predict()` wall time (equivalent to `t_coreml_predict_s` in bakeoff schema). This isolates the Conv1d impact on the Core ML subgraph, but total hybrid pipeline improvement may be smaller because CPU-side stages (`t_prefix_extract_s`, `t_har_builder_cpu_s`) are unchanged. Do not over-claim full-pipeline speedup from predict-only numbers.
+
+**Verification:** Documented improvement meeting the **merge rule** in Open Questions, **or** documented revert. **Phase 3 DoD:** Include **placement evidence** (`MLComputePlan` / Instruments summary) **or** explicit `placement_evidence: unavailable` in the results JSON with reliance on wall-clock only.
+
+---
+
+## Success Criteria
+
+### Hard requirements
+
+- [ ] Phase 0 Conv1d/Conv2d MIL equivalence gate passed (Conv1d confirmed to lower to `conv` MIL op).
+- [ ] `scripts/count_mil_ops.py` checked in and produces reproducible op histograms.
+- [ ] `AdaIN1d.fc` is `nn.Conv1d(kernel_size=1)` in committed code.
+- [ ] Hook matches PyTorch’s pre-hook API; checkpoints with 2D `fc.weight` load.
+- [ ] Hook round-trip test passes: both 2D→3D upgrade and 3D→3D no-op paths verified.
+- [ ] New pytest for Linear/Conv equivalence; full suite passes in project venv.
+- [ ] `tests/test_export_wrappers_shapes.py::test_synthesizer_model_forward_runs_and_returns_1d_audio` still passes (full Generator path through Conv1d `AdaIN1d`).
+- [ ] `kokoro_decoder_har_post_3s` and `_10s` re-exported; smoke + real-tensor Pearson **> 0.99**, **SNR ≥ 40 dB**, **max abs Δ ≤ 1e-2** (float32 metric space), per guardrails. Validation inputs frozen with documented seed/text/voice.
+- [ ] Decoder smoke test (`tests/test_adain1d_decoder_smoke.py` or equivalent) passes.
+- [ ] Benchmark result logged (harness or fallback).
+
+### Definition of Done
+
+- [ ] Phases 0–3 complete with logs.
+- [ ] No stale claims about `torch.cat` removal as outstanding work.
+- [ ] Plan references match repo files (no `bakeoff_harness.py` command unless the file exists — if harness lands mid-work, switch Phase 3 to harness and keep fallback as historical note).
+- [ ] Any cached `.mlmodelc` directories under `coreml/` deleted before re-exporting to avoid benchmarking stale compiled models.
+- [ ] [§ Results log](#results-log-commit-this) table filled in for baseline + after Conv1d (committed with the PR).
+
+## Open Questions
+
+### Resolved
+
+- **Does `GeneratorFromHar` trace include concat from old AdaIN padding?** No — padding branch removed; assert-only path in `AdaIN1d`.
+- **Does `IdentityAdaIN` affect this plan?** It replaces `AdainResBlk1d` norms on the shared `kmodel` for **every** export `--mode` before trace, but those layers **do not appear** in the **`decoder-har`** JIT graph (only `GeneratorFromHar` does). This plan does not change that policy.
+- **Checkpoint compatibility?** Yes, via pre-hook `fc.weight` unsqueeze from 2D checkpoints; tensors already 3D are left unchanged.
+
+### Unresolved
+
+- **Does Conv1d(k=1) lower to the same MIL `conv` op as Conv2d(1,1)?** Phase 0 hard gate. The scheduling guide prescribes Conv2d for ANE; we use Conv1d because `AdaIN1d` operates on 3D tensors. If MIL lowering differs, Phase 1 switches to Conv2d with input unsqueezes. See Phase 0 task list.
+- **Does MIL already map `linear` to ANE-optimal paths?** Phase 0 + Phase 3 determine. **Merge rule:** ship the Conv1d change if hard requirements (tests, Pearson + SNR/delta gates, clean export) pass **and** either **(a)** measurable improvement: `t_coreml_predict_s` or fallback median predict time **≥ 5% faster** than baseline on the same machine, **or** **(b)** MIL tally (via `scripts/count_mil_ops.py`) shows **≥ 10% fewer** ops tagged `linear` / `matmul` / `dense` (count the same taxonomy as Phase 0) in the new `3s` package **and** package metrics pass. Otherwise document and **revert** the module change. **Revert procedure:** revert `kokoro/istftnet.py` **and** restore prior `.mlpackage` artifacts from git (`git checkout HEAD~N -- coreml/kokoro_decoder_har_post_3s.mlpackage coreml/kokoro_decoder_har_post_10s.mlpackage`). Do not leave reverted Python code with post-Conv1d packages or vice versa.
+
+## References
+
+### Internal
+
+- [CoreML Compute Unit Scheduling Guide](../Guides/apple-silicon/CoreML-Compute-Unit-Scheduling-guide.md)
+- [Bakeoff Plan](kokoro-bakeoff-v2.md)
+- [Debug Notes](../Notes/debug-notes.md)
+- [Learnings](../learnings.md)
+
+### External
+
+- [Apple: Deploying Transformers on the ANE](https://machinelearning.apple.com/research/neural-engine-transformers)
+- [Orion: Characterizing Apple's Neural Engine](https://arxiv.org/abs/2603.06728)
+- [Pre-built packages (distribution)](https://huggingface.co/mattmireles/kokoro-coreml) — optional consumer artifacts; **git** remains source of truth for exporter and pinned behavior.
+
+## Risks and Mitigations
+
+| Risk | Mitigation |
+| ---- | ---------- |
+| Core ML already optimizes linear → no speedup | Phase 0 MIL + Phase 3 numbers; document outcome. |
+| Conv1d MIL lowering differs from Conv2d | Phase 0 hard gate: compare Conv1d(k=1) vs Conv2d(1,1) MIL ops before Phase 1. Switch to Conv2d if they differ. |
+| FP16 numeric drift | Pearson on real tensors; export `--precision fp32` diagnostic if needed. |
+| Singleton-axis / padding interactions (guide) | Phase 0 notes on `(B,C,1)` prevalence; both old and new paths produce same transient shape; verify MIL does not materialize a buffer. Kokoro `num_features` values: 256 (first level), 128 (deeper). |
+| Hook API misuse | Copy verbatim signature from this plan; review against PyTorch docs for pinned version. |
+| Synthetic export gate non-finite | Use real `x_pre`/`har` for acceptance; see `export_synth/convert.py` decoder-har branch. |
+| Conv1d AdaIN1d used in future full-decoder export | `IdentityAdaIN` replaces `AdainResBlk1d.norm1/norm2` before trace for all modes, so Conv1d `AdaIN1d` is dead code in full/decoder paths. If `IdentityAdaIN` swap is ever removed, Conv1d `AdaIN1d` may re-surface MIL broadcast issues — document this in `IdentityAdaIN` docstring. |
+
+## Files Likely to Change
+
+| File | Change |
+| ---- | ------ |
+| `kokoro/istftnet.py` | `AdaIN1d`: Conv1d + hook + update class docstring (`Linear` → `Conv1d`) |
+| `scripts/count_mil_ops.py` | **New** MIL op-type histogram (Phase 0 required deliverable) |
+| `tests/test_adain1d_linear_vs_conv1d.py` | **New** equivalence test + hook round-trip (2D→3D and 3D→3D) |
+| `tests/test_adain1d_decoder_smoke.py` | **New** `AdainResBlk1d` fan-in smoke |
+| `coreml/kokoro_decoder_har_post_3s.mlpackage` | Rebuild |
+| `coreml/kokoro_decoder_har_post_10s.mlpackage` | Rebuild |
+| `outputs/bakeoff/ane_optimization_results.json` | Benchmark log (gitignored) |
+| `outputs/bakeoff/frozen_inputs_{3s,10s}.npz` | Frozen validation inputs per bucket (gitignored) |
+
+## Results log (commit this)
+
+When the optimization PR merges, **append a row here** (or replace the placeholder table) so the repo keeps a durable summary. Full JSON may stay gitignored under `outputs/bakeoff/`.
+
+| Run | git SHA | coremltools | Hardware | `t_coreml_predict_s` or fallback median (ms) | Pearson | Max abs Δwave / SNR | MIL note (linear→conv?) |
+| --- | --- | --- | --- | --- | --- | --- | --- |
+| Baseline | | | | | | | |
+| After Conv1d | | | | | | | |

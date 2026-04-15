@@ -112,6 +112,7 @@ TBD. Not manually confirmed. Likely **multiple factors**: (1) harmonic vs upsamp
 ### Related Guides
 
 - [CLAUDE.md](../../CLAUDE.md) - PyTorch → Core ML workflow, validation mindset
+- [Core ML compute unit scheduling](../Guides/apple-silicon/CoreML-Compute-Unit-Scheduling-guide.md) - `MLComputeUnits`, powermetrics/Instruments, silent CPU–GPU fallback
 - [README/learnings.md](../learnings.md) - Historical Core ML / BNNS / ANE notes
 
 ### Fix (partial)

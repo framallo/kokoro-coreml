@@ -16,8 +16,9 @@ iterate on real failures until passes.
 
 - **`git push` allowed when** the user invokes `$git-push`, names `git-push`,
   or clearly asks you to sync, push, and fix CI until green—or a checked-in
-  workflow authorizes the same (for example cooperating with `execute-plan`
-  after phased work).
+  workflow authorizes the same (for example **`execute-plan`** step 5 **after
+  all phases** are committed). **`execute-plan`** does **not** authorize
+  running **`git-push`** after **each** phase—only the final tail.
 - This authorizes **`git commit`**, **`git pull`/`git merge`** (integrating
   `origin`), **`git push`**, reading CI logs, and **code/test fixes** needed to
   get workflows green.
@@ -78,8 +79,8 @@ iterate on real failures until passes.
 
 ### 5. On failure: fix root cause, repeat
 
-- Read logs; reproduce locally when possible (`pytest`, targeted scripts,
-  `kokoro.js` tests if relevant, matching what failed).
+- Read logs; reproduce locally when possible (`pnpm lint`, `pnpm check`, targeted
+  tests, smoke, etc., matching what failed).
 - Fix the **underlying issue**—not symptoms only—then **commit** (again via
   **`git-commit`** when there are new changes) and **push**, then **re-watch**
   CI.

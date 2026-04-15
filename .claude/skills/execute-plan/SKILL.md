@@ -1,6 +1,6 @@
 ---
 name: execute-plan
-description: Execute a checked-in implementation plan for this repo phase by phase. Use when the user provides a concrete plan path and wants end-to-end implementation, phase audits, plan updates, commits, push, and CI monitoring. Do not use for creating a plan, one-off fixes without a checked-in plan, or read-only review work.
+description: Execute a checked-in implementation plan for this repo phase by phase. Commits land once per completed phase locally; push and CI monitoring run once after every phase is done (not after each phase). Use when the user provides a concrete plan path and wants end-to-end implementation, phase audits, plan updates, commits, push, and CI monitoring. Do not use for creating a plan, one-off fixes without a checked-in plan, or read-only review work.
 ---
 
 # Execute Plan
@@ -28,15 +28,18 @@ time.
 - Explicit invocation of `$execute-plan` counts as authorization for this
   workflow's git side effects. Direct naming also counts, for example
   "use execute-plan":
-  - phase commits
-  - sync with `origin/main`
-  - push
-  - CI monitoring and follow-up fixes
+  - **During phases (step 4):** narrow **phase commits** on the current branch
+    only. You may **`git fetch`** and merge/rebase **locally** to integrate
+    `origin/main` when needed—**do not** **`git push`** to `origin` and **do
+    not** run the full **`git-push`** skill until **all** phases are complete.
+  - **After all phases (step 5):** one **`git-push`** pass: integrate upstream,
+    push the branch, monitor GitHub Actions, and fix failures until green.
 - If `execute-plan` was routed implicitly or inferred rather than invoked
   directly, it may prepare local implementation work but must stop before the
   first commit or push and explain why.
-- At the start of the workflow, state that `execute-plan` is running and that
-  it will create phase commits, push, and monitor CI unless the user opts out.
+- At the start of the workflow, state that `execute-plan` is running: **phase
+  commits first, then a single push/CI tail**—unless the user opts out of
+  remote writes.
 
 ## Procedure
 
@@ -59,6 +62,8 @@ time.
    - 4d. Commit only your changes. Stage **only** the files for the completed
      phase (narrower than the default `git-commit` whole-tree staging) and
      follow the `git-commit` skill for the commit **message** (what and why).
+     **Stop after the commit—do not push.** Per-phase push is an anti-pattern
+     here.
 5. After all phases are complete:
    - follow `git-push` for syncing with `origin`, pushing the branch, watching
      GitHub Actions (when CI exists), and fixing failures until green (phase
@@ -87,6 +92,9 @@ Before each phase commit, explicitly verify:
 
 - Do not create a new plan inside this workflow.
 - Do not silently skip the audit step.
+- **Do not push to `origin` between phase commits.** Reserve **`git push`**
+  and the **`git-push`** skill for step 5 (after every phase is implemented and
+  committed), unless the user explicitly asks for a different cadence.
 - Do not push with known failing CI unless the user explicitly overrides that
   rule.
 
