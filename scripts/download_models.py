@@ -111,6 +111,48 @@ def download(
     )
 
 
+def _repair_missing_manifests(token: str | None, force: bool = False) -> int:
+    """Download any Manifest.json files that snapshot_download silently skipped.
+
+    huggingface_hub.snapshot_download() has a known quirk where it can skip
+    Manifest.json files inside .mlpackage directories even when the
+    allow_patterns should match them.  This function patches each affected
+    package by downloading the file individually via hf_hub_download().
+
+    Called by:
+      - main(), immediately after download() completes.
+
+    Returns:
+        Number of packages that were repaired.
+    """
+    from huggingface_hub import hf_hub_download
+    import glob as globmod
+
+    repaired = 0
+    # Search all .mlpackage dirs anywhere under the repo root.
+    for pkg_dir in sorted(globmod.glob(str(_REPO_ROOT / "**" / "*.mlpackage"), recursive=True)):
+        pkg = Path(pkg_dir)
+        manifest = pkg / "Manifest.json"
+        if manifest.exists() and not force:
+            continue
+        # Compute the HF-repo-relative path (e.g. "coreml/foo.mlpackage").
+        rel_path = pkg.relative_to(_REPO_ROOT)
+        hf_file = f"{rel_path}/Manifest.json"
+        print(f"  Repairing {rel_path} — downloading missing Manifest.json ...")
+        try:
+            hf_hub_download(
+                HF_REPO_ID,
+                hf_file,
+                token=token,
+                local_dir=str(_REPO_ROOT),
+                force_download=True,
+            )
+            repaired += 1
+        except Exception as exc:
+            print(f"    WARNING: could not download {hf_file}: {exc}")
+    return repaired
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(
         description="Download CoreML models and voices from Hugging Face Hub.",
@@ -154,6 +196,11 @@ def main() -> None:
     try:
         result_dir = download(patterns, token, force=args.force)
         print(f"\nDownload complete: {result_dir}")
+        # Repair any .mlpackage dirs where snapshot_download silently
+        # skipped Manifest.json (known huggingface_hub quirk).
+        n_repaired = _repair_missing_manifests(token, force=args.force)
+        if n_repaired:
+            print(f"Repaired {n_repaired} package(s) with missing Manifest.json.")
     except Exception as exc:
         print(f"\nDownload failed: {exc}", file=sys.stderr)
         sys.exit(1)
