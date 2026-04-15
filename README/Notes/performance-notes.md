@@ -708,3 +708,145 @@ One outlier was excluded: `medium` on iteration 0 spiked to `2101 ms` predict (v
 ### Plan reference
 
 Full experiment design: `README/Plans/kokoro-bakeoff-v2.md`
+
+---
+
+## Bakeoff v3: Swift pipeline on M2 MacBook Air
+
+**First collected:** TBD
+**Status:** Pending — run `$bakeoff` on M2 Air
+
+### End-to-end wall time (warm median, milliseconds)
+
+| Input | Audio | A (Python HAR) | D (MPS) | E (CPU) | F (Swift) |
+| --- | --- | --- | --- | --- | --- |
+| tiny | 1.55s | ___ ms | ___ ms | ___ ms | **___ ms** |
+| short | 2.80s | ___ ms | ___ ms | ___ ms | **___ ms** |
+| medium | 6.58s | ___ ms | ___ ms | ___ ms | **___ ms** |
+| long | 8.35s | ___ ms | ___ ms | ___ ms | **___ ms** |
+
+### RTF (wall time / audio duration)
+
+| Input | A (Python HAR) | D (MPS) | E (CPU) | F (Swift) |
+| --- | --- | --- | --- | --- |
+| tiny | ___ | ___ | ___ | **___** |
+| short | ___ | ___ | ___ | **___** |
+| medium | ___ | ___ | ___ | **___** |
+| long | ___ | ___ | ___ | **___** |
+
+### Speedup: Config F vs baselines
+
+| Input | F vs A | F vs D | F vs E |
+| --- | --- | --- | --- |
+| tiny | ___x | ___x | ___x |
+| short | ___x | ___x | ___x |
+| medium | ___x | ___x | ___x |
+| long | ___x | ___x | ___x |
+
+### Interpretation
+
+TBD — fill after running `$bakeoff` on M2 Air.
+
+### Provenance
+
+- Machine: Apple M2 MacBook Air, ___ GB
+- Git: ___
+- Results: `outputs/bakeoff/results_m2_air_v3.json`
+
+---
+
+## Bakeoff v3: Swift pipeline on M1 Mac Mini
+
+**First collected:** TBD
+**Status:** Pending — run `$bakeoff` on M1 Mini
+
+### End-to-end wall time (warm median, milliseconds)
+
+| Input | Audio | A (Python HAR) | D (MPS) | E (CPU) | F (Swift) |
+| --- | --- | --- | --- | --- | --- |
+| tiny | 1.55s | ___ ms | ___ ms | ___ ms | **___ ms** |
+| short | 2.80s | ___ ms | ___ ms | ___ ms | **___ ms** |
+| medium | 6.58s | ___ ms | ___ ms | ___ ms | **___ ms** |
+| long | 8.35s | ___ ms | ___ ms | ___ ms | **___ ms** |
+
+### RTF (wall time / audio duration)
+
+| Input | A (Python HAR) | D (MPS) | E (CPU) | F (Swift) |
+| --- | --- | --- | --- | --- |
+| tiny | ___ | ___ | ___ | **___** |
+| short | ___ | ___ | ___ | **___** |
+| medium | ___ | ___ | ___ | **___** |
+| long | ___ | ___ | ___ | **___** |
+
+### Speedup: Config F vs baselines
+
+| Input | F vs A | F vs D | F vs E |
+| --- | --- | --- | --- |
+| tiny | ___x | ___x | ___x |
+| short | ___x | ___x | ___x |
+| medium | ___x | ___x | ___x |
+| long | ___x | ___x | ___x |
+
+### Interpretation
+
+TBD — fill after running `$bakeoff` on M1 Mini.
+
+### Provenance
+
+- Machine: Apple M1 Mac Mini, ___ GB
+- Git: ___
+- Results: `outputs/bakeoff/results_m1_mini.json`
+
+---
+
+## Cross-Machine Comparison: Swift Pipeline (Config F) Scaling
+
+**Status:** Pending — requires M1 Mini and M2 Air data
+
+### Config F wall time across machines (warm median, ms)
+
+| Input | Audio | M1 Mini | M2 Air | M2 Ultra |
+| --- | --- | --- | --- | --- |
+| tiny | 1.55s | ___ ms | ___ ms | 86 ms |
+| short | 2.80s | ___ ms | ___ ms | 84 ms |
+| medium | 6.58s | ___ ms | ___ ms | 166 ms |
+| long | 8.35s | ___ ms | ___ ms | 165 ms |
+
+### Config A (Python HAR-post) across machines
+
+| Input | M1 Mini | M2 Air | M2 Ultra |
+| --- | --- | --- | --- |
+| tiny | ___ ms | 329 ms | 122 ms |
+| short | ___ ms | 323 ms | 136 ms |
+| medium | ___ ms | 521 ms | 232 ms |
+| long | ___ ms | 513 ms | 286 ms |
+
+### Config F speedup vs Config A per machine
+
+| Input | M1 Mini | M2 Air | M2 Ultra |
+| --- | --- | --- | --- |
+| tiny | ___x | ___x | 1.4x |
+| short | ___x | ___x | 1.6x |
+| medium | ___x | ___x | 1.4x |
+| long | ___x | ___x | 1.7x |
+
+### Scaling: relative to M2 Ultra
+
+| Machine | Config F (tiny) | Config F (long) | Config A (tiny) | Config A (long) |
+| --- | --- | --- | --- | --- |
+| M2 Ultra | 1.0x (86 ms) | 1.0x (165 ms) | 1.0x (122 ms) | 1.0x (286 ms) |
+| M2 Air | ___x | ___x | 2.7x (329 ms) | 1.8x (513 ms) |
+| M1 Mini | ___x | ___x | ___x | ___x |
+
+### Interpretation
+
+TBD — fill after collecting M1 Mini and M2 Air data.
+
+Key questions this section answers:
+1. Does the Swift pipeline speedup (1.4-1.7x vs Python) hold on lower-end hardware, or does it shrink/invert as CoreML predict becomes the bottleneck?
+2. How does the M1 Mini's 16-core ANE compare to the M2 Air's 16-core ANE for these models?
+3. Is there a hardware tier where the Python pipeline is actually faster (e.g., if CoreML model loading dominates on constrained RAM)?
+
+### Plan reference
+
+Bakeoff plan Phase 7: `README/Plans/kokoro-bakeoff-v2.md`

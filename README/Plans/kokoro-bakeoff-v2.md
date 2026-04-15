@@ -727,24 +727,42 @@ timing anecdotes.
 
 ---
 
-### Phase 7: Cross-Machine Comparison (M2 Air + others)
+### Phase 7: Cross-Machine Comparison (M1 Mini + M2 Air)
 
-**Goal:** Run the updated harness (Configs A, D, E, F) on M2 MacBook Air and any other available machines to measure how the Swift pipeline speedup scales across hardware.
+**Goal:** Run the updated harness (Configs A, D, E, F) on M1 Mac Mini and M2 MacBook Air to measure how the Swift pipeline speedup scales across hardware tiers.
 
-**Context:** M2 Air bakeoff v2 data (already collected for A–E) showed CoreML predict is 3–4x slower than M2 Ultra. The Swift pipeline eliminates CPU-side Python overhead, but CoreML predict times scale with hardware. M2 Air data will show whether the Swift speedup holds, shrinks, or inverts on lower-end hardware.
+**Context:** M2 Air bakeoff v2 data (already collected for A–E) showed CoreML predict is 3–4x slower than M2 Ultra, with the bottleneck shifting from CPU-side overhead to CoreML inference. The Swift pipeline eliminates Python overhead, but CoreML predict times scale with ANE core count and memory bandwidth. Cross-machine data answers whether Config F's speedup holds, shrinks, or inverts on lower-end chips.
+
+**Use the `$bakeoff` skill** (`.claude/skills/bakeoff/SKILL.md`) to run on each machine. It handles prerequisites, harness invocation, and results recording.
 
 **Tasks:**
 
-- [ ] Run ``--configs a,d,e,f --iterations 5 --order-seed 0`` on M2 MacBook Air
-- [ ] Produce ``outputs/bakeoff/results_m2_air_v3.json``
-- [ ] Update summary with cross-machine comparison table (Config F Air vs Ultra)
-- [ ] Update ``README/Notes/performance-notes.md`` with cross-machine Swift pipeline section
+#### M1 Mac Mini
+
+- [ ] Run `$bakeoff` with `--machine-id m1_mini` on M1 Mac Mini (8-core CPU, 8-core GPU, 16-core ANE, 8/16 GB)
+- [ ] Produce `outputs/bakeoff/results_m1_mini.json`
+- [ ] Update `README/Notes/performance-notes.md` with M1 Mini section (placeholder already exists)
+
+#### M2 MacBook Air
+
+- [ ] Run `$bakeoff` with `--machine-id m2_air_v3` on M2 MacBook Air (8-core CPU, 10-core GPU, 16-core ANE, 24 GB)
+- [ ] Produce `outputs/bakeoff/results_m2_air_v3.json`
+- [ ] Update `README/Notes/performance-notes.md` with M2 Air v3 section (placeholder already exists)
+
+#### Cross-Machine Comparison
+
+- [ ] Produce cross-machine comparison table in `README/Notes/performance-notes.md`:
+  - Config F across all 3 machines (M1 Mini, M2 Air, M2 Ultra)
+  - Config A across all 3 machines
+  - Scaling factors (Air/Ultra, Mini/Ultra)
+  - Interpretation: does Swift speedup hold across hardware tiers?
 
 **Verification:**
 
 - M2 Air Config A numbers match existing v2 Air data (±10%)
-- Config F Air numbers are consistent with per-stage scaling expectations
-- Cross-machine speedup table produced
+- Config F numbers are consistent with per-stage scaling expectations
+- M1 Mini Config A numbers are reasonable (expect 2-3x slower than M2 Ultra)
+- Cross-machine comparison table produced
 
 ---
 
