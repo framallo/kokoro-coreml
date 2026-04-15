@@ -225,7 +225,7 @@ Full experiment design: `README/Plans/ane-optimization-v1.md`
 ## Bakeoff v2: Controlled five-config benchmark on M2 Ultra
 
 **First collected:** 2026-04-15
-**Status:** Complete (M1 Mini and powermetrics telemetry deferred)
+**Status:** Complete (powermetrics telemetry deferred; M1 Mini data collected — see below)
 
 ### Summary
 
@@ -431,6 +431,104 @@ The AdaIN export risk did NOT materialize. DecoderPre (F0_conv + N_conv + encode
 ### Plan reference
 
 Full plan: `README/Plans/swift-prefix-rewrite-v1.md`
+
+---
+
+## Bakeoff v2: Controlled benchmark on M1 Mini
+
+**First collected:** 2026-04-15
+**Status:** Complete
+
+### Summary
+
+Same bakeoff harness and frozen inputs as the M2 Ultra and M2 Air runs, now on a base M1 Mac Mini (8-core CPU, 8-core GPU, 16-core ANE, 16 GB). Config A (shipping HAR-post) is **2.3–4.8x faster than PyTorch CPU** and **6–14x realtime**. CoreML `predict()` consumes 50–51% of wall time on the 10s bucket and 40–42% on the 3s bucket — a balanced split between CPU-side overhead and CoreML inference, similar to the M2 Air pattern.
+
+### What was measured
+
+- **Config A:** Shipping hybrid HAR-post path (`coreml/kokoro_decoder_har_post_{3,10}s.mlpackage`)
+- **Config B:** Naive decoder-only 10s artifact, `compute_units=ALL`
+- **Config C:** Naive decoder-only 10s artifact, `compute_units=CPU_AND_GPU`
+- **Config D:** PyTorch end-to-end on MPS (`PYTORCH_ENABLE_MPS_FALLBACK=1`)
+- **Config E:** PyTorch end-to-end on CPU
+
+All configs used identical frozen inputs, `voice=af_heart`, `speed=1.0`, `torch.manual_seed(0)`.
+
+### Method
+
+Same as M2 Ultra run: `scripts/bakeoff_harness.py` with `run --configs a,b,c,d,e --iterations 5 --order-seed 0`. Counterbalanced ordering, models preloaded and warmed. `PYTORCH_ENABLE_MPS_FALLBACK=1` set for the full run (Config D).
+
+### End-to-end wall time (warm median, milliseconds)
+
+| Input | Audio | A (HAR-post) | B (.all) | C (.cpuAndGPU) | D (MPS) | E (CPU) |
+| --- | --- | --- | --- | --- | --- | --- |
+| `tiny` | `1.55s` | `259 ms` | `1589 ms` | `1556 ms` | `360 ms` | `601 ms` |
+| `short` | `2.80s` | `240 ms` | `1561 ms` | `1577 ms` | `750 ms` | `896 ms` |
+| `medium` | `6.58s` | `603 ms` | `1624 ms` | `1598 ms` | `1025 ms` | `2223 ms` |
+| `long` | `8.35s` | `600 ms` | `1628 ms` | `1625 ms` | `1257 ms` | `2849 ms` |
+
+### RTF (canonical audio duration / wall time)
+
+| Input | A (HAR-post) | B (.all) | C (.cpuAndGPU) | D (MPS) | E (CPU) |
+| --- | --- | --- | --- | --- | --- |
+| `tiny` | `0.167` (6x RT) | `1.025` | `1.004` | `0.232` | `0.388` |
+| `short` | `0.086` (12x RT) | `0.557` | `0.563` | `0.268` | `0.320` |
+| `medium` | `0.092` (11x RT) | `0.247` | `0.243` | `0.156` | `0.338` |
+| `long` | `0.072` (14x RT) | `0.195` | `0.195` | `0.151` | `0.341` |
+
+### Speedup: Config A vs PyTorch baselines
+
+| Input | Audio | A vs E (CPU) | A vs D (MPS) |
+| --- | --- | --- | --- |
+| `tiny` | `1.55s` | `2.3x` | `1.4x` |
+| `short` | `2.80s` | `3.7x` | `3.1x` |
+| `medium` | `6.58s` | `3.7x` | `1.7x` |
+| `long` | `8.35s` | `4.8x` | `2.1x` |
+
+### Config A stage breakdown (warm median)
+
+| Input | Bucket | Prefix extract | HAR builder (CPU) | CoreML predict | Orchestration | Total |
+| --- | --- | --- | --- | --- | --- | --- |
+| `tiny` | `3s` | `67.3 ms` (26%) | `74.2 ms` (29%) | `102.4 ms` (40%) | `2.1 ms` | `259 ms` |
+| `short` | `3s` | `73.5 ms` (31%) | `64.3 ms` (27%) | `100.6 ms` (42%) | `1.6 ms` | `240 ms` |
+| `medium` | `10s` | `131.4 ms` (22%) | `153.6 ms` (25%) | `310.4 ms` (51%) | `2.1 ms` | `603 ms` |
+| `long` | `10s` | `149.2 ms` (25%) | `149.4 ms` (25%) | `298.0 ms` (50%) | `1.6 ms` | `600 ms` |
+
+### Interpretation
+
+1. **Config A is 6–14x realtime on M1 Mini.** The shortest input (`tiny`, 1.55s audio) completes in 259 ms; the longest (`long`, 8.35s audio) in 600 ms. Roughly 1.7–2.2x slower than M2 Ultra, similar to M2 Air.
+
+2. **CoreML predict scales with bucket size.** On the 3s bucket, predict is ~100 ms (40% of wall time). On the 10s bucket, predict jumps to ~300 ms (50% of wall time). CPU-side overhead (prefix + HAR builder) stays proportional to input length regardless of bucket.
+
+3. **Speedup vs CPU scales strongly with duration.** The 2.3x speedup at `tiny` grows to 4.8x at `long` — matching the M2 Air scaling curve and exceeding M2 Ultra's 1.7x → 3.5x range. PyTorch CPU scales linearly with sequence length while CoreML predict is sublinear.
+
+4. **MPS shows high variance.** Config D (MPS) has significant run-to-run variation (std up to 1.8s on `medium`), consistent with `aten::angle` fallback and thermal throttling. Treat as directional only.
+
+5. **Configs B and C remain indistinguishable.** Both hover around 1.55–1.63s regardless of input length, consistent with all other machines. ANE participation under `.all` remains **indeterminate** without powermetrics telemetry.
+
+6. **No OOM on 16 GB.** All five configs loaded and ran successfully on the M1 Mini's 16 GB unified memory. This resolves the Phase 4 deferral in the bakeoff plan — M1 Mini is viable as a benchmark target.
+
+### Cross-machine comparison: M1 Mini vs M2 Air vs M2 Ultra
+
+| Input | M1 Mini A | M2 Air A | M2 Ultra A | M1/Ultra | M1 Mini E | M2 Air E | M2 Ultra E | M1/Ultra |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| `tiny` | `259 ms` | `329 ms` | `151 ms` | `1.7x` | `601 ms` | `436 ms` | `258 ms` | `2.3x` |
+| `short` | `240 ms` | `323 ms` | `155 ms` | `1.5x` | `896 ms` | `819 ms` | `396 ms` | `2.3x` |
+| `medium` | `603 ms` | `521 ms` | `283 ms` | `2.1x` | `2223 ms` | `1929 ms` | `782 ms` | `2.8x` |
+| `long` | `600 ms` | `513 ms` | `274 ms` | `2.2x` | `2849 ms` | `2441 ms` | `966 ms` | `2.9x` |
+
+Config A on M1 Mini is 1.5–2.2x slower than M2 Ultra and surprisingly close to M2 Air (within 20% on short inputs, ~15% slower on long inputs). The M1 Mini's CoreML predict is ~100 ms on the 3s bucket (vs M2 Air's 220 ms and M2 Ultra's 19–57 ms), suggesting the M1's 16-core ANE handles the small bucket efficiently. On the 10s bucket, predict jumps to ~300 ms, closer to the M2 Air's 260 ms. PyTorch CPU is 2.3–2.9x slower than M2 Ultra, consistent with the M1 → M2 Ultra compute gap.
+
+### Provenance
+
+- Machine: Apple M1 Mac Mini, 16 GB
+- Git: `46c9b7f0517e`
+- Torch: `2.5.0` / coremltools: `8.3.0` / numpy: `1.26.4`
+- Order seed: `0`, iterations: `5`
+- Results: `outputs/bakeoff/results_apple_m1.json`
+
+### Plan reference
+
+Full experiment design: `README/Plans/kokoro-bakeoff-v2.md`
 
 ---
 
