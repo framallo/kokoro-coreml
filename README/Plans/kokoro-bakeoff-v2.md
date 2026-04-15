@@ -1,7 +1,7 @@
 # Kokoro TTS Bakeoff — Implementation Plan
 
 **Date:** 2026-04-14
-**Status:** Implemented (M1 Mini data and powermetrics telemetry deferred)
+**Status:** Implemented (M1 Mini data and powermetrics telemetry deferred; Phase 6–7 added for Swift pipeline comparison)
 
 > Research design lives in `README/Plans/kokoro-bakeoff-experiment-v1.md`. This
 > plan covers what to build and run to produce reproducible benchmark data for
@@ -695,6 +695,68 @@ timing anecdotes.
 - `outputs/bakeoff/summary.md` exists and every gate has a written answer with
   supporting numbers or an explicit limitation.
 
+---
+
+### Phase 6: Add Swift Pipeline as Config F
+
+**Goal:** Add the Swift prefix rewrite pipeline (``README/Plans/swift-prefix-rewrite-v1.md``) as Config F to the bakeoff harness, producing a direct controlled comparison against all existing configs.
+
+**Context:** The Swift pipeline replaces Python orchestration with 5 CoreML models + Swift DSP. Per-stage measurements (``README/Notes/performance-notes.md``, "Swift prefix rewrite" section) show 2.1–2.9x speedup on M2 Ultra vs Python Config A. But these are per-stage estimates, not end-to-end counterbalanced measurements. Config F puts the Swift pipeline through the same methodology as A–E.
+
+**Prerequisites:**
+
+- Swift Package (``swift/``) builds in release mode
+- All 5 CoreML models exported (Duration, F0Ntrain ×2, DecoderPre ×2, GeneratorFromHar ×2)
+- Pre-tokenized inputs from ``scripts/prepare_swift_bench_inputs.py``
+
+**Tasks:**
+
+- [ ] Build a Swift CLI executable (``swift/Sources/KokoroBenchmark/main.swift``) that:
+  - Loads all CoreML models and hn-nsf weights
+  - Accepts a JSON input file (from ``prepare_swift_bench_inputs.py``) and produces JSON output with ``wall_time_s``, ``rtf_canonical``, and stage timings
+  - Uses the same ``voice=af_heart``, ``speed=1.0``, and frozen inputs as Configs A–E
+  - Warmup: 1 call per bucket before timed iterations
+- [ ] Add Config F to ``scripts/bakeoff_harness.py``:
+  - Call the compiled Swift binary as a subprocess for each (input, iteration) pair
+  - Parse JSON stdout to extract timing fields matching the existing results schema
+  - Include Config F in the counterbalanced config shuffle
+- [ ] Update ``scripts/bakeoff_summarize.py``:
+  - Add Config F columns to wall time, RTF, and speedup tables
+  - New **Gate 6 — How much faster is the Swift pipeline vs Python Config A?** Report per-input speedup with stage breakdown comparison.
+- [ ] Run: ``uv run python scripts/bakeoff_harness.py run --configs a,d,e,f --iterations 5 --order-seed 0`` on M2 Ultra
+  - Note: Configs B/C (decoder-only) omitted unless specifically requested — they measure ANE participation, not Swift pipeline speed
+- [ ] Produce ``outputs/bakeoff/results_m2_ultra_v3.json`` and updated ``outputs/bakeoff/summary_v3.md``
+- [ ] Update ``README/Notes/performance-notes.md`` with "Bakeoff v3" section
+
+**Verification:**
+
+- Config F numbers are consistent with the per-stage estimates from Phase 3 of the Swift prefix rewrite plan (±15% tolerance for counterbalanced ordering effects)
+- All existing Config A/D/E numbers are reproducible within ±10% of v2 results
+- Gate 6 has a written answer with supporting numbers
+
+---
+
+### Phase 7: Cross-Machine Comparison (M2 Air + others)
+
+**Goal:** Run the updated harness (Configs A, D, E, F) on M2 MacBook Air and any other available machines to measure how the Swift pipeline speedup scales across hardware.
+
+**Context:** M2 Air bakeoff v2 data (already collected for A–E) showed CoreML predict is 3–4x slower than M2 Ultra. The Swift pipeline eliminates CPU-side Python overhead, but CoreML predict times scale with hardware. M2 Air data will show whether the Swift speedup holds, shrinks, or inverts on lower-end hardware.
+
+**Tasks:**
+
+- [ ] Run ``--configs a,d,e,f --iterations 5 --order-seed 0`` on M2 MacBook Air
+- [ ] Produce ``outputs/bakeoff/results_m2_air_v3.json``
+- [ ] Update summary with cross-machine comparison table (Config F Air vs Ultra)
+- [ ] Update ``README/Notes/performance-notes.md`` with cross-machine Swift pipeline section
+
+**Verification:**
+
+- M2 Air Config A numbers match existing v2 Air data (±10%)
+- Config F Air numbers are consistent with per-stage scaling expectations
+- Cross-machine speedup table produced
+
+---
+
 ## Success Criteria
 
 ### Hard Requirements (Must Pass)
@@ -798,5 +860,7 @@ timing anecdotes.
 | File | Change Type | Notes |
 | --- | --- | --- |
 | `README/Plans/kokoro-bakeoff-v2.md` | Update | This revised implementation-ready plan |
-| `scripts/bakeoff_harness.py` | Create | Unified benchmark harness with four modes |
+| `scripts/bakeoff_harness.py` | Create / Modify | Unified benchmark harness; Phase 6 adds Config F |
+| `scripts/bakeoff_summarize.py` | Modify | Phase 6 adds Config F tables and Gate 6 |
 | `requirements-bakeoff.txt` | Create | Pinned benchmark environment |
+| `swift/Sources/KokoroBenchmark/main.swift` | Create | Swift CLI for Config F (Phase 6) |
