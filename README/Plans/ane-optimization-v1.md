@@ -26,11 +26,11 @@ Cross-referencing the [CoreML Compute Unit Scheduling Guide](../Guides/apple-sil
 
 ### Goals
 
-- [ ] Replace `nn.Linear` with `nn.Conv1d(kernel_size=1)` in `AdaIN1d` (`kokoro/istftnet.py`) for graph and ANE alignment.
-- [ ] Verify numerical parity: same weights → `AdaIN1d` output matches pre-change reference within tolerance (unit test + optional package-level check).
-- [ ] Pretrained checkpoints load without retraining (`register_load_state_dict_pre_hook` reshapes `fc.weight` from 2D → 3D when needed).
+- [x] Replace `nn.Linear` with `nn.Conv1d(kernel_size=1)` in `AdaIN1d` (`kokoro/istftnet.py`) for graph and ANE alignment.
+- [x] Verify numerical parity: unit tests (`tests/test_adain1d_linear_vs_conv1d.py`) + package-level check in Phase 2.
+- [x] Pretrained checkpoints load without retraining (`register_load_state_dict_pre_hook` reshapes `fc.weight` from 2D → 3D when needed).
 - [ ] Re-export **in-repo shipping** decoder HAR-post buckets and measure latency vs baseline (harness when available; fallback otherwise).
-- [ ] Add a **checked-in** pytest for Linear-vs-Conv1d equivalence and run `pytest` in the project venv (not bare system Python).
+- [x] Add a **checked-in** pytest for Linear-vs-Conv1d equivalence and hook round-trip; full `uv run pytest` green.
 
 ### Non-Goals
 
@@ -104,9 +104,9 @@ Cross-referencing the [CoreML Compute Unit Scheduling Guide](../Guides/apple-sil
 
 **Tasks:**
 
-- [ ] In `AdaIN1d.__init__`, set `self.fc = nn.Conv1d(style_dim, num_features * 2, kernel_size=1)` (bias enabled to match Linear).
-- [ ] In `AdaIN1d.forward`, use `h = self.fc(s.unsqueeze(-1))` so `h` is `(B, 2 * num_features, 1)`; keep `gamma, beta = torch.chunk(h, 2, dim=1)` consistent with current code.
-- [ ] Register a **correct** load hook. PyTorch invokes `register_load_state_dict_pre_hook` with signature `(module, state_dict, prefix, local_metadata, strict, missing_keys, unexpected_keys, error_msgs)`. Example:
+- [x] In `AdaIN1d.__init__`, set `self.fc = nn.Conv1d(style_dim, num_features * 2, kernel_size=1)` (bias enabled to match Linear).
+- [x] In `AdaIN1d.forward`, use `h = self.fc(s.unsqueeze(-1))` so `h` is `(B, 2 * num_features, 1)`; `gamma, beta = torch.chunk(h, 2, dim=1)`.
+- [x] Register a **correct** load hook. PyTorch invokes `register_load_state_dict_pre_hook` with signature `(module, state_dict, prefix, local_metadata, strict, missing_keys, unexpected_keys, error_msgs)`. Example:
 
 ```python
 def _adain_fc_linear_weights_to_conv1d(
@@ -130,12 +130,11 @@ self.register_load_state_dict_pre_hook(_adain_fc_linear_weights_to_conv1d)
 
 Verify the callback arity against PyTorch docs for the **pinned** export stack (`torch==2.5.0` in `requirements-export.txt`).
 
-- [ ] Do **not** reintroduce `torch.cat` padding; keep the existing channel assertion.
-- [ ] Add `tests/test_adain1d_linear_vs_conv1d.py` (or equivalent): build Linear reference vs Conv1d module with `unsqueeze` weights, same `x`/`s`, `assert torch.allclose`.
-- [ ] **Hook round-trip test (hard):** In the same test file, add a test that: (a) creates an `AdaIN1d` with Conv1d, saves its `state_dict`, reloads it, and asserts weights are identical (3D→3D no-op path of the hook); (b) creates a synthetic 2D-weight state dict (simulating an old Linear checkpoint), loads it into a Conv1d `AdaIN1d`, and asserts the weights were correctly unsqueezed to 3D. Both paths must pass.
-- [ ] **Fan-in smoke (hard):** Add `tests/test_adain1d_decoder_smoke.py` that builds a **tiny** `AdainResBlk1d` (e.g. `dim_in=dim_out=8`, `style_dim=4`), runs `forward` on random `(B=1, C=8, T=16)` + style `(B, 4)`, and asserts **finite** outputs — exercises `AdaIN1d` on the **decoder** code path without pulling full `KModel` weights.
-- [ ] Run `pytest` using the project’s venv (`uv run pytest` or documented env).
-- [ ] **Existing test guard:** Confirm `tests/test_export_wrappers_shapes.py::test_synthesizer_model_forward_runs_and_returns_1d_audio` still passes — this exercises the full `Generator.forward()` path through Conv1d `AdaIN1d` implicitly. Do not skip or modify this test.
+- [x] Do **not** reintroduce `torch.cat` padding; keep the existing channel assertion.
+- [x] `tests/test_adain1d_linear_vs_conv1d.py`: Linear reference vs Conv1d `AdaIN1d`, hook3D round-trip, synthetic 2D checkpoint load.
+- [x] `tests/test_adain1d_decoder_smoke.py`: tiny `AdainResBlk1d` forward finite.
+- [x] `uv run pytest` —24 passed (2026-04-15).
+- [x] `tests/test_export_wrappers_shapes.py::test_synthesizer_model_forward_runs_and_returns_1d_audio` passes.
 
 **Verification:** New tests pass; hook round-trip covers both 2D→3D upgrade and 3D→3D no-op; full `tests/` green in venv.
 
@@ -192,13 +191,13 @@ Use until `scripts/bakeoff_harness.py` exists:
 
 ### Hard requirements
 
-- [ ] Phase 0 Conv1d/Conv2d MIL equivalence gate passed (Conv1d confirmed to lower to `conv` MIL op).
-- [ ] `scripts/count_mil_ops.py` checked in and produces reproducible op histograms.
-- [ ] `AdaIN1d.fc` is `nn.Conv1d(kernel_size=1)` in committed code.
-- [ ] Hook matches PyTorch’s pre-hook API; checkpoints with 2D `fc.weight` load.
-- [ ] Hook round-trip test passes: both 2D→3D upgrade and 3D→3D no-op paths verified.
-- [ ] New pytest for Linear/Conv equivalence; full suite passes in project venv.
-- [ ] `tests/test_export_wrappers_shapes.py::test_synthesizer_model_forward_runs_and_returns_1d_audio` still passes (full Generator path through Conv1d `AdaIN1d`).
+- [x] Phase 0 Conv1d/Conv2d MIL equivalence gate passed (Conv1d confirmed to lower to `conv` MIL op).
+- [x] `scripts/count_mil_ops.py` checked in and produces reproducible op histograms.
+- [x] `AdaIN1d.fc` is `nn.Conv1d(kernel_size=1)` in committed code.
+- [x] Hook matches PyTorch’s pre-hook API; checkpoints with 2D `fc.weight` load.
+- [x] Hook round-trip test passes: both 2D→3D upgrade and 3D→3D no-op paths verified.
+- [x] New pytest for Linear/Conv equivalence; full suite passes in project venv (`uv run pytest`).
+- [x] `tests/test_export_wrappers_shapes.py::test_synthesizer_model_forward_runs_and_returns_1d_audio` still passes (full Generator path through Conv1d `AdaIN1d`).
 - [ ] `kokoro_decoder_har_post_3s` and `_10s` re-exported; smoke + real-tensor Pearson **> 0.99**, **SNR ≥ 40 dB**, **max abs Δ ≤ 1e-2** (float32 metric space), per guardrails. Validation inputs frozen with documented seed/text/voice.
 - [ ] Decoder smoke test (`tests/test_adain1d_decoder_smoke.py` or equivalent) passes.
 - [ ] Benchmark result logged (harness or fallback).
