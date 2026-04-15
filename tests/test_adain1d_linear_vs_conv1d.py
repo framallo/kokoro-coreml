@@ -49,6 +49,9 @@ def test_load_state_dict_hook_3d_round_trip():
     sd = m.state_dict()
     m2 = AdaIN1d(16, 32)
     m2.load_state_dict(sd, strict=True)
+    # Shape must survive the round-trip unchanged (no double-unsqueeze).
+    # AdaIN1d(style_dim=16, num_features=32) → Conv1d(16, 64, 1); out = num_features*2.
+    assert m2.fc.weight.shape == (64, 16, 1), f"unexpected shape {m2.fc.weight.shape}"
     assert m2.fc.weight.shape == sd["fc.weight"].shape
     assert torch.allclose(m2.fc.weight, m.fc.weight)
     assert torch.allclose(m2.fc.bias, m.fc.bias)
@@ -63,4 +66,44 @@ def test_load_state_dict_hook_2d_linear_checkpoint():
     m.load_state_dict(sd, strict=True)
     assert m.fc.weight.shape == (C * 2, style_dim, 1)
     assert torch.allclose(m.fc.weight.squeeze(-1), lin_w)
+    # fc.bias shape is (out_channels,) for both Linear and Conv1d — no migration needed
     assert torch.allclose(m.fc.bias, lin_b)
+
+
+def test_load_state_dict_hook_prefixed_submodule():
+    """Hook fires with correct prefix when a legacy 2D checkpoint is loaded via AdainResBlk1d.
+
+    Real-world load path: AdainResBlk1d.load_state_dict(legacy_sd) — the hook
+    receives prefix 'norm1.' / 'norm2.' and must resolve 'norm1.fc.weight' correctly.
+    """
+    from kokoro.istftnet import AdainResBlk1d
+
+    style_dim, dim = 8, 16
+    blk = AdainResBlk1d(dim_in=dim, dim_out=dim, style_dim=style_dim)
+
+    # Build a state dict that looks like a legacy Linear checkpoint:
+    # replace the 3D Conv1d fc.weights with 2D Linear fc.weights.
+    sd = blk.state_dict()
+    sd["norm1.fc.weight"] = sd["norm1.fc.weight"].squeeze(-1)  # 3D → 2D
+    sd["norm2.fc.weight"] = sd["norm2.fc.weight"].squeeze(-1)  # 3D → 2D
+
+    blk.load_state_dict(sd, strict=True)
+
+    assert blk.norm1.fc.weight.shape == (dim * 2, style_dim, 1), blk.norm1.fc.weight.shape
+    assert blk.norm2.fc.weight.shape == (dim * 2, style_dim, 1), blk.norm2.fc.weight.shape
+
+
+def test_adain1d_forward_t1_finite():
+    """T=1: var(dim=2, unbiased=False) == 0 by definition; output must be finite.
+
+    With T=1 the normalization collapses to x_norm=0, so output equals beta
+    everywhere — deterministic and finite, but different from T>1 behaviour.
+    """
+    torch.manual_seed(0)
+    style_dim, C = 16, 8
+    m = AdaIN1d(style_dim, C)
+    x = torch.randn(1, C, 1)
+    s = torch.randn(1, style_dim)
+    y = m(x, s)
+    assert y.shape == x.shape
+    assert torch.isfinite(y).all()

@@ -105,11 +105,30 @@ def _adain_fc_linear_weights_to_conv1d(
     unexpected_keys,
     error_msgs,
 ):
-    """Load2D Linear checkpoints into 3D Conv1d(fc) weights (in-place state_dict)."""
+    """Migrate a legacy nn.Linear 'fc' weight (2D) into nn.Conv1d shape (3D) on checkpoint load.
+
+    Registered via the *public* register_load_state_dict_pre_hook, so 'module' is the
+    first positional argument (8-param signature).  Do NOT swap to the private
+    _register_load_state_dict_pre_hook (7 params, no 'module'): that would silently
+    land 'state_dict' in the 'module' slot and corrupt every key lookup.
+
+    Behaviour:
+      - fc.weight dim == 2  (legacy Linear)   → unsqueeze(-1) in state_dict  [2D→3D]
+      - fc.weight dim == 3  (already Conv1d)  → no-op                        [identity]
+      - key absent or None                    → no-op                        [strict=False safe]
+
+    fc.bias: shape (out_channels,) is identical for both nn.Linear and nn.Conv1d.
+    No bias transform is needed here — do not add one.
+
+    'prefix' is the full dotted path to this AdaIN1d instance within its parent
+    (e.g. 'norm1.' when loaded through AdainResBlk1d), so prefix + "fc.weight"
+    resolves to the correct key in the full module state dict.
+    """
     key = prefix + "fc.weight"
     tensor = state_dict.get(key)
     if tensor is not None and tensor.dim() == 2:
         state_dict[key] = tensor.unsqueeze(-1)
+    # fc.bias: (out_channels,) is identical for Linear and Conv1d — no transform needed.
 
 
 class AdaIN1d(nn.Module):
@@ -124,10 +143,8 @@ class AdaIN1d(nn.Module):
     # 2. Style-dependent parameters: gamma, beta = Conv1d(kernel_size=1)(style)
     # 3. Adaptive transformation: output = (1 + gamma) * x_norm + beta
     #
-    # ONNX Export Compatibility:
-    # - Uses affine=True in InstanceNorm1d to avoid channel dimension loss
-    # - Workaround for legacy torch.onnx.export limitations
-    # - Additional learnable parameters don't affect inference quality
+    # Manual channel-wise normalization (no nn.InstanceNorm1d) avoids exporter
+    # shape/broadcast bugs and keeps the MIL graph clean for ANE tracing.
     #
     # Parameters:
     # - style_dim: Dimension of input style vector (typically 128)
