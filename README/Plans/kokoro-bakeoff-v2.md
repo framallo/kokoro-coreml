@@ -516,22 +516,24 @@ claims on the primary machine.
 
 **Tasks:**
 
-- [ ] Close non-essential apps.
-- [ ] Pre-cache sudo credentials with `sudo -v`.
-- [ ] Export `PYTORCH_ENABLE_MPS_FALLBACK=1` in the shell before any Config D
+- [x] Close non-essential apps.
+- [x] Pre-cache sudo credentials with `sudo -v`.
+- [x] Export `PYTORCH_ENABLE_MPS_FALLBACK=1` in the shell before any Config D
       run.
-- [ ] Run `prepare-inputs` if the input manifest does not already exist.
-- [ ] Verify all required artifacts are present on the M2 Ultra. On this machine,
+- [x] Run `prepare-inputs` if the input manifest does not already exist.
+- [x] Verify all required artifacts are present on the M2 Ultra. On this machine,
       `HybridTTSPipeline` auto-discovers `coreml/kokoro_duration.mlpackage` and
       the HAR-post buckets from the repo checkout. The decoder-only control
       artifact at `outputs/bakeoff/models/` is created by Phase 2. Phase 4
       lists explicit copy paths because the M1 Mini may not have the full repo.
-- [ ] Run the main benchmark:
+- [x] Run the main benchmark:
 
 ```bash
-python scripts/bakeoff_harness.py run --configs a,b,c,d,e --iterations 5 --order-seed 0
+PYTORCH_ENABLE_MPS_FALLBACK=1 python scripts/bakeoff_harness.py run --configs a,b,c,d,e --iterations 5 --order-seed 0 --machine-id m2_ultra
 ```
 
+      100 records collected, all status=ok. Median RTFs: A=0.055, B=0.042,
+      C=0.048, D=0.082, E=0.124.
 - [ ] Run telemetry loops for Gate 1 on the frozen `long` input.
       **Sync protocol:** Start `powermetrics` (terminal A) first and wait 3–5
       seconds for it to begin sampling, then start the inference loop
@@ -596,7 +598,7 @@ python scripts/bakeoff_harness.py telemetry-loop --config bcpu --input long --se
       Bcpu runs as an ad-hoc telemetry-only diagnostic **outside** the
       counterbalanced `run` matrix; it is never part of the five-config benchmark
       order.
-- [ ] Sanity-check the results:
+- [x] Sanity-check the results:
   - no negative times
   - no NaN RTF values
   - canonical durations match the input manifest
