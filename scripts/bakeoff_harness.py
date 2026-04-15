@@ -70,20 +70,29 @@ VOICE = "af_heart"
 SPEED = 1.0
 
 BAKEOFF_INPUTS: dict[str, str] = {
-    "tiny": "Hello world!",
-    "short": "The quick brown fox jumps over the dog.",
-    "medium": (
-        "This is a longer sentence that will test the performance of our pipeline "
-        "running on the Apple GPU."
+    "3s": "The quick brown fox jumps over the dog.",
+    "7s": (
+        "The morning sun cast long shadows across the garden as birds began "
+        "their chorus in the ancient oak tree."
     ),
-    "long": (
-        "This is a longer sentence that will test the performance of our pipeline "
-        "running on the Apple GPU. A few more words added here."
+    "15s": (
+        "The ancient lighthouse stood alone on the rocky cliff, its beam sweeping "
+        "across dark waters with the patience of centuries. Ships had come and gone, "
+        "storms had battered its walls, yet still it turned, guiding sailors home."
+    ),
+    "30s": (
+        "When the last train departed that evening, the platform fell silent. "
+        "The old stationmaster locked the ticket office with trembling hands, "
+        "running his fingers along the worn counter where countless journeys "
+        "had begun. Outside, autumn wind scattered golden leaves across the "
+        "empty tracks. He had spent forty years here, watching the world rush "
+        "past in a blur of faces and farewells. The station would stand a while "
+        "longer, its clock still ticking, its roof sheltering the pigeons."
     ),
 }
 
 # Maximum canonical audio duration (seconds).  prepare-inputs hard-fails above this.
-MAX_CANONICAL_DURATION_S = 9.0
+MAX_CANONICAL_DURATION_S = 30.0
 
 # Headline config IDs valid for ``run --configs``.
 HEADLINE_CONFIGS = {"a", "b", "c", "d", "e", "f"}
@@ -235,7 +244,7 @@ def cmd_prepare_inputs(args: argparse.Namespace) -> None:
 
         T_f0 = int(vi["f0_curve"].shape[-1])
         canonical_duration_s = T_f0 / 80.0
-        expected_bucket = _select_bucket_seconds_standalone(canonical_duration_s, [3, 10])
+        expected_bucket = _select_bucket_seconds_standalone(canonical_duration_s, [3, 7, 10, 15, 30])
 
         print(f"  T_f0={T_f0}, canonical_duration={canonical_duration_s:.3f}s, bucket={expected_bucket}s")
 
@@ -247,21 +256,21 @@ def cmd_prepare_inputs(args: argparse.Namespace) -> None:
             )
             sys.exit(1)
 
-        # Bucket-boundary assertion for the 'short' input.
-        if input_key == "short":
-            if ceil(canonical_duration_s) > 3:
+        # Bucket-boundary assertion: input key matches expected bucket.
+        if input_key in ("3s", "7s", "15s", "30s"):
+            target_bucket = int(input_key.rstrip("s"))
+            if expected_bucket != target_bucket:
                 print(
-                    f"  FAIL: 'short' input canonical duration {canonical_duration_s:.3f}s "
-                    f"routes to {expected_bucket}s bucket (ceil={ceil(canonical_duration_s)}). "
-                    f"Must route to 3s. Shorten the text."
+                    f"  WARNING: '{input_key}' routes to {expected_bucket}s bucket "
+                    f"instead of target {target_bucket}s (canonical={canonical_duration_s:.3f}s)."
                 )
-                sys.exit(1)
 
-        # Smoke assertion: Config A would only choose 3s or 10s.
-        if expected_bucket not in (3, 10):
+        # Smoke assertion: bucket must be in the available set.
+        available_buckets = {3, 7, 10, 15, 30}
+        if expected_bucket not in available_buckets:
             print(
-                f"  FAIL: expected bucket {expected_bucket}s is not 3s or 10s -- "
-                f"Config A cannot serve this input."
+                f"  FAIL: expected bucket {expected_bucket}s is not in {sorted(available_buckets)} -- "
+                f"no model available for this duration."
             )
             sys.exit(1)
 

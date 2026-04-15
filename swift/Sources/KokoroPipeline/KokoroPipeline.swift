@@ -48,7 +48,12 @@ public enum PipelineConstants {
     /// Derived from bucket geometry: full_f0_len = bucket_sec * 24000 / 300,
     /// then F0Ntrain's 2× upsample means T_frames = full_f0_len / 2.
     /// Single source of truth — used by both init() and synthesize().
-    public static let tFramesForBucket: [Int: Int] = [3: 120, 10: 400, 45: 1800]
+    public static let tFramesForBucket: [Int: Int] = [
+        3: 120, 7: 560, 10: 400, 15: 1200, 30: 2400, 45: 1800,
+    ]
+
+    /// Duration model enumerated token sizes. Caller pads to nearest.
+    public static let durationTokenSizes: [Int] = [32, 64, 128, 256, 512]
 }
 
 // MARK: - Stage Timing

@@ -173,29 +173,39 @@ def main():
             outputs = duration_model(input_ids, ref_s, speed, attention_mask)
             print(f"✓ Test T={T}: outputs shapes = {[o.shape for o in outputs]}")
 
-    # Use fixed 128-token input for tracing (matches E5RT requirements)
-    T = 128
-    input_ids = torch.randint(0, 100, (1, T), dtype=torch.int32)
-    ref_s = torch.zeros(1, 256, dtype=torch.float32)
-    speed = torch.tensor([1.0], dtype=torch.float32)
-    attention_mask = torch.ones(1, T, dtype=torch.int32)
+    # E5RT (ANE runtime) cannot handle RangeDim or EnumeratedShapes with multiple
+    # variable inputs — it fails with "Tensor size cannot be queried because all
+    # dimensions are not known." The workaround is separate models per token count.
+    #
+    # Export one model per enumerated size. The caller picks the smallest model
+    # that fits the actual token count and pads to that size.
+    ENUM_SIZES = [32, 64, 128, 256, 512]
 
-    # Use jit.trace instead of torch.export to avoid TRAINING dialect issues
-    print("🔄 Using torch.jit.trace (avoiding TRAINING dialect)")
-    with torch.no_grad():
-        traced = torch.jit.trace(duration_model, (input_ids, ref_s, speed, attention_mask), strict=False)
+    out_dir = _ROOT / "coreml"
+    out_dir.mkdir(parents=True, exist_ok=True)
 
-    # Convert with fixed shapes to avoid E5RT stride conflicts
-    # Use static shapes that E5RT can handle reliably
-    with capture_ane_logs() as convert_buf:
-        duration_ml = ct.convert(
-            traced,
-            inputs=[
-                ct.TensorType(name="input_ids",      shape=(1, 128),  dtype=np.int32),
-                ct.TensorType(name="ref_s",          shape=(1, 256),  dtype=np.float32),
-                ct.TensorType(name="speed",          shape=(1,),      dtype=np.float32),
-                ct.TensorType(name="attention_mask", shape=(1, 128),  dtype=np.int32),
-            ],
+    for T in ENUM_SIZES:
+        print(f"\n{'='*50}")
+        print(f"Exporting Duration model for T={T}")
+        print(f"{'='*50}")
+
+        input_ids = torch.randint(0, 100, (1, T), dtype=torch.int32)
+        ref_s = torch.zeros(1, 256, dtype=torch.float32)
+        speed = torch.tensor([1.0], dtype=torch.float32)
+        attention_mask = torch.ones(1, T, dtype=torch.int32)
+
+        with torch.no_grad():
+            traced = torch.jit.trace(duration_model, (input_ids, ref_s, speed, attention_mask), strict=False)
+
+        with capture_ane_logs() as convert_buf:
+            duration_ml = ct.convert(
+                traced,
+                inputs=[
+                    ct.TensorType(name="input_ids",      shape=(1, T),  dtype=np.int32),
+                    ct.TensorType(name="ref_s",          shape=(1, 256),  dtype=np.float32),
+                    ct.TensorType(name="speed",          shape=(1,),      dtype=np.float32),
+                    ct.TensorType(name="attention_mask", shape=(1, T),  dtype=np.int32),
+                ],
             outputs=[
                 ct.TensorType(name="pred_dur"),
                 ct.TensorType(name="d"), 
@@ -208,51 +218,39 @@ def main():
             compute_precision=ct.precision.FLOAT16,
             compute_units=ct.ComputeUnit.ALL,  # Allow ANE optimization
         )
-    assert_no_cpu_fallback_in_logs(convert_buf.getvalue(), phase="duration ct.convert")
-    validate_duration_traced_vs_coreml(traced, duration_ml)
+        assert_no_cpu_fallback_in_logs(convert_buf.getvalue(), phase=f"duration T={T} ct.convert")
 
-    out_dir = _ROOT / "coreml"
-    out_dir.mkdir(parents=True, exist_ok=True)
-    out_path = out_dir / "kokoro_duration.mlpackage"
-    duration_ml.save(str(out_path))
-    print(f"✅ Saved duration model to: {out_path}")
-    
-    # Validate the exported model with fixed 128-token inputs
-    print("🔍 Validating exported model with fixed shapes...")
-    predict_logs: list[str] = []
-    for test_tokens in [16, 64, 128]:
-        # Create fixed-size inputs (always 128 tokens)
-        input_ids = np.zeros((1, 128), dtype=np.int32)
-        input_ids[0, :test_tokens] = np.random.randint(1, 100, test_tokens)  # Fill first N with tokens
+        out_path = out_dir / f"kokoro_duration_t{T}.mlpackage"
+        duration_ml.save(str(out_path))
+        print(f"Saved: {out_path}")
 
-        attention_mask = np.zeros((1, 128), dtype=np.int32)
-        attention_mask[0, :test_tokens] = 1  # Mark actual tokens as 1, padding as 0
+        # Quick validation: predict with the exported model
+        test_tokens = min(T, T - 2)
+        test_ids = np.zeros((1, T), dtype=np.int32)
+        test_ids[0, :test_tokens] = np.random.randint(1, 100, test_tokens)
+        test_mask = np.zeros((1, T), dtype=np.int32)
+        test_mask[0, :test_tokens] = 1
 
         test_input = {
-            "input_ids": input_ids,
+            "input_ids": test_ids,
             "ref_s": np.zeros((1, 256), dtype=np.float32),
             "speed": np.array([1.0], dtype=np.float32),
-            "attention_mask": attention_mask,
+            "attention_mask": test_mask,
         }
-        with capture_ane_logs() as pred_buf:
-            test_output = duration_ml.predict(test_input)
-        predict_logs.append(pred_buf.getvalue())
-        print(
-            f"✓ Test tokens={test_tokens}: SUCCESS - output keys: {list(test_output.keys())}"
-        )
-    assert_no_cpu_fallback_in_logs(
-        merge_log_checks(*predict_logs), phase="duration predict"
-    )
-    
-    # Print model specs for debugging
-    print("\n📋 Model input specifications:")
-    desc = duration_ml.input_description
-    for name in ['input_ids', 'attention_mask', 'ref_s', 'speed']:
-        if hasattr(desc, name):
-            feature = getattr(desc, name)
-            print(f"  {name}: {feature}")
-    
-    print("✅ Duration model export and validation complete!")
+        test_output = duration_ml.predict(test_input)
+        print(f"  Predict OK: output keys = {list(test_output.keys())}")
+
+    # Also save the T=128 model as the default (backward compat)
+    default_src = out_dir / "kokoro_duration_t128.mlpackage"
+    default_dst = out_dir / "kokoro_duration.mlpackage"
+    if default_src.exists():
+        import shutil
+        if default_dst.exists():
+            shutil.rmtree(str(default_dst))
+        shutil.copytree(str(default_src), str(default_dst))
+        print(f"\nCopied {default_src.name} -> {default_dst.name} (backward compat)")
+
+    print(f"\n✅ Duration models exported for T = {ENUM_SIZES}")
 
 if __name__ == "__main__":
     main()

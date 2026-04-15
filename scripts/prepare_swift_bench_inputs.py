@@ -21,18 +21,28 @@ import torch
 _ROOT = Path(__file__).resolve().parent.parent
 
 BAKEOFF_INPUTS = {
-    "tiny": "Hello world!",
-    "short": "The quick brown fox jumps over the dog.",
-    "medium": (
-        "This is a longer sentence designed to test the performance "
-        "of our text to speech system running on the Apple GPU."
+    "3s": "The quick brown fox jumps over the dog.",
+    "7s": (
+        "The morning sun cast long shadows across the garden as birds began "
+        "their chorus in the ancient oak tree."
     ),
-    "long": (
-        "This is a longer sentence designed to test the performance "
-        "of our text to speech system running on modern Apple Silicon "
-        "hardware. A few more words added here."
+    "15s": (
+        "The ancient lighthouse stood alone on the rocky cliff, its beam sweeping "
+        "across dark waters with the patience of centuries. Ships had come and gone, "
+        "storms had battered its walls, yet still it turned, guiding sailors home."
+    ),
+    "30s": (
+        "When the last train departed that evening, the platform fell silent. "
+        "The old stationmaster locked the ticket office with trembling hands, "
+        "running his fingers along the worn counter where countless journeys "
+        "had begun. Outside, autumn wind scattered golden leaves across the "
+        "empty tracks. He had spent forty years here, watching the world rush "
+        "past in a blur of faces and farewells. The station would stand a while "
+        "longer, its clock still ticking, its roof sheltering the pigeons."
     ),
 }
+# Duration model enumerated sizes — pad tokens to nearest.
+ENUM_SIZES = [32, 64, 128, 256, 512]
 VOICE = "af_heart"
 SPEED = 1.0
 
@@ -77,26 +87,21 @@ def main():
         # Get voice embedding
         ref_s = voice_embedding_for_phoneme_string(voice_pack, phonemes)
 
-        # Build input IDs (padded to 128)
+        # Build input IDs
         input_ids = list(filter(lambda i: i is not None,
                                map(lambda p: kmodel.vocab.get(p), phonemes)))
         input_ids = [0] + input_ids + [0]  # BOS/EOS
 
-        # Pad to 128
-        padded_ids = input_ids[:128] + [0] * max(0, 128 - len(input_ids))
-        attention_mask = [1] * min(len(input_ids), 128) + [0] * max(0, 128 - len(input_ids))
+        # Pad to nearest enumerated size
+        enum_T = next((s for s in ENUM_SIZES if s >= len(input_ids)), ENUM_SIZES[-1])
+        padded_ids = input_ids[:enum_T] + [0] * max(0, enum_T - len(input_ids))
+        attention_mask = [1] * min(len(input_ids), enum_T) + [0] * max(0, enum_T - len(input_ids))
 
         ref_s_list = ref_s.cpu().numpy().flatten().tolist()
 
-        # Get canonical duration from the bakeoff manifest if available
-        manifest_path = _ROOT / "outputs" / "bakeoff" / "input_manifest.json"
+        # Compute canonical duration via extract_vocoder_inputs (ground truth)
         canonical_dur = None
-        if manifest_path.exists():
-            manifest = json.loads(manifest_path.read_text())
-            if key in manifest.get("inputs", {}):
-                canonical_dur = manifest["inputs"][key].get("canonical_duration_s")
-
-        # If no manifest, compute from extract_vocoder_inputs
+        # Try the bakeoff manifest first
         if canonical_dur is None:
             from kokoro.coreml_pipeline import HybridTTSPipeline
             pipe = HybridTTSPipeline()

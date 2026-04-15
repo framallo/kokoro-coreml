@@ -98,16 +98,27 @@ func main() throws {
     let config = MLModelConfiguration()
     config.computeUnits = .all
 
-    // Duration model
-    fputs("Loading models...\n", stderr)
-    let durURL = modelsURL.appendingPathComponent("kokoro_duration.mlpackage")
-    let durCompiled = try MLModel.compileModel(at: durURL)
-    let durationModel = try MLModel(contentsOf: durCompiled, configuration: config)
+    // Pick the smallest Duration model enumeration that fits the token count.
+    // Duration models are exported per size: kokoro_duration_t{32,64,128,256,512}.mlpackage
+    let enumSizes = [32, 64, 128, 256, 512]
+    let actualTokens = benchInput.num_tokens
+    guard let T = enumSizes.first(where: { $0 >= actualTokens }) else {
+        fputs("Token count \(actualTokens) exceeds max enumeration 512\n", stderr)
+        exit(1)
+    }
 
-    // Determine bucket from input length
-    // We need to run duration model first to get pred_dur, then select bucket
-    // For warmup and bucket selection, do a quick duration prediction
-    let T = 128
+    fputs("Loading models (duration T=\(T))...\n", stderr)
+    let durURL = modelsURL.appendingPathComponent("kokoro_duration_t\(T).mlpackage")
+    if !FileManager.default.fileExists(atPath: durURL.path) {
+        // Fall back to default (backward compat)
+        fputs("  Duration T=\(T) not found, trying default\n", stderr)
+    }
+    let durActualURL = FileManager.default.fileExists(atPath: durURL.path)
+        ? durURL
+        : modelsURL.appendingPathComponent("kokoro_duration.mlpackage")
+    let durationModel = try MLModel(contentsOf: try MLModel.compileModel(at: durActualURL), configuration: config)
+
+    // Build duration input at the selected T
     let idsArray = try MLMultiArray(shape: [1, NSNumber(value: T)], dataType: .int32)
     let maskArray = try MLMultiArray(shape: [1, NSNumber(value: T)], dataType: .int32)
     let refSArray = try MLMultiArray(shape: [1, 256], dataType: .float32)
@@ -144,13 +155,14 @@ func main() throws {
     for j in 0..<tokenCount {
         totalFrames += max(1, Int(round(predDurPtr[j])))
     }
-    // Use canonical duration from manifest for bucket selection.
-    // The model's pred_dur includes padding tokens (clamped to min=1), inflating
-    // the frame count. The Python pipeline uses T_f0 / 80.0 from actual vocoder inputs.
+    // Use canonical duration from manifest for bucket selection
     let canonicalDurForBucket = benchInput.canonical_duration_s ?? (Double(totalFrames) / 80.0)
-    let bucketSec = Int(ceil(canonicalDurForBucket)) <= 3 ? 3 : 10
+    // Select smallest bucket >= ceil(canonical duration)
+    let availableBuckets = [3, 7, 10, 15, 30]
+    let bucketThreshold = Int(ceil(canonicalDurForBucket))
+    let bucketSec = availableBuckets.first(where: { $0 >= bucketThreshold }) ?? availableBuckets.last!
 
-    fputs("  Input: \(inputKey), tokens: \(benchInput.num_tokens), frames: \(totalFrames), canonical=\(canonicalDurForBucket)s, bucket: \(bucketSec)s\n", stderr)
+    fputs("  Input: \(inputKey), tokens: \(actualTokens)/\(T), canonical=\(String(format: "%.1f", canonicalDurForBucket))s, bucket: \(bucketSec)s\n", stderr)
 
     // Load bucket-specific models
     let tFrames = bucketSec == 3 ? 120 : 400
