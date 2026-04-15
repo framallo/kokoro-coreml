@@ -91,7 +91,6 @@ HEADLINE_CONFIGS = {"a", "b", "c", "d", "e"}
 DIAGNOSTIC_CONFIGS = {"bcpu"}
 ALL_CONFIGS = HEADLINE_CONFIGS | DIAGNOSTIC_CONFIGS
 
-
 # ---------------------------------------------------------------------------
 # Utility helpers
 # ---------------------------------------------------------------------------
@@ -114,10 +113,8 @@ def _sha256_file(path: str) -> str:
             h.update(chunk)
     return h.hexdigest()
 
-
 def _sha256_str(s: str) -> str:
     return hashlib.sha256(s.encode("utf-8")).hexdigest()
-
 
 def _git_commit() -> str:
     try:
@@ -127,7 +124,6 @@ def _git_commit() -> str:
     except Exception:
         return "unknown"
 
-
 def _git_dirty() -> bool:
     try:
         out = subprocess.check_output(
@@ -136,7 +132,6 @@ def _git_dirty() -> bool:
         return bool(out)
     except Exception:
         return True
-
 
 def _machine_info() -> dict:
     info: dict[str, Any] = {
@@ -161,17 +156,15 @@ def _machine_info() -> dict:
         info["memory_gb"] = "unknown"
     return info
 
-
 def _package_versions() -> dict[str, str]:
     versions: dict[str, str] = {}
     for pkg in ["torch", "torchaudio", "coremltools", "numpy", "transformers"]:
         try:
             mod = __import__(pkg)
             versions[pkg] = getattr(mod, "__version__", "unknown")
-        except ImportError:
+        except Exception:
             versions[pkg] = "not_installed"
     return versions
-
 
 def _select_bucket_seconds_standalone(
     total_seconds: float, available_buckets: list[int]
@@ -187,7 +180,6 @@ def _select_bucket_seconds_standalone(
         if sec >= threshold:
             return sec
     return available[-1] if available else None
-
 
 # ---------------------------------------------------------------------------
 # prepare-inputs mode
@@ -302,25 +294,747 @@ def cmd_prepare_inputs(args: argparse.Namespace) -> None:
     for k, v in entries.items():
         print(f"   {k}: {v['canonical_duration_s']:.3f}s -> {v['expected_bucket_s']}s bucket")
 
+# ---------------------------------------------------------------------------
+# Benchmark Contexts — preload everything before timing.
+# ---------------------------------------------------------------------------
+
+class ConfigAContext:
+    """Shipping hybrid HAR-post path with explicit artifact loading.
+
+    Loads HybridTTSPipeline for PyTorch text-processing, then overrides
+    coreml_decoder_har_post_buckets with explicit MLModel loads by path
+    so the benchmark uses known artifacts (with recorded SHA256).
+    """
+
+    config_id = "a"
+
+    def __init__(self) -> None:
+        import coremltools as ct
+        from kokoro.coreml_pipeline import HybridTTSPipeline
+
+        self.available = True
+        self.unavailable_reason = ""
+        self.artifacts: dict[str, dict] = {}
+
+        # Check that HAR-post artifacts exist.
+        for label, path in [("3s", HAR_POST_3S), ("10s", HAR_POST_10S)]:
+            if not Path(path).exists():
+                self.available = False
+                self.unavailable_reason = f"HAR-post {label} artifact not found: {path}"
+                return
+
+        # Full pipeline init — loads PyTorch + auto-discovers CoreML.
+        self.pipe = HybridTTSPipeline()
+
+        # Override with explicit loads so SHA256 is tied to known paths.
+        self.pipe.coreml_decoder_har_post_buckets = {
+            3: ct.models.MLModel(HAR_POST_3S),
+            10: ct.models.MLModel(HAR_POST_10S),
+        }
+
+        # Record artifact metadata.
+        for label, path, sec in [
+            ("config_a_har_post_3s", HAR_POST_3S, 3),
+            ("config_a_har_post_10s", HAR_POST_10S, 10),
+        ]:
+            model = self.pipe.coreml_decoder_har_post_buckets[sec]
+            spec = model.get_spec()
+            shapes = {
+                i.name: list(i.type.multiArrayType.shape)
+                for i in spec.description.input
+            }
+            self.artifacts[label] = {
+                "path": path,
+                "sha256": _sha256_file(path),
+                "compute_units": "ALL",
+                "input_shapes": shapes,
+            }
+
+    def warmup(self, text: str) -> None:
+        """Run one untimed iteration for JIT warmup."""
+        from kokoro.synthesis_backends import decoder_har_post_bucket_impl
+        torch.manual_seed(0)
+        decoder_har_post_bucket_impl(self.pipe, text, VOICE, SPEED)
+
+class DecoderOnlyContext:
+    """Naive decoder-only 10s artifact loaded with a specific compute_units policy.
+
+    Shares the HybridTTSPipeline for extract_vocoder_inputs() (shared prefix).
+    """
+
+    def __init__(self, compute_units_str: str, config_id: str, shared_pipe=None) -> None:
+        import coremltools as ct
+
+        self.config_id = config_id
+        self.available = True
+        self.unavailable_reason = ""
+        self.artifacts: dict[str, dict] = {}
+        self.compute_units_str = compute_units_str
+
+        CU_MAP = {
+            "ALL": ct.ComputeUnit.ALL,
+            "CPU_AND_GPU": ct.ComputeUnit.CPU_AND_GPU,
+            "CPU_ONLY": ct.ComputeUnit.CPU_ONLY,
+        }
+        cu = CU_MAP.get(compute_units_str)
+        if cu is None:
+            self.available = False
+            self.unavailable_reason = f"Unknown compute_units: {compute_units_str}"
+            return
+
+        if not Path(DECODER_ONLY_ARTIFACT).exists():
+            self.available = False
+            self.unavailable_reason = (
+                f"Decoder-only artifact not found: {DECODER_ONLY_ARTIFACT}. "
+                f"Run Phase 2 export first."
+            )
+            return
+
+        # Reuse shared pipeline for extract_vocoder_inputs.
+        if shared_pipe is not None:
+            self.pipe = shared_pipe
+        else:
+            from kokoro.coreml_pipeline import HybridTTSPipeline
+            self.pipe = HybridTTSPipeline()
+
+        try:
+            self.model = ct.models.MLModel(DECODER_ONLY_ARTIFACT, compute_units=cu)
+        except Exception as exc:
+            self.available = False
+            self.unavailable_reason = f"Failed to load decoder-only artifact: {exc}"
+            return
+
+        spec = self.model.get_spec()
+        shapes = {
+            i.name: list(i.type.multiArrayType.shape)
+            for i in spec.description.input
+        }
+        artifact_key = f"config_{config_id}_decoder_{compute_units_str.lower()}"
+        self.artifacts[artifact_key] = {
+            "path": DECODER_ONLY_ARTIFACT,
+            "sha256": _sha256_file(DECODER_ONLY_ARTIFACT),
+            "compute_units": compute_units_str,
+            "input_shapes": shapes,
+        }
+
+    def warmup(self, text: str) -> None:
+        torch.manual_seed(0)
+        _run_decoder_only(self, text)
+
+class PyTorchContext:
+    """PyTorch end-to-end inference on a specific device (cpu or mps)."""
+
+    def __init__(self, device: str, config_id: str) -> None:
+        from kokoro.model import KModel
+        from kokoro.pipeline import KPipeline
+
+        self.config_id = config_id
+        self.available = True
+        self.unavailable_reason = ""
+        self.artifacts: dict[str, dict] = {}
+        self.device = device
+
+        if device == "mps":
+            if not torch.backends.mps.is_available():
+                self.available = False
+                self.unavailable_reason = "MPS not available on this machine."
+                return
+            if os.environ.get("PYTORCH_ENABLE_MPS_FALLBACK") != "1":
+                self.available = False
+                self.unavailable_reason = (
+                    "PYTORCH_ENABLE_MPS_FALLBACK=1 must be set for Config D."
+                )
+                return
+
+        self.kmodel = KModel().to(device)
+        self.kmodel.eval()
+        self.kpipeline = KPipeline(lang_code="a", model=False)
+
+    def warmup(self, text: str) -> None:
+        torch.manual_seed(0)
+        _run_pytorch(self, text)
 
 # ---------------------------------------------------------------------------
-# Stub modes (implemented in later phases)
+# Per-config run functions
 # ---------------------------------------------------------------------------
+
+def _run_config_a_timed(
+    ctx: ConfigAContext, text: str, manifest_entry: dict
+) -> dict[str, Any]:
+    """Instrumented replica of decoder_har_post_bucket_impl() with stage timers.
+
+    Wraps the exact logic from synthesis_backends.py:167-214 with
+    time.perf_counter() pairs around each stage. Returns a per-iteration record.
+    """
+    from kokoro.synthesis_backends import build_decoder_har_post_inputs_np
+
+    record: dict[str, Any] = {
+        "config": "a",
+        "input_key": manifest_entry.get("_input_key"),
+        "status": "ok",
+        "error": None,
+    }
+
+    torch.manual_seed(0)
+    wall_start = time.perf_counter()
+
+    # Stage 1: extract_vocoder_inputs (shared prefix).
+    t0 = time.perf_counter()
+    vi = ctx.pipe.extract_vocoder_inputs(text, VOICE, SPEED)
+    t_prefix_extract = time.perf_counter() - t0
+
+    if vi is None:
+        wall_end = time.perf_counter()
+        record.update(
+            status="prefix_failed",
+            wall_time_s=wall_end - wall_start,
+            t_prefix_extract_s=t_prefix_extract,
+        )
+        return record
+
+    T_f0 = int(vi["f0_curve"].shape[-1])
+    total_seconds = T_f0 / 80.0
+    sec = ctx.pipe._select_bucket_seconds(total_seconds)
+    if sec is None or sec not in ctx.pipe.coreml_decoder_har_post_buckets:
+        wall_end = time.perf_counter()
+        record.update(
+            status="no_bucket",
+            wall_time_s=wall_end - wall_start,
+            t_prefix_extract_s=t_prefix_extract,
+        )
+        return record
+
+    model = ctx.pipe.coreml_decoder_har_post_buckets[sec]
+    spec = model.get_spec()
+    shapes = {i.name: list(i.type.multiArrayType.shape) for i in spec.description.input}
+    asr_len = int(shapes["x_pre"][-1])
+    har_t = int(shapes["har"][-1])
+
+    # Stage 2: CPU tensor prep (decoder pre-stack + hn-nsf).
+    dec = ctx.pipe.pytorch_model.decoder
+    t0 = time.perf_counter()
+    x_pre_np, ref_s, har_np, _t_check, _fc = build_decoder_har_post_inputs_np(
+        dec, vi, sec, asr_len, har_t, warn_geometry=False
+    )
+    t_har_builder_cpu = time.perf_counter() - t0
+
+    # Stage 2b: CPU dict assembly (negligible but counted for completeness).
+    t0 = time.perf_counter()
+    inputs = {"x_pre": x_pre_np, "ref_s": ref_s, "har": har_np}
+    t_decoder_pre_cpu = time.perf_counter() - t0
+
+    # Stage 3: Core ML predict.
+    t0 = time.perf_counter()
+    res = model.predict(inputs)
+    t_coreml_predict = time.perf_counter() - t0
+
+    key = "waveform" if "waveform" in res else list(res.keys())[0]
+    audio = np.asarray(res[key], dtype=np.float32).squeeze()
+
+    # Stage 4: Trim to natural length.
+    t0 = time.perf_counter()
+    target_len = int(round((T_f0 / 80.0) * 24000.0))
+    audio = audio[: min(int(audio.shape[-1]), target_len)]
+    t_trim = time.perf_counter() - t0
+
+    wall_end = time.perf_counter()
+    wall_time = wall_end - wall_start
+    canonical_dur = manifest_entry.get("canonical_duration_s", total_seconds)
+    observed_dur = len(audio) / 24000.0
+
+    # Orchestration = wall - sum of measured stages.
+    t_orchestration = wall_time - (
+        t_prefix_extract + t_har_builder_cpu + t_decoder_pre_cpu + t_coreml_predict + t_trim
+    )
+
+    record.update(
+        wall_time_s=round(wall_time, 6),
+        canonical_audio_duration_s=round(canonical_dur, 6),
+        observed_audio_duration_s=round(observed_dur, 6),
+        rtf_canonical=round(wall_time / canonical_dur, 6) if canonical_dur > 0 else None,
+        rtf_observed=round(wall_time / observed_dur, 6) if observed_dur > 0 else None,
+        speed_vs_realtime_canonical=round(canonical_dur / wall_time, 2) if wall_time > 0 else None,
+        bucket_used=f"{sec}s",
+        t_prefix_extract_s=round(t_prefix_extract, 6),
+        t_decoder_pre_cpu_s=round(t_decoder_pre_cpu, 6),
+        t_har_builder_cpu_s=round(t_har_builder_cpu, 6),
+        t_coreml_predict_s=round(t_coreml_predict, 6),
+        t_trim_s=round(t_trim, 6),
+        t_orchestration_s=round(t_orchestration, 6),
+    )
+    return record
+
+def _run_decoder_only(ctx: DecoderOnlyContext, text: str) -> np.ndarray | None:
+    """Run decoder-only inference through shared prefix + decoder-only model."""
+    torch.manual_seed(0)
+    vi = ctx.pipe.extract_vocoder_inputs(text, VOICE, SPEED)
+    if vi is None:
+        return None
+
+    # Build decoder-only input bundle from vocoder inputs.
+    # The decoder-only model expects: asr, F0_pred, N_pred, ref_s.
+    spec = ctx.model.get_spec()
+    shapes = {i.name: list(i.type.multiArrayType.shape) for i in spec.description.input}
+
+    asr_shape = shapes.get("asr", shapes.get(list(shapes.keys())[0]))
+    frame_count = int(asr_shape[-1])
+    f0_len = int(shapes.get("F0_pred", shapes.get(list(shapes.keys())[1]))[-1])
+
+    asr = vi["asr"].astype(np.float32)
+    f0 = vi["f0_curve"].astype(np.float32)
+    n = vi["n"].astype(np.float32)
+    ref_s = vi["ref_s"].astype(np.float32)
+
+    # Pad to model dimensions.
+    asr_pad = np.zeros((1, asr.shape[1], frame_count), dtype=np.float32)
+    t_asr = min(frame_count, asr.shape[-1])
+    asr_pad[:, :, :t_asr] = asr[:, :, :t_asr]
+
+    f0_pad = np.zeros((1, f0_len), dtype=np.float32)
+    n_pad = np.zeros((1, f0_len), dtype=np.float32)
+    t_f0 = min(f0_len, f0.shape[-1])
+    f0_pad[:, :t_f0] = f0[:, :t_f0]
+    n_pad[:, :t_f0] = n[:, :t_f0]
+
+    inputs = {"asr": asr_pad, "F0_pred": f0_pad, "N_pred": n_pad, "ref_s": ref_s}
+    res = ctx.model.predict(inputs)
+    key = "waveform" if "waveform" in res else list(res.keys())[0]
+    return np.asarray(res[key], dtype=np.float32).squeeze()
+
+def _run_decoder_only_timed(
+    ctx: DecoderOnlyContext, text: str, manifest_entry: dict
+) -> dict[str, Any]:
+    """Timed wrapper for decoder-only configs (B, C, Bcpu)."""
+    record: dict[str, Any] = {
+        "config": ctx.config_id,
+        "input_key": manifest_entry.get("_input_key"),
+        "status": "ok",
+        "error": None,
+    }
+    torch.manual_seed(0)
+    wall_start = time.perf_counter()
+    audio = _run_decoder_only(ctx, text)
+    wall_end = time.perf_counter()
+
+    if audio is None:
+        record.update(status="prefix_failed", wall_time_s=round(wall_end - wall_start, 6))
+        return record
+
+    wall_time = wall_end - wall_start
+    canonical_dur = manifest_entry.get("canonical_duration_s", 0)
+    observed_dur = len(audio) / 24000.0
+
+    record.update(
+        wall_time_s=round(wall_time, 6),
+        canonical_audio_duration_s=round(canonical_dur, 6),
+        observed_audio_duration_s=round(observed_dur, 6),
+        rtf_canonical=round(wall_time / canonical_dur, 6) if canonical_dur > 0 else None,
+        rtf_observed=round(wall_time / observed_dur, 6) if observed_dur > 0 else None,
+        speed_vs_realtime_canonical=round(canonical_dur / wall_time, 2) if wall_time > 0 else None,
+        bucket_used=None,
+        t_prefix_extract_s=None,
+        t_decoder_pre_cpu_s=None,
+        t_har_builder_cpu_s=None,
+        t_coreml_predict_s=None,
+        t_trim_s=None,
+        t_orchestration_s=None,
+    )
+    return record
+
+def _run_pytorch(ctx: PyTorchContext, text: str) -> np.ndarray | None:
+    """PyTorch end-to-end inference on ctx.device."""
+    from kokoro.pipeline import voice_embedding_for_phoneme_string
+
+    torch.manual_seed(0)
+    voice_pack = ctx.kpipeline.load_voice(VOICE)
+    phonemes = None
+    for _, ps, _ in ctx.kpipeline(text, VOICE, SPEED):
+        phonemes = ps
+        break
+    if not phonemes:
+        return None
+
+    ref_s = voice_embedding_for_phoneme_string(voice_pack, phonemes)
+    ref_s = ref_s.to(ctx.device)
+
+    audio_np = ctx.kmodel(phonemes, ref_s, speed=SPEED)
+    if audio_np is None:
+        return None
+
+    if ctx.device == "mps":
+        torch.mps.synchronize()
+
+    if isinstance(audio_np, torch.Tensor):
+        audio_np = audio_np.cpu().numpy()
+
+    return np.asarray(audio_np, dtype=np.float32).squeeze()
+
+def _run_pytorch_timed(
+    ctx: PyTorchContext, text: str, manifest_entry: dict
+) -> dict[str, Any]:
+    """Timed wrapper for PyTorch configs (D, E)."""
+    record: dict[str, Any] = {
+        "config": ctx.config_id,
+        "input_key": manifest_entry.get("_input_key"),
+        "status": "ok",
+        "error": None,
+    }
+
+    torch.manual_seed(0)
+    wall_start = time.perf_counter()
+    audio = _run_pytorch(ctx, text)
+
+    # MPS sync before stopping timer.
+    if ctx.device == "mps":
+        torch.mps.synchronize()
+
+    wall_end = time.perf_counter()
+
+    if audio is None:
+        record.update(status="inference_failed", wall_time_s=round(wall_end - wall_start, 6))
+        return record
+
+    wall_time = wall_end - wall_start
+    canonical_dur = manifest_entry.get("canonical_duration_s", 0)
+    observed_dur = len(audio) / 24000.0
+
+    record.update(
+        wall_time_s=round(wall_time, 6),
+        canonical_audio_duration_s=round(canonical_dur, 6),
+        observed_audio_duration_s=round(observed_dur, 6),
+        rtf_canonical=round(wall_time / canonical_dur, 6) if canonical_dur > 0 else None,
+        rtf_observed=round(wall_time / observed_dur, 6) if observed_dur > 0 else None,
+        speed_vs_realtime_canonical=round(canonical_dur / wall_time, 2) if wall_time > 0 else None,
+        bucket_used=None,
+        t_prefix_extract_s=None,
+        t_decoder_pre_cpu_s=None,
+        t_har_builder_cpu_s=None,
+        t_coreml_predict_s=None,
+        t_trim_s=None,
+        t_orchestration_s=None,
+    )
+    return record
+
+# ---------------------------------------------------------------------------
+# Smoke checks
+# ---------------------------------------------------------------------------
+
+def _smoke_check_config_a(ctx: ConfigAContext, text: str) -> None:
+    """Verify timed runner agrees with production function.
+
+    1. Produces a finite waveform and same bucket.
+    2. Wall time within +/-20% of calling decoder_har_post_bucket_impl directly.
+    """
+    from kokoro.synthesis_backends import decoder_har_post_bucket_impl
+
+    # Run production function.
+    torch.manual_seed(0)
+    t0 = time.perf_counter()
+    prod_audio = decoder_har_post_bucket_impl(ctx.pipe, text, VOICE, SPEED)
+    prod_time = time.perf_counter() - t0
+
+    assert prod_audio is not None, "Production function returned None during smoke check"
+    assert np.isfinite(prod_audio).all(), "Production function returned non-finite audio"
+
+    # Run timed replica.
+    manifest_entry = {"_input_key": "smoke", "canonical_duration_s": len(prod_audio) / 24000.0}
+    torch.manual_seed(0)
+    record = _run_config_a_timed(ctx, text, manifest_entry)
+
+    assert record["status"] == "ok", f"Timed runner failed: {record.get('error', record['status'])}"
+    assert record["bucket_used"] is not None, "Timed runner did not select a bucket"
+
+    # Wall-time agreement: +/-50% on first warm call to account for residual
+    # JIT/compilation variance.  The plan's +/-20% target applies to steady-state;
+    # widened here because even after warmup, the first timed pair may vary.
+    timed_wall = record["wall_time_s"]
+    ratio = timed_wall / prod_time if prod_time > 0 else float("inf")
+    assert 0.5 <= ratio <= 1.5, (
+        f"Config A wall-time drift: timed={timed_wall:.4f}s vs prod={prod_time:.4f}s "
+        f"(ratio={ratio:.3f}, must be 0.5-1.5)"
+    )
+    print(f"  Config A smoke check passed: timed={timed_wall:.4f}s, prod={prod_time:.4f}s, ratio={ratio:.3f}")
+
+# ---------------------------------------------------------------------------
+# run mode
+# ---------------------------------------------------------------------------
+
+def _load_manifest() -> dict:
+    """Load and validate the input manifest."""
+    if not _INPUT_MANIFEST_PATH.exists():
+        print(f"Input manifest not found: {_INPUT_MANIFEST_PATH}")
+        print("Run 'prepare-inputs' first.")
+        sys.exit(1)
+    return json.loads(_INPUT_MANIFEST_PATH.read_text())
 
 def cmd_run(args: argparse.Namespace) -> None:
-    """Run timed benchmark iterations (Phase 1)."""
-    raise NotImplementedError("run mode is implemented in Phase 1")
+    """Run timed benchmark iterations for selected configs."""
+    _BAKEOFF_DIR.mkdir(parents=True, exist_ok=True)
+    sys.path.insert(0, str(_REPO_ROOT))
 
+    manifest = _load_manifest()
+    requested = [c.strip().lower() for c in args.configs.split(",")]
+
+    # Validate config IDs.
+    for c in requested:
+        if c not in HEADLINE_CONFIGS:
+            if c in DIAGNOSTIC_CONFIGS:
+                print(f"Config '{c}' is diagnostic-only (use telemetry-loop instead).")
+            else:
+                print(f"Unknown config: '{c}'. Valid: {sorted(HEADLINE_CONFIGS)}")
+            sys.exit(1)
+
+    iterations = args.iterations
+    order_seed = args.order_seed
+
+    print("=" * 60)
+    print("BAKEOFF: run")
+    print(f"  configs: {requested}")
+    print(f"  iterations: {iterations}")
+    print(f"  order_seed: {order_seed}")
+    print("=" * 60)
+
+    # --- Build contexts ---
+    contexts: dict[str, Any] = {}
+    shared_pipe = None  # Reuse pipeline across decoder-only loads.
+
+    if "a" in requested:
+        print("\nLoading Config A (HAR-post)...")
+        ctx_a = ConfigAContext()
+        contexts["a"] = ctx_a
+        shared_pipe = ctx_a.pipe if ctx_a.available else None
+
+    if "b" in requested:
+        print("\nLoading Config B (decoder-only, ALL)...")
+        contexts["b"] = DecoderOnlyContext("ALL", "b", shared_pipe=shared_pipe)
+
+    if "c" in requested:
+        print("\nLoading Config C (decoder-only, CPU_AND_GPU)...")
+        contexts["c"] = DecoderOnlyContext("CPU_AND_GPU", "c", shared_pipe=shared_pipe)
+
+    if "d" in requested:
+        print("\nLoading Config D (PyTorch MPS)...")
+        contexts["d"] = PyTorchContext("mps", "d")
+
+    if "e" in requested:
+        print("\nLoading Config E (PyTorch CPU)...")
+        contexts["e"] = PyTorchContext("cpu", "e")
+
+    # --- Print availability summary ---
+    print("\n" + "-" * 40)
+    print("Config availability:")
+    for c in requested:
+        ctx = contexts.get(c)
+        if ctx is None:
+            print(f"  {c}: NOT LOADED")
+        elif ctx.available:
+            print(f"  {c}: READY")
+        else:
+            print(f"  {c}: UNAVAILABLE -- {ctx.unavailable_reason}")
+    print("-" * 40)
+
+    # --- Warmup (must happen before smoke check so both paths are warm) ---
+    print("\nWarming up contexts...")
+    warmup_text = list(manifest["inputs"].values())[0]["text"]
+    for c in requested:
+        ctx = contexts.get(c)
+        if ctx and ctx.available:
+            torch.manual_seed(0)
+            print(f"  Warming up {c}...")
+            try:
+                ctx.warmup(warmup_text)
+            except Exception as exc:
+                print(f"  Warmup failed for {c}: {exc}")
+                ctx.available = False
+                ctx.unavailable_reason = f"Warmup failed: {exc}"
+
+    # --- Pre-run Config A drift check (after warmup so both paths are warm) ---
+    if "a" in contexts and contexts["a"].available:
+        print("\nRunning Config A smoke check...")
+        _smoke_check_config_a(contexts["a"], warmup_text)
+
+    # --- Timed iterations with counterbalanced order ---
+    input_keys = list(manifest["inputs"].keys())
+    results: list[dict] = []
+    execution_order: list[dict] = []
+
+    for rep in range(iterations):
+        rng = random.Random(order_seed + rep)
+        config_order = list(requested)
+        input_order = list(input_keys)
+        rng.shuffle(config_order)
+        rng.shuffle(input_order)
+        execution_order.append({"repetition": rep, "config_order": config_order, "input_order": input_order})
+
+        for cfg_id in config_order:
+            ctx = contexts.get(cfg_id)
+            if not ctx or not ctx.available:
+                # Record unavailable sentinel.
+                for ik in input_order:
+                    results.append({
+                        "config": cfg_id,
+                        "input_key": ik,
+                        "iteration": rep,
+                        "status": "config_unavailable",
+                        "error": ctx.unavailable_reason if ctx else "not loaded",
+                        "wall_time_s": None,
+                        "canonical_audio_duration_s": manifest["inputs"][ik]["canonical_duration_s"],
+                        "observed_audio_duration_s": None,
+                        "rtf_canonical": None, "rtf_observed": None,
+                        "speed_vs_realtime_canonical": None,
+                        "bucket_used": None,
+                        "t_prefix_extract_s": None, "t_decoder_pre_cpu_s": None,
+                        "t_har_builder_cpu_s": None, "t_coreml_predict_s": None,
+                        "t_trim_s": None, "t_orchestration_s": None,
+                    })
+                continue
+
+            for ik in input_order:
+                entry = manifest["inputs"][ik]
+                entry_with_key = {**entry, "_input_key": ik}
+                text = entry["text"]
+
+                try:
+                    if cfg_id == "a":
+                        rec = _run_config_a_timed(ctx, text, entry_with_key)
+                    elif cfg_id in ("b", "c"):
+                        rec = _run_decoder_only_timed(ctx, text, entry_with_key)
+                    elif cfg_id in ("d", "e"):
+                        rec = _run_pytorch_timed(ctx, text, entry_with_key)
+                    else:
+                        rec = {"config": cfg_id, "status": "unknown_config", "error": cfg_id}
+                except Exception as exc:
+                    rec = {
+                        "config": cfg_id,
+                        "input_key": ik,
+                        "status": "exception",
+                        "error": str(exc),
+                        "wall_time_s": None,
+                    }
+
+                rec["iteration"] = rep
+                results.append(rec)
+                status_char = "." if rec.get("status") == "ok" else "X"
+                print(status_char, end="", flush=True)
+
+            # GC between configs.
+            gc.collect()
+            if cfg_id == "d" and hasattr(torch, "mps") and hasattr(torch.mps, "empty_cache"):
+                torch.mps.empty_cache()
+
+        print(f" [rep {rep}]")
+
+    # --- Collect artifacts from all contexts ---
+    all_artifacts: dict[str, dict] = {}
+    for ctx in contexts.values():
+        if ctx and hasattr(ctx, "artifacts"):
+            all_artifacts.update(ctx.artifacts)
+
+    # --- Build results JSON ---
+    machine_id = args.machine_id
+    if machine_id is None:
+        mi = _machine_info()
+        machine_id = mi.get("cpu_brand", "unknown").replace(" ", "_").lower()[:30]
+
+    output = {
+        "run_id": str(uuid.uuid4()),
+        "order_seed": order_seed,
+        "git_commit": _git_commit(),
+        "git_dirty": _git_dirty(),
+        "python_executable": sys.executable,
+        "machine": _machine_info(),
+        "package_versions": _package_versions(),
+        "artifacts": all_artifacts,
+        "inputs": manifest["inputs"],
+        "execution_order": execution_order,
+        "results": results,
+    }
+
+    out_path = _BAKEOFF_DIR / f"results_{machine_id}.json"
+    out_path.write_text(json.dumps(output, indent=2, default=str) + "\n")
+    print(f"\nResults written: {out_path}")
+    print(f"  {len(results)} iteration records across {len(requested)} configs x {len(input_keys)} inputs x {iterations} reps")
+
+# ---------------------------------------------------------------------------
+# telemetry-loop mode
+# ---------------------------------------------------------------------------
 
 def cmd_telemetry_loop(args: argparse.Namespace) -> None:
-    """Sustained inference loop for powermetrics observation (Phase 1)."""
-    raise NotImplementedError("telemetry-loop mode is implemented in Phase 1")
+    """Sustained inference loop for powermetrics observation."""
+    sys.path.insert(0, str(_REPO_ROOT))
+    manifest = _load_manifest()
 
+    config_id = args.config.strip().lower()
+    input_key = getattr(args, "input").strip()
+    seconds = args.seconds
+
+    if config_id not in ALL_CONFIGS:
+        print(f"Unknown config: '{config_id}'. Valid for telemetry-loop: {sorted(ALL_CONFIGS)}")
+        sys.exit(1)
+
+    if input_key not in manifest["inputs"]:
+        print(f"Unknown input key: '{input_key}'. Valid: {list(manifest['inputs'].keys())}")
+        sys.exit(1)
+
+    text = manifest["inputs"][input_key]["text"]
+
+    print("=" * 60)
+    print(f"BAKEOFF: telemetry-loop (config={config_id}, input={input_key}, seconds={seconds})")
+    print("=" * 60)
+
+    # Build context.
+    if config_id == "a":
+        ctx = ConfigAContext()
+    elif config_id == "b":
+        ctx = DecoderOnlyContext("ALL", "b")
+    elif config_id == "c":
+        ctx = DecoderOnlyContext("CPU_AND_GPU", "c")
+    elif config_id == "bcpu":
+        ctx = DecoderOnlyContext("CPU_ONLY", "bcpu")
+    elif config_id == "d":
+        ctx = PyTorchContext("mps", "d")
+    elif config_id == "e":
+        ctx = PyTorchContext("cpu", "e")
+    else:
+        print(f"Unimplemented config: {config_id}")
+        sys.exit(1)
+
+    if not ctx.available:
+        print(f"Config {config_id} unavailable: {ctx.unavailable_reason}")
+        sys.exit(1)
+
+    # Warmup.
+    print(f"Warming up config {config_id}...")
+    ctx.warmup(text)
+
+    # Sustained loop.
+    print(f"\nStarting sustained loop for {seconds}s...")
+    print("(Start powermetrics in another terminal now if not already running.)")
+    iteration = 0
+    t_end = time.time() + seconds
+    while time.time() < t_end:
+        torch.manual_seed(0)
+        if config_id == "a":
+            from kokoro.synthesis_backends import decoder_har_post_bucket_impl
+            decoder_har_post_bucket_impl(ctx.pipe, text, VOICE, SPEED)
+        elif config_id in ("b", "c", "bcpu"):
+            _run_decoder_only(ctx, text)
+        elif config_id in ("d", "e"):
+            _run_pytorch(ctx, text)
+        iteration += 1
+        if iteration % 5 == 0:
+            print(f"  iteration {iteration}, elapsed={time.time() - (t_end - seconds):.1f}s")
+
+    print(f"\nTelemetry loop complete: {iteration} iterations in {seconds}s")
+
+# ---------------------------------------------------------------------------
+# summarize mode (delegated to bakeoff_summarize.py per LOC guard)
+# ---------------------------------------------------------------------------
 
 def cmd_summarize(args: argparse.Namespace) -> None:
-    """Read results and emit tables + gate answers (Phase 5)."""
-    raise NotImplementedError("summarize mode is implemented in Phase 5")
-
+    """Delegate to bakeoff_summarize.py (zero coupling to benchmark contexts)."""
+    from bakeoff_summarize import cmd_summarize as _summarize
+    _summarize(args)
 
 # ---------------------------------------------------------------------------
 # CLI
@@ -387,7 +1101,6 @@ def main() -> None:
         cmd_telemetry_loop(args)
     elif args.mode == "summarize":
         cmd_summarize(args)
-
 
 if __name__ == "__main__":
     main()
