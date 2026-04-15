@@ -184,23 +184,23 @@ Trim (Swift)
 **Tasks:**
 
 - [x] Create `swift/Package.swift` (done in Phase 1)
-- [ ] `swift/Sources/KokoroPipeline/KokoroPipeline.swift`:
-  - `init(modelsDirectory: URL)` — load Duration, F0Ntrain, GeneratorFromHar CoreML models
-  - `synthesize(inputIds: [Int32], attentionMask: [Int32], refS: MLMultiArray, speed: Float) -> [Float]`
-  - Stage timing using `ContinuousClock`
-- [ ] `swift/Sources/KokoroPipeline/AlignmentBuilder.swift`:
-  - Port `_build_alignment_matrix()` from `coreml_pipeline.py:336-362`
-  - `buildAlignmentMatrix(predDur: [Int], traceLength: Int, frameCount: Int) -> MLMultiArray`
-- [ ] `swift/Sources/KokoroPipeline/MLMultiArrayHelpers.swift`:
-  - Matrix multiply: en = d × alignment, asr = t_en × alignment (use `cblas_sgemm` via Accelerate)
-  - Zero-pad to bucket geometry
-  - Shape introspection from model spec
-- [ ] `swift/Sources/KokoroPipeline/BucketSelector.swift`:
-  - Port `_select_bucket_seconds()` logic
-- [ ] **DecoderPre bridge:** For the initial pipeline, call a Python subprocess (`uv run python scripts/decoder_pre_bridge.py`) or use a pre-computed x_pre tensor saved to disk for the benchmark inputs. The point is to get the end-to-end Swift pipeline working and measurable before tackling the AdaIN export fight.
-  - Create `scripts/decoder_pre_bridge.py`: takes asr/f0/n/ref_s as .npy, runs PyTorch decoder pre, writes x_pre as .npy
-  - Alternative: pre-compute and cache x_pre for the 4 bakeoff inputs
-- [ ] Integration: chain Duration → alignment → F0Ntrain → pad → DecoderPre (bridge) → hn-nsf → GeneratorFromHar → trim
+- [x] `swift/Sources/KokoroPipeline/KokoroPipeline.swift`:
+  - `KokoroPipeline.init(modelsDirectory:, buckets:, linearWeights:, linearBias:)` — loads Duration, F0Ntrain, GeneratorFromHar CoreML models
+  - `synthesize(inputIds:, attentionMask:, refS:, speed:, decoderPreKey:) -> SynthesisResult` — full 9-stage pipeline with stage timing
+  - `StageTimings` struct with per-stage and total/preDecoder computed properties
+  - `SynthesisResult` with audio, timings, bucket, audio duration
+  - DecoderPre bridge: `precomputedDecoderPre` dictionary loaded from disk
+- [x] `swift/Sources/KokoroPipeline/AlignmentBuilder.swift`:
+  - `buildAlignmentMatrix(predDur:, traceLength:, frameCount:) -> [Float]` — flat row-major one-hot matrix
+- [x] `swift/Sources/KokoroPipeline/MLMultiArrayHelpers.swift`:
+  - `matmul3D(a:, b:, M:, K:, N:)` using `cblas_sgemm` via Accelerate
+  - `zeroPad3D`, `zeroPad1D` for bucket geometry padding
+  - `makeZeroArray3D`, `makeZeroArray2D`, `copyInto` for MLMultiArray construction
+  - `inputShapes(from:)` for model spec introspection
+- [x] `swift/Sources/KokoroPipeline/BucketSelector.swift`:
+  - `selectBucket(totalSeconds:, availableBuckets:) -> Int?`
+- [x] **DecoderPre bridge:** `scripts/decoder_pre_bridge.py` pre-computes x_pre for all 4 bakeoff inputs. Outputs saved to `outputs/decoder_pre_bridge/{key}/x_pre.npy`. Bridge times: tiny=44.7ms, short=38.4ms, medium=91.7ms, long=103.8ms.
+- [x] Integration: KokoroPipeline.synthesize() chains all 9 stages. `swift build` clean (zero warnings). `swift test` 7 tests pass.
 
 **Verification:** `swift build` succeeds. `swift test` runs unit tests for alignment builder, hn-nsf, padding. Full chain produces audio matching Python pipeline (correlation > 0.95 on bakeoff inputs).
 
