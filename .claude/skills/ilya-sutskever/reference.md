@@ -1,0 +1,38 @@
+# kokoro-coreml reading list (persona + export work)
+
+Paths are **repo-root relative** (open from the `kokoro-coreml` checkout root).
+
+## Canonical persona and playbook
+
+- `CLAUDE.md` — Ilya persona, PyTorch → Core ML checklist, ANE layout, divide-and-conquer
+
+## Conversion and export
+
+- `README/Kokoro-to-CoreML-conversion.md`
+- `README/coreml-conversion-guide.md`
+- `README/learnings.md`
+- `README/problem-summary.md`
+
+## Apple silicon runtime and performance
+
+- `README/Guides/apple-silicon/CoreML-Compute-Unit-Scheduling-guide.md`
+- `README/Guides/apple-silicon/pytorch-mps.md`
+- `README/Guides/apple-silicon/HF-transformers-MPS-guide.md`
+- `README/Notes/performance-notes.md`
+- `README/Plans/ane-optimization-v1.md`
+
+## Experiments and comparisons
+
+- `README/Plans/kokoro-bakeoff-v2.md`
+- Other plans under `README/Plans/` as needed
+
+## Repo process (plan-driven work)
+
+- `README/Skills/plan-workflow-skills-guide.md`
+- `README/Skills/phase-audit-rubric.md`
+
+## Related skills (narrower charters)
+
+- `.claude/skills/audit/SKILL.md` — findings-first review; word **audit**
+- `.claude/skills/debug/SKILL.md` — systematic defect investigation; word **debug**
+- `.claude/skills/execute-plan/SKILL.md` — phased plan execution
