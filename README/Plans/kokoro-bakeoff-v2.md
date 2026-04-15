@@ -315,7 +315,7 @@ without truncation.
 
 **Tasks:**
 
-- [ ] Create `BAKEOFF_INPUTS` in `scripts/bakeoff_harness.py` with exactly four
+- [x] Create `BAKEOFF_INPUTS` in `scripts/bakeoff_harness.py` with exactly four
       named inputs:
   - `tiny` targeting `~1s`
   - `short` targeting `~3s` (must stay at or below `3.0s`; see bucket boundary assertion)
@@ -326,25 +326,25 @@ without truncation.
       for text selection — those texts were already tuned to hit similar
       duration targets. Adjust only if `prepare-inputs` shows a text violates
       the duration or bucket constraints.
-- [ ] Hardcode `VOICE = "af_heart"` and `SPEED = 1.0`.
-- [ ] Implement `prepare-inputs` mode:
+- [x] Hardcode `VOICE = "af_heart"` and `SPEED = 1.0`.
+- [x] Implement `prepare-inputs` mode:
   - instantiate a CPU benchmark context once
   - run each input once under Config E
   - hard-fail immediately if any input's `extract_vocoder_inputs()` returns
     `None` — a partial manifest is never written
   - write `outputs/bakeoff/input_manifest.json`
   - record canonical duration and expected Config A bucket
-- [ ] Hard-fail `prepare-inputs` if any canonical duration exceeds `9.0s`.
+- [x] Hard-fail `prepare-inputs` if any canonical duration exceeds `9.0s`.
       Shorten the offending text and rerun instead of accepting an input set
       that sits on the `10s` edge.
-- [ ] Add a bucket-boundary assertion: for the `short` input (targeting `~3s`),
+- [x] Add a bucket-boundary assertion: for the `short` input (targeting `~3s`),
       verify that `ceil(canonical_duration) <= 3` so it routes to the `3s`
       bucket. The bucket selection logic in `_select_bucket_seconds` uses
       `sec >= ceil(total_seconds)`, so an audio duration of `3.01s` routes to
       `10s`, not `3s`. If the `short` input drifts above `3.0s`, shorten its
       text. Record the expected bucket in the manifest using the same
       `_select_bucket_seconds` logic, not a hardcoded assumption.
-- [ ] Add a smoke assertion that Config A would choose only `3s` or `10s` for
+- [x] Add a smoke assertion that Config A would choose only `3s` or `10s` for
       the frozen inputs.
 
 **Verification:**
