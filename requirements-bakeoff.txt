@@ -1,0 +1,7 @@
+# Requirements for bakeoff benchmark environment.
+# Inherits all pins from the export environment to avoid duplication/drift.
+-r requirements-export.txt
+
+# Delta pins: lock transitive deps that requirements-export.txt leaves unpinned.
+huggingface_hub==0.28.1
+loguru==0.7.3
