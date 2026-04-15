@@ -82,19 +82,35 @@ public func matmul3D(
 /// Zero-pad a 3D array (1, C, T_src) to (1, C, T_target).
 ///
 /// Matches: ``asr_pad = np.zeros((1, 512, frame_count)); asr_pad[:,:,:t] = asr[:,:,:t]``
+///
+/// Uses subscript access (not raw pointer arithmetic) to handle MLMultiArray
+/// strides correctly. CoreML model outputs may have non-trivial strides.
 public func zeroPad3D(source: MLMultiArray, channels: Int, targetTime: Int) throws -> MLMultiArray {
     let result = try makeZeroArray3D(channels: channels, time: targetTime)
-    let srcPtr = source.dataPointer.assumingMemoryBound(to: Float.self)
-    let dstPtr = result.dataPointer.assumingMemoryBound(to: Float.self)
-
     let srcTime = source.shape[2].intValue
     let copyTime = min(srcTime, targetTime)
 
-    // Copy channel by channel (each channel is a contiguous row)
-    for c in 0..<channels {
-        let srcOffset = c * srcTime
-        let dstOffset = c * targetTime
-        memcpy(dstPtr + dstOffset, srcPtr + srcOffset, copyTime * MemoryLayout<Float>.size)
+    // Check if source has standard contiguous strides (batch=C*T, channel=T, time=1)
+    let srcStrides = source.strides.map { $0.intValue }
+    let isContiguous = srcStrides.count >= 3 && srcStrides[2] == 1 && srcStrides[1] == srcTime
+
+    if isContiguous {
+        // Fast path: memcpy per channel
+        let srcPtr = source.dataPointer.assumingMemoryBound(to: Float.self)
+        let dstPtr = result.dataPointer.assumingMemoryBound(to: Float.self)
+        for c in 0..<channels {
+            let srcOffset = c * srcTime
+            let dstOffset = c * targetTime
+            memcpy(dstPtr + dstOffset, srcPtr + srcOffset, copyTime * MemoryLayout<Float>.size)
+        }
+    } else {
+        // Safe path: subscript access for non-contiguous layouts
+        let dstPtr = result.dataPointer.assumingMemoryBound(to: Float.self)
+        for c in 0..<channels {
+            for t in 0..<copyTime {
+                dstPtr[c * targetTime + t] = source[[0, c, t] as [NSNumber]].floatValue
+            }
+        }
     }
     return result
 }

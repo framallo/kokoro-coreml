@@ -43,6 +43,12 @@ public enum PipelineConstants {
     public static let hiddenDim: Int = 640
     /// Text encoder output dimension.
     public static let textEncoderDim: Int = 512
+
+    /// F0Ntrain input T dimension for each bucket (seconds → T_frames).
+    /// Derived from bucket geometry: full_f0_len = bucket_sec * 24000 / 300,
+    /// then F0Ntrain's 2× upsample means T_frames = full_f0_len / 2.
+    /// Single source of truth — used by both init() and synthesize().
+    public static let tFramesForBucket: [Int: Int] = [3: 120, 10: 400, 45: 1800]
 }
 
 // MARK: - Stage Timing
@@ -88,10 +94,17 @@ public struct SynthesisResult {
 /// Main TTS pipeline orchestrator.
 ///
 /// Loads CoreML models and provides ``synthesize()`` for text-to-audio.
-/// DecoderPre is currently a bridge (pre-computed tensors loaded from disk).
+///
+/// ## Model loading
+///
+/// ``init(modelsDirectory:buckets:linearWeights:linearBias:)`` calls
+/// ``MLModel.compileModel`` synchronously. On first run this can take
+/// hundreds of milliseconds per model. For app integration, call init
+/// on a background thread or use pre-compiled ``.mlmodelc`` bundles.
 public class KokoroPipeline {
     private let durationModel: MLModel
     private let f0ntrainModels: [Int: MLModel]  // keyed by T_frames
+    private let decoderPreModels: [Int: MLModel] // keyed by bucket seconds
     private let generatorModels: [Int: MLModel]  // keyed by bucket seconds
 
     /// Learned weights from SourceModuleHnNSF.l_linear.
@@ -101,18 +114,17 @@ public class KokoroPipeline {
     /// Available bucket durations in seconds.
     private let availableBuckets: [Int]
 
-    /// Pre-computed DecoderPre outputs for bridge mode.
-    /// Keyed by a string identifier (e.g., input name or hash).
-    /// Phase 4 replaces this with a CoreML model.
-    public var precomputedDecoderPre: [String: MLMultiArray] = [:]
-
     /// Load all models from a directory.
     ///
     /// Expected files:
     /// - ``kokoro_duration.mlpackage``
     /// - ``kokoro_f0ntrain_t{T}.mlpackage`` for each bucket's T_frames
+    /// - ``kokoro_decoder_pre_{N}s.mlpackage`` for each bucket
     /// - ``kokoro_decoder_har_post_{N}s.mlpackage`` for each bucket
-    /// - ``linear_weights.json`` (SourceModuleHnNSF learned weights)
+    ///
+    /// Note: ``MLModel.compileModel`` is called synchronously. For app
+    /// integration, call init on a background queue or use pre-compiled
+    /// ``.mlmodelc`` bundles to avoid blocking the main thread.
     public init(
         modelsDirectory: URL,
         buckets: [Int] = [3, 10],
@@ -127,20 +139,29 @@ public class KokoroPipeline {
 
         // F0Ntrain models (one per bucket's T_frames)
         var f0Models: [Int: MLModel] = [:]
-        // T_frames values: 3s -> 120, 10s -> 400 (from bucket geometry)
-        let tFramesMap: [Int: Int] = [3: 120, 10: 400, 45: 1800]
         for sec in buckets {
-            if let t = tFramesMap[sec] {
+            if let t = PipelineConstants.tFramesForBucket[sec] {
                 let url = modelsDirectory.appendingPathComponent("kokoro_f0ntrain_t\(t).mlpackage")
                 if FileManager.default.fileExists(atPath: url.path) {
                     let config = MLModelConfiguration()
                     config.computeUnits = .all
-                    let compiled = try MLModel.compileModel(at: url)
-                    f0Models[t] = try MLModel(contentsOf: compiled, configuration: config)
+                    f0Models[t] = try MLModel(contentsOf: MLModel.compileModel(at: url), configuration: config)
                 }
             }
         }
         self.f0ntrainModels = f0Models
+
+        // DecoderPre models (Phase 4: CoreML, no longer bridge)
+        var decPreModels: [Int: MLModel] = [:]
+        for sec in buckets {
+            let url = modelsDirectory.appendingPathComponent("kokoro_decoder_pre_\(sec)s.mlpackage")
+            if FileManager.default.fileExists(atPath: url.path) {
+                let config = MLModelConfiguration()
+                config.computeUnits = .all
+                decPreModels[sec] = try MLModel(contentsOf: MLModel.compileModel(at: url), configuration: config)
+            }
+        }
+        self.decoderPreModels = decPreModels
 
         // Generator (HAR-post) models
         var genModels: [Int: MLModel] = [:]
@@ -149,8 +170,7 @@ public class KokoroPipeline {
             if FileManager.default.fileExists(atPath: url.path) {
                 let config = MLModelConfiguration()
                 config.computeUnits = .all
-                let compiled = try MLModel.compileModel(at: url)
-                genModels[sec] = try MLModel(contentsOf: compiled, configuration: config)
+                genModels[sec] = try MLModel(contentsOf: MLModel.compileModel(at: url), configuration: config)
             }
         }
         self.generatorModels = genModels
@@ -167,14 +187,12 @@ public class KokoroPipeline {
     ///   - attentionMask: Mask for actual tokens (1) vs padding (0). Shape: (128,).
     ///   - refS: Voice embedding, shape (256,).
     ///   - speed: Speech rate multiplier.
-    ///   - decoderPreKey: Key to look up pre-computed DecoderPre output (bridge mode).
     /// - Returns: SynthesisResult with audio and timing breakdown.
     public func synthesize(
         inputIds: [Int32],
         attentionMask: [Int32],
         refS: [Float],
-        speed: Float = 1.0,
-        decoderPreKey: String? = nil
+        speed: Float = 1.0
     ) throws -> SynthesisResult {
         var timings = StageTimings()
 
@@ -185,7 +203,10 @@ public class KokoroPipeline {
         let t1 = CFAbsoluteTimeGetCurrent()
         timings.durationCoreML = t1 - t0
 
-        // Extract duration model outputs
+        // Extract duration model outputs.
+        // Note: Duration model also outputs "ref_s_out" (a passthrough of the input ref_s,
+        // renamed to avoid CoreML aliasing — see export_duration.py:111). We use the caller's
+        // refS directly instead, since ref_s_out is just ref_s + zeros_like(ref_s).
         let predDurArray = durOutput.featureValue(for: "pred_dur")!.multiArrayValue!
         let dArray = durOutput.featureValue(for: "d")!.multiArrayValue!
         let tEnArray = durOutput.featureValue(for: "t_en")!.multiArrayValue!
@@ -219,8 +240,8 @@ public class KokoroPipeline {
             K: tokenCount,
             N: totalFrames
         )
-        // asr is needed for DecoderPre input (Phase 4). Currently unused in bridge mode.
-        let _ = try matmul3D(
+        // asr is used by DecoderPre CoreML: the aligned text features.
+        let asr = try matmul3D(
             a: tEnArray,
             b: alignment,
             M: PipelineConstants.textEncoderDim,
@@ -236,10 +257,9 @@ public class KokoroPipeline {
         guard let bucketSec = selectBucket(totalSeconds: totalSeconds, availableBuckets: availableBuckets) else {
             throw PipelineError.noBucketAvailable
         }
-        let tFramesMap: [Int: Int] = [3: 120, 10: 400, 45: 1800]
-        guard let tFrames = tFramesMap[bucketSec],
+        guard let tFrames = PipelineConstants.tFramesForBucket[bucketSec],
               let f0nModel = f0ntrainModels[tFrames] else {
-            throw PipelineError.modelNotLoaded("f0ntrain_t\(tFramesMap[bucketSec] ?? 0)")
+            throw PipelineError.modelNotLoaded("f0ntrain_t\(PipelineConstants.tFramesForBucket[bucketSec] ?? 0)")
         }
 
         // Pad en to F0Ntrain's expected T dimension
@@ -282,11 +302,36 @@ public class KokoroPipeline {
         let t9 = CFAbsoluteTimeGetCurrent()
         timings.padding = t9 - t8
 
-        // ---- Stage 6: DecoderPre (bridge) ----
+        // ---- Stage 6: DecoderPre CoreML ----
         let t10 = CFAbsoluteTimeGetCurrent()
-        guard let xPre = precomputedDecoderPre[decoderPreKey ?? "default"] else {
-            throw PipelineError.decoderPreNotAvailable
+        guard let decPreModel = decoderPreModels[bucketSec] else {
+            throw PipelineError.modelNotLoaded("decoder_pre_\(bucketSec)s")
         }
+
+        // Build DecoderPre inputs: asr (padded), f0 (as 3D), n (as 3D), ref_s
+        let asrPadded = try zeroPad3D(source: asr, channels: PipelineConstants.textEncoderDim, targetTime: decPreFrameCount(bucketSec: bucketSec))
+
+        // F0 and N as (1, 1, full_f0_len) for DecoderPre Conv1d input
+        let f0Array3D = try makeZeroArray3D(channels: 1, time: fullF0Len)
+        copyInto(array: f0Array3D, from: f0Padded)
+        let nPadded = zeroPad1D(source: nCurve, targetLength: fullF0Len)
+        let nArray3D = try makeZeroArray3D(channels: 1, time: fullF0Len)
+        copyInto(array: nArray3D, from: nPadded)
+
+        let refSArray = try makeZeroArray2D(dim: PipelineConstants.voiceEmbeddingDim)
+        let refSPtr = refSArray.dataPointer.assumingMemoryBound(to: Float.self)
+        for i in 0..<PipelineConstants.voiceEmbeddingDim {
+            refSPtr[i] = refS[i]
+        }
+
+        let decPreInput = try MLDictionaryFeatureProvider(dictionary: [
+            "asr": MLFeatureValue(multiArray: asrPadded),
+            "f0": MLFeatureValue(multiArray: f0Array3D),
+            "n_input": MLFeatureValue(multiArray: nArray3D),
+            "ref_s": MLFeatureValue(multiArray: refSArray),
+        ])
+        let decPreOutput = try decPreModel.prediction(from: decPreInput)
+        let xPre = decPreOutput.featureValue(for: "x_pre")!.multiArrayValue!
         let t11 = CFAbsoluteTimeGetCurrent()
         timings.decoderPre = t11 - t10
 
@@ -311,11 +356,11 @@ public class KokoroPipeline {
         let harArray = try makeZeroArray3D(channels: HarmonicConstants.harChannels, time: harFrames)
         copyInto(array: harArray, from: harFlat)
 
-        // ref_s as MLMultiArray
-        let refSArray = try makeZeroArray2D(dim: PipelineConstants.voiceEmbeddingDim)
-        let refSPtr = refSArray.dataPointer.assumingMemoryBound(to: Float.self)
+        // ref_s as MLMultiArray (reuse for GeneratorFromHar)
+        let genRefSArray = try makeZeroArray2D(dim: PipelineConstants.voiceEmbeddingDim)
+        let genRefSPtr = genRefSArray.dataPointer.assumingMemoryBound(to: Float.self)
         for i in 0..<PipelineConstants.voiceEmbeddingDim {
-            refSPtr[i] = refS[i]
+            genRefSPtr[i] = refS[i]
         }
 
         // Read expected shapes from model
@@ -337,7 +382,7 @@ public class KokoroPipeline {
 
         let genInput = try MLDictionaryFeatureProvider(dictionary: [
             "x_pre": MLFeatureValue(multiArray: xPrePadded),
-            "ref_s": MLFeatureValue(multiArray: refSArray),
+            "ref_s": MLFeatureValue(multiArray: genRefSArray),
             "har": MLFeatureValue(multiArray: harPadded),
         ])
         let genOutput = try genModel.prediction(from: genInput)
@@ -373,6 +418,18 @@ public class KokoroPipeline {
     }
 
     // MARK: - Private Helpers
+
+    /// Compute the ASR frame count for DecoderPre's expected input shape.
+    ///
+    /// Matches ``conv1d_output_length_from_module(full_f0_len, dec.F0_conv)``
+    /// where F0_conv has kernel=3, stride=2, padding=1.
+    /// Formula: ``(full_f0_len + 2*padding - kernel) / stride + 1 = (L + 1) / 2``
+    private func decPreFrameCount(bucketSec: Int) -> Int {
+        let bucketSamples = bucketSec * PipelineConstants.sampleRate
+        let fullF0Len = Int(round(Double(bucketSamples) / Double(HarmonicConstants.upsampleScale)))
+        // Conv1d(k=3, s=2, p=1): output = (input + 2*1 - 3) / 2 + 1 = (input - 1) / 2 + 1
+        return (fullF0Len - 1) / 2 + 1
+    }
 
     private func buildDurationInput(
         inputIds: [Int32],
@@ -416,7 +473,6 @@ public class KokoroPipeline {
 public enum PipelineError: Error, LocalizedError {
     case noBucketAvailable
     case modelNotLoaded(String)
-    case decoderPreNotAvailable
 
     public var errorDescription: String? {
         switch self {
@@ -424,8 +480,6 @@ public enum PipelineError: Error, LocalizedError {
             return "No bucket available for the requested duration"
         case .modelNotLoaded(let name):
             return "Model not loaded: \(name)"
-        case .decoderPreNotAvailable:
-            return "DecoderPre output not available. Pre-compute with scripts/decoder_pre_bridge.py or implement Phase 4 (CoreML DecoderPre)."
         }
     }
 }
