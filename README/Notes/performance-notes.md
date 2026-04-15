@@ -150,7 +150,7 @@ So the current regression appears to be **mostly in the shared prefix path**, wi
 
 ### Summary
 
-Cross-referenced the [CoreML Compute Unit Scheduling Guide](../Guides/apple-silicon/CoreML-Compute-Unit-Scheduling-guide.md) against the production `GeneratorFromHar` ANE path. The Orion reverse-engineering project (Constraint #17) claims matmul executes 3x slower than 1x1 convolution on the ANE. We replaced `nn.Linear` with `nn.Conv1d(kernel_size=1)` in `AdaIN1d.fc` — dozens of instances in the hot ANE path. **Result: no improvement.** Core ML `predict()` time was unchanged or marginally worse. CoreML's MIL compiler already lowers `linear` ops to conv internally, making the source-level change redundant. The real latency gap (vs HF baseline packages) lives in `extract_vocoder_inputs()`, the PyTorch CPU prefix path — not the ANE decoder at all.
+Cross-referenced the [CoreML Compute Unit Scheduling Guide](../Guides/apple-silicon/CoreML-Compute-Unit-Scheduling-guide.md) against the production `GeneratorFromHar` ANE path. The Orion reverse-engineering project (Constraint #17) claims matmul executes 3x slower than 1x1 convolution on the ANE. We replaced `nn.Linear` with `nn.Conv1d(kernel_size=1)` in `AdaIN1d.fc` — dozens of instances in the hot ANE path. **Result: no improvement.** Core ML `predict()` time was unchanged or marginally worse. CoreML's MIL compiler very likely lowers `linear` ops to conv internally (inferred from identical predict times, not MIL-dump verified), making the source-level change redundant. The largest measured latency gap (vs HF baseline packages) appears in `extract_vocoder_inputs()`, the PyTorch CPU prefix path — though this needs a dedicated prefix-only A/B to rule out measurement noise (see caveats below). Note: the CPU-side `build inputs` stage was actually 6.8 ms *faster* for the repo on the `long` input, partially offsetting the predict penalty — the overall picture is mixed, not uniformly worse.
 
 ### What we did
 
@@ -184,7 +184,7 @@ Cross-referenced the [CoreML Compute Unit Scheduling Guide](../Guides/apple-sili
 | tiny | 19.9 ms | 19.1 ms | +0.8 ms (worse) |
 | long | 43.9 ms | 42.0 ms | +1.9 ms (worse) |
 
-**Conclusion:** CoreML's MIL compiler already optimizes `linear` → conv internally during the `.mlpackage` compilation/specialization step. The source-level Conv1d change is redundant — the compiled ANE graph is the same either way. Orion Constraint #17 applies to **direct ANE programming** (bypassing CoreML), not to the CoreML conversion pipeline.
+**Conclusion:** CoreML's MIL compiler very likely optimizes `linear` → conv internally during the `.mlpackage` compilation/specialization step — inferred from the identical predict() times, not directly verified with a MIL before/after dump. The source-level Conv1d change appears redundant. Orion Constraint #17 likely applies to **direct ANE programming** (bypassing CoreML), not to the CoreML conversion pipeline. A definitive proof would require dumping the MIL graph (e.g. via `ct.models.MLModel._mil_program`) for both variants and comparing the lowered ops.
 
 **The real regression is in the PyTorch CPU prefix:**
 
@@ -193,14 +193,16 @@ Cross-referenced the [CoreML Compute Unit Scheduling Guide](../Guides/apple-sili
 | tiny | extract_vocoder_inputs | 49.9 ms | 41.5 ms | +8.4 ms |
 | long | extract_vocoder_inputs | 128.6 ms | 119.4 ms | +9.2 ms |
 
-This +8-9ms penalty is consistent across inputs and dwarfs the Core ML predict delta. It lives in the shared PyTorch path (duration model + alignment + hn-nsf), which the Conv1d change does not touch. The cause is not yet identified — may be a codebase drift between the HF-published packages and the current repo state.
+This +8-9ms penalty is consistent across inputs and dwarfs the Core ML predict delta. It lives in the shared PyTorch path (duration model + alignment + hn-nsf), which the Conv1d change does not touch.
+
+**Caveat:** The stage breakdown swapped only decoder `.mlpackage` files between repo and HF; the prefix extraction code was identical in both runs. A consistent +8-9ms delta on a shared code path is suspicious — it may reflect run-to-run thermal/cache variance, process ordering effects (repo always ran first), or genuine codebase drift. A dedicated prefix-only A/B with interleaved runs and higher iteration count is needed to confirm this as a real regression vs. measurement noise.
 
 ### Key takeaways for future work
 
-1. **Don't optimize what CoreML already optimizes.** The MIL compiler's internal lowering passes handle Linear → Conv conversion. Source-level changes to match Orion constraints only matter when programming the ANE directly (bypassing CoreML).
+1. **Don't optimize what CoreML likely already optimizes.** The MIL compiler's internal lowering passes very likely handle Linear → Conv conversion (inferred from identical predict times). Source-level changes to match Orion constraints likely only matter when programming the ANE directly (bypassing CoreML). Verify with a MIL dump if this assumption becomes load-bearing.
 2. **Profile before optimizing.** The stage breakdown showed the bottleneck was in the PyTorch prefix, not the ANE decoder. Without the breakdown, we'd have spent more time on the wrong problem.
 3. **The dead `torch.cat` removal was valid.** Even though it was dead code, removing it prevents future accidental activation and eliminates an ANE-banned op from the source.
-4. **The `extract_vocoder_inputs()` regression is the real target.** A +8-9ms consistent penalty across inputs points to something in the duration model, alignment, or hn-nsf CPU path that changed between the HF baseline and the current repo.
+4. **The `extract_vocoder_inputs()` gap needs a dedicated A/B.** A +8-9ms delta across inputs is suggestive but not conclusive — the stage breakdown only swapped decoder packages while prefix code was identical, so the delta may reflect thermal/ordering effects rather than a real regression. A prefix-only interleaved A/B benchmark is needed before committing to an optimization effort there.
 
 ### Related Guides
 
@@ -210,7 +212,7 @@ This +8-9ms penalty is consistent across inputs and dwarfs the Core ML predict d
 
 ### Files changed (then reverted)
 
-- `kokoro/istftnet.py:129` — `AdaIN1d.fc`: Linear → Conv1d (reverted)
+- `kokoro/istftnet.py:129` — `AdaIN1d.fc`: Linear → Conv1d + `register_load_state_dict_pre_hook` for weight reshaping (both reverted)
 - `kokoro/istftnet.py:131-152` — `AdaIN1d.forward`: input reshape for Conv1d (reverted)
 - `kokoro/istftnet.py:146-155` — dead `torch.cat` padding branch removed (kept)
 

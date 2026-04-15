@@ -1,4 +1,10 @@
-"""AdaIN1d: Conv1d path matches Linear reference math; checkpoint hook round-trip."""
+"""AdaIN1d: forward math correctness, edge cases, and state_dict round-trip.
+
+History: this file originally tested a Conv1d variant of AdaIN1d (nn.Conv1d
+with kernel_size=1 replacing nn.Linear).  That experiment was reverted after
+benchmarking showed no improvement — see README/Notes/performance-notes.md
+"ANE optimization experiment" section.  The current AdaIN1d uses nn.Linear.
+"""
 
 from __future__ import annotations
 
@@ -11,7 +17,7 @@ from kokoro.istftnet import AdaIN1d
 
 
 def _reference_adain_forward(x, s, fc_linear: nn.Linear):
-    """Same as AdaIN1d.forward but using Linear + view for style projection."""
+    """Reference AdaIN1d forward using explicit Linear + view math."""
     B, C, T = x.shape
     num_features = fc_linear.out_features // 2
     eps = 1e-5
@@ -25,72 +31,42 @@ def _reference_adain_forward(x, s, fc_linear: nn.Linear):
     return (1.0 + gamma_exp) * x_norm + beta_exp
 
 
-def test_adain_conv_matches_linear_reference():
+def test_adain_forward_matches_reference():
+    """AdaIN1d.forward() matches the reference Linear math exactly."""
     torch.manual_seed(0)
     B, C, T, style_dim = 2, 64, 32, 128
     x = torch.randn(B, C, T)
     s = torch.randn(B, style_dim)
+
+    # Build reference with standalone Linear
     fc_lin = nn.Linear(style_dim, C * 2)
     out_ref = _reference_adain_forward(x, s, fc_lin)
 
+    # Copy the same weights into AdaIN1d
     m = AdaIN1d(style_dim, C)
     with torch.no_grad():
-        m.fc.weight.copy_(fc_lin.weight.unsqueeze(-1))
+        m.fc.weight.copy_(fc_lin.weight)
         m.fc.bias.copy_(fc_lin.bias)
     out = m(x, s)
     assert torch.allclose(out, out_ref, rtol=1e-5, atol=1e-6)
 
 
-def test_load_state_dict_hook_3d_round_trip():
+def test_state_dict_round_trip():
+    """state_dict save/load round-trips with 2D Linear weight shape."""
     m = AdaIN1d(16, 32)
     torch.manual_seed(1)
     for p in m.parameters():
         p.data.normal_(0, 0.1)
     sd = m.state_dict()
+
     m2 = AdaIN1d(16, 32)
     m2.load_state_dict(sd, strict=True)
-    # Shape must survive the round-trip unchanged (no double-unsqueeze).
-    # AdaIN1d(style_dim=16, num_features=32) → Conv1d(16, 64, 1); out = num_features*2.
-    assert m2.fc.weight.shape == (64, 16, 1), f"unexpected shape {m2.fc.weight.shape}"
+
+    # Linear weight shape: (out_features, in_features) = (64, 16)
+    assert m2.fc.weight.shape == (64, 16), f"unexpected shape {m2.fc.weight.shape}"
     assert m2.fc.weight.shape == sd["fc.weight"].shape
     assert torch.allclose(m2.fc.weight, m.fc.weight)
     assert torch.allclose(m2.fc.bias, m.fc.bias)
-
-
-def test_load_state_dict_hook_2d_linear_checkpoint():
-    style_dim, C = 8, 16
-    m = AdaIN1d(style_dim, C)
-    lin_w = torch.randn(C * 2, style_dim)
-    lin_b = torch.randn(C * 2)
-    sd = {"fc.weight": lin_w, "fc.bias": lin_b}
-    m.load_state_dict(sd, strict=True)
-    assert m.fc.weight.shape == (C * 2, style_dim, 1)
-    assert torch.allclose(m.fc.weight.squeeze(-1), lin_w)
-    # fc.bias shape is (out_channels,) for both Linear and Conv1d — no migration needed
-    assert torch.allclose(m.fc.bias, lin_b)
-
-
-def test_load_state_dict_hook_prefixed_submodule():
-    """Hook fires with correct prefix when a legacy 2D checkpoint is loaded via AdainResBlk1d.
-
-    Real-world load path: AdainResBlk1d.load_state_dict(legacy_sd) — the hook
-    receives prefix 'norm1.' / 'norm2.' and must resolve 'norm1.fc.weight' correctly.
-    """
-    from kokoro.istftnet import AdainResBlk1d
-
-    style_dim, dim = 8, 16
-    blk = AdainResBlk1d(dim_in=dim, dim_out=dim, style_dim=style_dim)
-
-    # Build a state dict that looks like a legacy Linear checkpoint:
-    # replace the 3D Conv1d fc.weights with 2D Linear fc.weights.
-    sd = blk.state_dict()
-    sd["norm1.fc.weight"] = sd["norm1.fc.weight"].squeeze(-1)  # 3D → 2D
-    sd["norm2.fc.weight"] = sd["norm2.fc.weight"].squeeze(-1)  # 3D → 2D
-
-    blk.load_state_dict(sd, strict=True)
-
-    assert blk.norm1.fc.weight.shape == (dim * 2, style_dim, 1), blk.norm1.fc.weight.shape
-    assert blk.norm2.fc.weight.shape == (dim * 2, style_dim, 1), blk.norm2.fc.weight.shape
 
 
 def test_adain1d_forward_t1_finite():
@@ -107,3 +83,37 @@ def test_adain1d_forward_t1_finite():
     y = m(x, s)
     assert y.shape == x.shape
     assert torch.isfinite(y).all()
+
+
+def test_adain1d_channel_mismatch_raises():
+    """AdaIN1d raises AssertionError when C != num_features.
+
+    The dead torch.cat padding branch was removed and replaced with an assert
+    to guard against silent shape mismatches (see performance-notes.md).
+    """
+    torch.manual_seed(0)
+    style_dim, C = 16, 8
+    m = AdaIN1d(style_dim, C)
+    # Feed x with wrong channel count
+    x_wrong = torch.randn(1, C + 4, 10)
+    s = torch.randn(1, style_dim)
+    with pytest.raises(AssertionError, match="channel mismatch"):
+        m(x_wrong, s)
+
+
+def test_adain1d_in_resblock_state_dict():
+    """AdaIN1d weights load correctly through AdainResBlk1d parent."""
+    from kokoro.istftnet import AdainResBlk1d
+
+    style_dim, dim = 8, 16
+    blk = AdainResBlk1d(dim_in=dim, dim_out=dim, style_dim=style_dim)
+
+    sd = blk.state_dict()
+    blk2 = AdainResBlk1d(dim_in=dim, dim_out=dim, style_dim=style_dim)
+    blk2.load_state_dict(sd, strict=True)
+
+    # Linear weight: (out_features, in_features) = (dim*2, style_dim)
+    assert blk2.norm1.fc.weight.shape == (dim * 2, style_dim)
+    assert blk2.norm2.fc.weight.shape == (dim * 2, style_dim)
+    assert torch.allclose(blk2.norm1.fc.weight, blk.norm1.fc.weight)
+    assert torch.allclose(blk2.norm2.fc.weight, blk.norm2.fc.weight)

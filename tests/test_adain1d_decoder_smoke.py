@@ -1,4 +1,4 @@
-"""Fan-in smoke: AdainResBlk1d (decoder path) uses AdaIN1d with Conv1d fc."""
+"""Fan-in smoke: AdainResBlk1d (decoder path) uses AdaIN1d with Linear fc."""
 
 from __future__ import annotations
 

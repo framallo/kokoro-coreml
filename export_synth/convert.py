@@ -336,7 +336,7 @@ def export_synthesizers(output_dir, buckets_str, debug=False, trace_length: int 
                     # GeneratorFromHar wraps the Generator conv/AdaIN/iSTFT stack.
                     # The IdentityAdaIN loop above targets AdainResBlk1d (Decoder stack)
                     # only. Generator.resblocks and noise_res use AdaINResBlock1 — a
-                    # different class — so their AdaIN1d(Conv1d) instances are live in
+                    # different class — so their AdaIN1d(Linear) instances are live in
                     # this trace by design: Generator style conditioning is preserved.
                     gen_from_har = GeneratorFromHar(gen).eval()
                     traced_model = torch.jit.trace(
