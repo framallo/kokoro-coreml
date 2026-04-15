@@ -57,12 +57,31 @@ public func matmul3D(
     M: Int, K: Int, N: Int
 ) throws -> MLMultiArray {
     let result = try makeZeroArray3D(channels: M, time: N)
-    let aPtr = a.dataPointer.assumingMemoryBound(to: Float.self)
+
+    // Ensure A is contiguous (CoreML outputs may have non-trivial strides).
+    let aStrides = a.strides.map { $0.intValue }
+    let aIsContiguous = aStrides.count >= 3 && aStrides[2] == 1 && aStrides[1] == K
+
+    let aContiguous: MLMultiArray
+    if aIsContiguous {
+        aContiguous = a
+    } else {
+        // Copy to contiguous layout
+        aContiguous = try makeZeroArray3D(channels: M, time: K)
+        let dstPtr = aContiguous.dataPointer.assumingMemoryBound(to: Float.self)
+        for m in 0..<M {
+            for k in 0..<K {
+                dstPtr[m * K + k] = a[[0, m, k] as [NSNumber]].floatValue
+            }
+        }
+    }
+
+    let aPtr = aContiguous.dataPointer.assumingMemoryBound(to: Float.self)
     let cPtr = result.dataPointer.assumingMemoryBound(to: Float.self)
 
-    // A is (1, M, K) row-major → pointer to M×K matrix
+    // A is (1, M, K) row-major → pointer to M*K matrix
     // B is flat (K, N) row-major
-    // C is (1, M, N) row-major → pointer to M×N matrix
+    // C is (1, M, N) row-major → pointer to M*N matrix
     b.withUnsafeBufferPointer { bBuf in
         cblas_sgemm(
             CblasRowMajor, CblasNoTrans, CblasNoTrans,
