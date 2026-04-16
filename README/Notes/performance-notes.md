@@ -1230,54 +1230,65 @@ Key questions this section will answer when Config F data is collected:
 
 ### Summary
 
-Same corrected v5 harness as the M2 Air run (all audit bugs fixed: bucket parity, tFrames mapping, duplicate matmul, ANE plan compilation), now on the lowest-spec Apple Silicon tested: M1 Mac Mini (8-core CPU, 8-core GPU, 16-core ANE, 16 GB). Only Configs D, E, F were run — **Config A could not run due to OOM** when the harness loaded all 5 HAR-post CoreML buckets + 2 PyTorch models simultaneously into 16 GB. This is a harness limitation, not a pipeline limitation — the production app loads only one bucket at a time.
+Same corrected v5 harness as the M2 Air run (all audit bugs fixed: bucket parity, tFrames mapping, duplicate matmul, ANE plan compilation), now on the lowest-spec Apple Silicon tested: M1 Mac Mini (8-core CPU, 8-core GPU, 16-core ANE, 16 GB). Configs D, E, F were run together; Config A was run separately (it OOMed when loaded alongside D+E due to 5 HAR-post CoreML models + 2 PyTorch models in 16 GB).
 
-**Config F wins at every duration on M1 Mini**, achieving **18-22x realtime** even on this lowest-spec machine. 30s of audio completes in 1.2 seconds.
+**Config F wins at every duration on M1 Mini**, achieving **18–22x realtime**. Config F is **1.1–1.5x faster than Config A** — a tighter margin than M2 Air (1.3–1.8x) but consistent across all durations.
 
 ### End-to-end wall time (warm median, milliseconds)
 
-| Input | Audio | Bucket | D (MPS) | E (CPU) | F (Swift) |
-| --- | --- | --- | --- | --- | --- |
-| 3s | 2.80s | 3s | 492 ms | 894 ms | **157 ms** |
-| 7s | 6.75s | 7s | 1038 ms | 2233 ms | **511 ms** |
-| 15s | 13.90s | 15s | 1958 ms | 4458 ms | **691 ms** |
-| 30s | 27.38s | 30s | 4167 ms | 8934 ms | **1229 ms** |
+| Input | Audio | Bucket | A (HAR-post) | D (MPS) | E (CPU) | F (Swift) |
+| --- | --- | --- | --- | --- | --- | --- |
+| 3s | 2.80s | 3s | 238 ms | 492 ms | 894 ms | **157 ms** |
+| 7s | 6.75s | 7s | 577 ms | 1038 ms | 2233 ms | **511 ms** |
+| 15s | 13.90s | 15s | 837 ms | 1958 ms | 4458 ms | **691 ms** |
+| 30s | 27.38s | 30s | 1637 ms | 4167 ms | 8934 ms | **1229 ms** |
 
 ### RTF and realtime factor
 
-| Input | Audio | D RTF | E RTF | F RTF | F realtime |
-| --- | --- | --- | --- | --- | --- |
-| 3s | 2.80s | 0.176 | 0.319 | **0.056** | **18x RT** |
-| 7s | 6.75s | 0.154 | 0.331 | **0.076** | **13x RT** |
-| 15s | 13.90s | 0.141 | 0.321 | **0.050** | **20x RT** |
-| 30s | 27.38s | 0.152 | 0.326 | **0.045** | **22x RT** |
+| Input | Audio | A RTF | D RTF | E RTF | F RTF | F realtime |
+| --- | --- | --- | --- | --- | --- | --- |
+| 3s | 2.80s | 0.085 (12x RT) | 0.176 | 0.319 | **0.056** | **18x RT** |
+| 7s | 6.75s | 0.085 (12x RT) | 0.154 | 0.331 | **0.076** | **13x RT** |
+| 15s | 13.90s | 0.060 (17x RT) | 0.141 | 0.321 | **0.050** | **20x RT** |
+| 30s | 27.38s | 0.060 (17x RT) | 0.152 | 0.326 | **0.045** | **22x RT** |
 
 ### Speedup: Config F vs baselines
 
-| Input | F vs D (MPS) | F vs E (CPU) |
-| --- | --- | --- |
-| 3s | **3.1x** | **5.7x** |
-| 7s | **2.0x** | **4.4x** |
-| 15s | **2.8x** | **6.4x** |
-| 30s | **3.4x** | **7.3x** |
+| Input | F vs A (HAR-post) | F vs D (MPS) | F vs E (CPU) |
+| --- | --- | --- | --- |
+| 3s | **1.5x** | **3.1x** | **5.7x** |
+| 7s | **1.1x** | **2.0x** | **4.4x** |
+| 15s | **1.2x** | **2.8x** | **6.4x** |
+| 30s | **1.3x** | **3.4x** | **7.3x** |
+
+### Config A stage breakdown (warm median)
+
+| Input | Bucket | Prefix extract | HAR builder (CPU) | CoreML predict | Total |
+| --- | --- | --- | --- | --- | --- |
+| 3s | 3s | 86 ms (36%) | 57 ms (24%) | 96 ms (40%) | 238 ms |
+| 7s | 7s | 130 ms (23%) | 97 ms (17%) | 346 ms (60%) | 577 ms |
+| 15s | 15s | 198 ms (24%) | 187 ms (22%) | 434 ms (52%) | 837 ms |
+| 30s | 30s | 409 ms (25%) | 364 ms (22%) | 858 ms (52%) | 1637 ms |
 
 ### Interpretation
 
-1. **Config F is 18-22x realtime on M1 Mini** — the lowest-spec Apple Silicon we've tested. Even 30s of audio completes in 1.2 seconds. This confirms the Swift+CoreML pipeline is viable on all shipping Apple Silicon Macs.
+1. **Config F is 18–22x realtime on M1 Mini** — the lowest-spec Apple Silicon we've tested. Even 30s of audio completes in 1.2 seconds. This confirms the Swift+CoreML pipeline is viable on all shipping Apple Silicon Macs.
 
-2. **Config F is 4.4-7.3x faster than PyTorch CPU and 2.0-3.4x faster than MPS** across all durations. The speedup vs CPU is the largest we've seen on any machine, because the M1's CPU is the weakest tested while the ANE remains competitive.
+2. **Config F beats Config A at every duration**, 1.1–1.5x faster. The margin is tighter than M2 Air (1.3–1.8x), consistent with the M1's smaller ANE/CPU gap — both pipelines are more ANE-bound here.
 
-3. **Config A could not run on 16 GB** due to the harness loading all 5 HAR-post CoreML models + 2 PyTorch models simultaneously. This is a harness limitation, not a pipeline limitation — the production app loads only one bucket at a time. The Swift pipeline's model eviction strategy (load one bucket, evict others) is essential for 16 GB devices.
+3. **Config F is 4.4–7.3x faster than PyTorch CPU and 2.0–3.4x faster than MPS.** The CPU speedup is the largest we've seen on any machine, because the M1's CPU is the weakest tested while the ANE remains competitive.
 
-4. **Config A data is omitted.** For A vs F comparison on comparable hardware, see the M2 Air section above where F was 1.3-1.8x faster than A at all durations.
+4. **CoreML predict dominates Config A at longer durations.** At 30s, predict is 858 ms (52% of wall time) — the CPU-side prefix (409 ms) and HAR builder (364 ms) are also substantial. Config F avoids both Python-side costs.
+
+5. **The Swift pipeline's model eviction strategy is essential for 16 GB.** Config A could only run in isolation (not alongside D+E). The production app should follow Config F's pattern of loading one bucket at a time.
 
 ### Provenance
 
 - Machine: Apple M1 Mac Mini, 16 GB, macOS 15.7.5
 - Git: main branch, commit `5a8e7a3`
 - Order seed: 0, iterations: 5
-- Results: `outputs/bakeoff/results_m1_mini_def.json`
-- Config A omitted: OOM on 16 GB when loading all 5 HAR-post buckets + 2 PyTorch models simultaneously
+- Results: `outputs/bakeoff/results_m1_mini_def.json` (D/E/F), `outputs/bakeoff/results_m1_mini_a.json` (A)
+- Note: Config A run separately due to OOM when loaded alongside D+E
 
 ### Plan reference
 
