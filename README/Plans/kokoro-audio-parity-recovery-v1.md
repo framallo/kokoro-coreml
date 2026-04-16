@@ -432,18 +432,25 @@ samples under `outputs/audio-parity/failing-current/` classify as
 
 **Tasks:**
 
-- [ ] Regenerate listen samples for short and medium inputs.
-- [ ] Have the user listen to the new samples before treating the fix as done.
-- [ ] Run `pytest` at the repo root and focused Swift tests under
+- [x] Regenerate listen samples for short and medium inputs.
+- [x] Have the user listen to the new samples before treating the fix as done.
+- [x] Run `pytest` at the repo root and focused Swift tests under
       `swift/Tests/KokoroPipelineTests/`.
 - [ ] Run the `bakeoff` skill only after the samples pass listening and objective
       gates.
-- [ ] Update [README/Notes/debug-notes.md](../Notes/debug-notes.md) through
+- [x] Update [README/Notes/debug-notes.md](../Notes/debug-notes.md) through
       `write-notes` with cause, fix, commands, and residual risks.
 
 **Verification:** The user confirms at least short and medium outputs sound
 human, objective gates pass, and the bakeoff results are regenerated from the
 fixed path.
+
+**Phase 7 Progress:** All enumerated listen shapes have been regenerated through
+`scripts/bakeoff_listen.py --keys 3s,7s,15s,30s` with the quality gate active.
+`outputs/bakeoff/listen/config_f_3s.wav`, `config_f_7s.wav`, `config_f_15s.wav`,
+and `config_f_30s.wav` all have `quality_pass=true` and
+`quality_decision=needs_listening`. The user confirmed the short and medium
+samples sound human. The full bakeoff rerun remains pending.
 
 ## Success Criteria
 
@@ -459,7 +466,7 @@ fixed path.
 - [ ] The current failing `outputs/bakeoff/listen/config_f_*.wav` files fail the
       new quality gate.
 - [ ] The fixed output passes stage parity at the previously divergent boundary.
-- [ ] Short and medium fixed samples sound human to the user.
+- [x] Short and medium fixed samples sound human to the user.
 - [ ] Performance bakeoff results are not regenerated or cited until quality
       gates pass.
 
@@ -468,7 +475,7 @@ fixed path.
 - [ ] Plan phases are checked off only after `phase-audit` verifies each phase.
 - [ ] `pytest` passes or any unrelated failure is documented with evidence.
 - [ ] Focused Swift tests pass for any touched Swift code.
-- [ ] `README/Notes/debug-notes.md` records the final root cause and fix.
+- [x] `README/Notes/debug-notes.md` records the final root cause and fix.
 - [ ] Final bakeoff artifacts include `quality_pass: true` for listen samples.
 
 ## Open Questions

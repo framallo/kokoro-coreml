@@ -6,6 +6,207 @@ Institutional memory for Kokoro PyTorch → Core ML (`mlprogram`) export, synthe
 
 ---
 
+## Issue: Swift Config F bakeoff samples were near-silent garbage — Resolved
+
+**First spotted:** 2026-04-16
+**Resolved:** 2026-04-16
+**Status:** Resolved
+
+### Summary
+
+The post-update Swift/Core ML Config F path was producing WAVs that looked valid
+but sounded non-human because the final Core ML waveform output was read as a
+flat contiguous buffer. The `GeneratorFromHar` output can be a non-contiguous
+`MLMultiArray`, so raw `dataPointer` traversal corrupted the trimmed audio. The
+runtime and benchmark now read waveform values through stride-aware
+`MLMultiArray` indexing before trimming, and regenerated short/medium samples
+pass objective speech-health gates and human listening.
+
+### Symptom
+
+- `outputs/bakeoff/listen/config_f_3s.wav`, `config_f_7s.wav`,
+  `config_f_15s.wav`, and `config_f_30s.wav` sounded like noise or near-silence,
+  not speech.
+- Objective probe on the failing set showed implausibly low activity compared
+  with PyTorch and HAR-post references:
+  - RMS roughly `491`, `488`, `300`, and `42`
+  - active fraction above 32 PCM counts roughly `2.0%`, `2.2%`, `2.1%`, and
+    `0.12%`
+  - zero-crossing rate below `0.36%`
+- The files were still structurally valid WAVs, so duration and non-empty checks
+  were not enough to catch the failure.
+
+### Root Cause
+
+The bad audio was caused by assuming Core ML waveform outputs were contiguous in
+logical index order:
+
+```swift
+let waveformPtr = waveformArray.dataPointer.assumingMemoryBound(to: Float.self)
+```
+
+That assumption is false for this `MLMultiArray` output. Reading the raw pointer
+and trimming by linear index pulled the wrong sample sequence into the final WAV.
+The model package itself was not the primary garbage-audio cause: when the same
+waveform was read through stride-aware `MLMultiArray` indexing, the
+`GeneratorFromHar` isolation check showed high waveform correlation (about
+`0.929`) and the resulting samples sounded human.
+
+There was also a workflow trap: `scripts/bakeoff_listen.py` used the existing
+release `kokoro-bench` binary if present. A stale release binary could therefore
+regenerate the old broken output even after the Swift source fix.
+
+### Related Guides
+
+- [Core ML compute-unit scheduling guide](../Guides/apple-silicon/CoreML-Compute-Unit-Scheduling-guide.md)
+  - Core ML runtime behavior and backend selection can differ across compute
+  units; validate real outputs, not just successful `predict()` calls.
+- [Plan workflow skills guide](../Skills/plan-workflow-skills-guide.md)
+  - This recovery followed the phase plan and per-phase audit workflow.
+- [Phase audit rubric](../Skills/phase-audit-rubric.md)
+  - Phase 5 and Phase 6 were checked against scope, tests, and checkbox
+  accuracy before commit.
+
+### Fix
+
+**Files:**
+
+- `swift/Sources/KokoroPipeline/MLMultiArrayHelpers.swift`
+- `swift/Sources/KokoroPipeline/KokoroPipeline.swift`
+- `swift/Sources/KokoroBenchmark/main.swift`
+- `swift/Sources/KokoroPipeline/TensorDebugDump.swift`
+- `scripts/audio_quality_probe.py`
+- `scripts/bakeoff_listen.py`
+
+**Runtime fix:**
+
+- Added shared stride-aware `floatValues(from:)` for `MLMultiArray` reads.
+- Replaced raw pointer extraction in `KokoroPipeline` Stage 9 trim with
+  `floatValues(from:)`.
+- Replaced raw pointer extraction in the benchmark WAV writer with
+  `floatValues(from:)`.
+- Kept tensor dumps on the same helper so debug and production reads agree.
+
+**Gate fix:**
+
+- Added `scripts/audio_quality_probe.py` to classify samples as
+  `reference_pass`, `needs_listening`, or `reject_without_listening`.
+- Updated `scripts/bakeoff_listen.py` to derive speech-health thresholds from
+  PyTorch and known HAR-post references.
+- Added `quality_pass`, `quality_decision`, `quality_reject_reasons`, and full
+  `audio_quality` records to listen metrics JSON.
+- Made `scripts/bakeoff_listen.py` rebuild release `kokoro-bench` when Swift
+  sources are newer than the binary, preventing stale-binary false regressions.
+
+**Commits:**
+
+- `df4763d` — Fix Core ML waveform extraction.
+- `97aeccb` — Add listen sample quality gate.
+
+### Verification
+
+```bash
+uv run python scripts/run_audio_parity_ladder.py --input-key 3s
+uv run python scripts/audio_quality_probe.py \
+  --reference outputs/audio-parity/references/pytorch_3s.wav \
+              outputs/audio-parity/references/pytorch_7s.wav \
+              outputs/audio-parity/references/pytorch_15s.wav \
+              outputs/audio-parity/references/pytorch_30s.wav \
+              outputs/audio-parity/comparators/decoder_har_post_demo.wav \
+  --candidate outputs/bakeoff/listen/config_f_3s.wav \
+              outputs/bakeoff/listen/config_f_7s.wav \
+  --out-dir outputs/bakeoff/listen/quality
+uv run python scripts/bakeoff_listen.py --keys 3s,7s
+uv run pytest
+swift test --package-path swift
+```
+
+Observed after the fix:
+
+- `outputs/bakeoff/listen/config_f_3s.wav`: `quality_pass=true`,
+  `quality_decision=needs_listening`, duration `2.525s`, RMS `4708.0`,
+  active32 `75.668%`, ZCR `8.578%`.
+- `outputs/bakeoff/listen/config_f_7s.wav`: `quality_pass=true`,
+  `quality_decision=needs_listening`, duration `6.000s`, RMS `4885.2`,
+  active32 `83.437%`, ZCR `10.078%`.
+- `outputs/bakeoff/listen/config_f_15s.wav`: `quality_pass=true`,
+  `quality_decision=needs_listening`, duration `12.600s`, RMS `5282.6`,
+  active32 `87.239%`, ZCR `10.858%`.
+- `outputs/bakeoff/listen/config_f_30s.wav`: `quality_pass=true`,
+  `quality_decision=needs_listening`, duration `25.750s`, RMS `4204.1`,
+  active32 `86.033%`, ZCR `11.146%`.
+- Human listening confirmed the regenerated short and medium samples sound
+  recognizably human.
+- `uv run pytest`: `41 passed`.
+- `swift test --package-path swift`: `15 passed`.
+
+### Investigation Log
+
+**2026-04-16**
+
+- **Hypothesis:** The new bakeoff winner might be invalid because the current
+  Config F WAVs are not speech despite having plausible durations.
+- **Tried:** Added an objective audio probe and compared PyTorch references,
+  `outputs/decoder_har_post_demo.wav`, and the failing bakeoff listen files.
+- **Outcome:** Confirmed the current bakeoff files were machine-rejectable
+  before listening: extremely low RMS, active fraction, and ZCR compared with
+  references.
+
+**2026-04-16**
+
+- **Hypothesis:** The old `outputs/decoder_har_post_demo.wav` might show the
+  last known-good HAR-post path and should be reproduced before trusting it.
+- **Tried:** Dug through git history and regenerated the old HAR-post demo with
+  the recovered 3s bucket path.
+- **Outcome:** Reproduction was not byte-exact, but it was functionally close
+  enough for a secondary comparator: exact duration, PCM Pearson about `0.996`,
+  and SNR about `20.7 dB`.
+
+**2026-04-16**
+
+- **Hypothesis:** The first semantic divergence was inside the stage pipeline,
+  not merely in WAV writing.
+- **Tried:** Built a stage-parity ladder for tokens, duration, alignment, `asr`,
+  `f0`, `n`, `x_pre`, HAR components, `GeneratorFromHar`, and waveform output.
+- **Outcome:** The ladder reported `first_failing_boundary=har_source`, but a
+  separate literal Swift `GeneratorFromHar` isolation using Python reference
+  tensors showed high waveform correlation when read stride-safely. This split
+  the problem into remaining `har_source` parity risk plus a confirmed final
+  waveform read corruption.
+
+**2026-04-16**
+
+- **Hypothesis:** Raw pointer reads of the Core ML waveform `MLMultiArray` were
+  corrupting the audio trim.
+- **Tried:** Replaced raw pointer extraction with stride-aware `MLMultiArray`
+  reads in the Swift runtime and benchmark WAV path, then regenerated short and
+  medium samples.
+- **Outcome:** Worked. Objective probe moved the samples from
+  `reject_without_listening` to `needs_listening`, and human listening confirmed
+  recognizable speech.
+
+**2026-04-16**
+
+- **Hypothesis:** The listen helper could still regenerate old bad samples if it
+  used a stale release `kokoro-bench` binary.
+- **Tried:** Made `scripts/bakeoff_listen.py` rebuild release `kokoro-bench`
+  when Swift sources are newer than the binary.
+- **Outcome:** Worked. A smoke run initially rejected stale-binary output, then
+  passed after the release binary rebuilt from the fixed Swift sources.
+
+### If This Recurs
+
+- [ ] Check whether any Core ML output is read through `dataPointer` before
+      confirming its logical strides are contiguous.
+- [ ] Run `uv run python scripts/audio_quality_probe.py` before asking for
+      human listening.
+- [ ] Confirm `scripts/bakeoff_listen.py` rebuilt release `kokoro-bench` after
+      Swift changes.
+- [ ] Treat `har_source` parity as a separate remaining risk; do not assume this
+      waveform-read fix proves every DSP boundary is numerically identical.
+
+---
+
 ## Issue: Decoder-only Core ML sounds non-human (ghost / unintelligible) — Active
 
 **First spotted:** 2026-04-07  
