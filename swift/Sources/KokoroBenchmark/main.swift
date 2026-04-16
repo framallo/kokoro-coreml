@@ -6,7 +6,7 @@
 ///
 ///     kokoro-bench --models-dir DIR --inputs-dir DIR \
 ///                  --hnsf-weights FILE --input-key KEY --seed 42 \
-///                  [--output metrics.json] [--wav out.wav]
+///                  [--output metrics.json] [--wav out.wav] [--dump-tensors DIR]
 ///
 /// **Batch mode** (persistent subprocess — models compiled once):
 ///
@@ -232,8 +232,21 @@ func runPipeline(
     seed: UInt64,
     weights: HnsfWeights,
     cache: ModelCache,
-    wavOutputPath: String? = nil
+    wavOutputPath: String? = nil,
+    tensorDumpPath: String? = nil
 ) throws -> Data {
+    var tensorDump: TensorDumpWriter? = nil
+    if let tensorDumpPath {
+        tensorDump = try TensorDumpWriter(directory: URL(fileURLWithPath: tensorDumpPath))
+    }
+
+    func withTensorDump(_ body: (inout TensorDumpWriter) throws -> Void) throws {
+        if var writer = tensorDump {
+            try body(&writer)
+            tensorDump = writer
+        }
+    }
+
     // Pick duration T
     let enumSizes = [32, 64, 128, 256, 512]
     let actualTokens = benchInput.num_tokens
@@ -258,6 +271,13 @@ func runPipeline(
     for j in 0..<min(benchInput.attention_mask.count, T) { maskPtr[j] = benchInput.attention_mask[j] }
     for j in 0..<min(benchInput.ref_s.count, 256) { refSPtr[j] = benchInput.ref_s[j] }
     speedArray[0] = NSNumber(value: benchInput.speed)
+
+    try withTensorDump { writer in
+        try writer.writeMLMultiArray(name: "tokens", array: idsArray)
+        try writer.writeMLMultiArray(name: "attention_mask", array: maskArray)
+        try writer.writeMLMultiArray(name: "ref_s", array: refSArray)
+        try writer.writeMLMultiArray(name: "speed", array: speedArray)
+    }
 
     let durInput = try MLDictionaryFeatureProvider(dictionary: [
         "input_ids": MLFeatureValue(multiArray: idsArray),
@@ -366,11 +386,26 @@ func runPipeline(
     let predDur = try readDurationFrames(from: predDurArray, validCount: validTokens)
     let frames = predDur.reduce(0, +)
 
+    try withTensorDump { writer in
+        try writer.writeMLMultiArray(name: "pred_dur", array: predDurArray)
+        try writer.writeInt32Array(
+            name: "pred_dur_valid",
+            values: predDur.map { Int32($0) },
+            shape: [1, predDur.count]
+        )
+        try writer.writeMLMultiArray(name: "duration_d", array: dArray)
+        try writer.writeMLMultiArray(name: "duration_t_en", array: tEnArray)
+    }
+
     // Stage 2: Alignment
     let t2 = CFAbsoluteTimeGetCurrent()
     let alignment = buildAlignmentMatrix(predDur: predDur, traceLength: tc, frameCount: frames)
     let t3 = CFAbsoluteTimeGetCurrent()
     let tAlignment = t3 - t2
+
+    try withTensorDump { writer in
+        try writer.writeFloatArray(name: "alignment", values: alignment, shape: [1, tc, frames])
+    }
 
     // Stage 3: Matrix ops
     let t4 = CFAbsoluteTimeGetCurrent()
@@ -380,12 +415,23 @@ func runPipeline(
     let t5 = CFAbsoluteTimeGetCurrent()
     let tMatrixOps = t5 - t4
 
+    try withTensorDump { writer in
+        try writer.writeMLMultiArray(name: "d_transposed", array: dTransposed)
+        try writer.writeMLMultiArray(name: "en", array: en)
+        try writer.writeMLMultiArray(name: "asr", array: asr)
+    }
+
     // Stage 4: F0Ntrain
     let t6 = CFAbsoluteTimeGetCurrent()
     let enPadded = try zeroPad3D(source: en, channels: 640, targetTime: tFrames)
     let sArray = try makeZeroArray2D(dim: 128)
     let sP = sArray.dataPointer.assumingMemoryBound(to: Float.self)
     for j in 0..<128 { sP[j] = benchInput.ref_s[128 + j] }
+
+    try withTensorDump { writer in
+        try writer.writeMLMultiArray(name: "en_padded", array: enPadded)
+        try writer.writeMLMultiArray(name: "s", array: sArray)
+    }
 
     let f0nInput = try MLDictionaryFeatureProvider(dictionary: [
         "en": MLFeatureValue(multiArray: enPadded),
@@ -405,6 +451,11 @@ func runPipeline(
     var nCurve = [Float](repeating: 0, count: f0Len)
     for j in 0..<f0Len { f0Curve[j] = f0P[j]; nCurve[j] = nP[j] }
 
+    try withTensorDump { writer in
+        try writer.writeFloatArray(name: "f0", values: f0Curve, shape: [1, f0Len])
+        try writer.writeFloatArray(name: "n", values: nCurve, shape: [1, f0Len])
+    }
+
     // Stage 5: Padding
     let t8 = CFAbsoluteTimeGetCurrent()
     let f0Padded = zeroPad1D(source: f0Curve, targetLength: fullF0Len)
@@ -414,6 +465,12 @@ func runPipeline(
     let asrPadded = try zeroPad3D(source: asr, channels: 512, targetTime: frameCount)
     let t9 = CFAbsoluteTimeGetCurrent()
     let tPadding = t9 - t8
+
+    try withTensorDump { writer in
+        try writer.writeFloatArray(name: "f0_padded", values: f0Padded, shape: [1, fullF0Len])
+        try writer.writeFloatArray(name: "n_padded", values: nPadded, shape: [1, fullF0Len])
+        try writer.writeMLMultiArray(name: "asr_padded", array: asrPadded)
+    }
 
     // Stage 6: DecoderPre CoreML
     let t10 = CFAbsoluteTimeGetCurrent()
@@ -436,6 +493,10 @@ func runPipeline(
     let t11 = CFAbsoluteTimeGetCurrent()
     let tDecoderPre = t11 - t10
 
+    try withTensorDump { writer in
+        try writer.writeMLMultiArray(name: "x_pre", array: xPre)
+    }
+
     // Stage 7: hn-nsf Swift
     let t12 = CFAbsoluteTimeGetCurrent()
     let (harFlat, harFrames) = buildHar(
@@ -446,6 +507,10 @@ func runPipeline(
     )
     let t13 = CFAbsoluteTimeGetCurrent()
     let tHnsf = t13 - t12
+
+    try withTensorDump { writer in
+        try writer.writeFloatArray(name: "har", values: harFlat, shape: [1, 22, harFrames])
+    }
 
     // Stage 8: GeneratorFromHar CoreML
     let t14 = CFAbsoluteTimeGetCurrent()
@@ -460,6 +525,11 @@ func runPipeline(
     let harExpTime = genShapes["har"]?.last ?? harFrames
     let xPrePadded = try zeroPad3D(source: xPre, channels: xPre.shape[1].intValue, targetTime: xPreExpTime)
     let harPadded = try zeroPad3D(source: harArray, channels: 22, targetTime: harExpTime)
+
+    try withTensorDump { writer in
+        try writer.writeMLMultiArray(name: "x_pre_padded", array: xPrePadded)
+        try writer.writeMLMultiArray(name: "har_padded", array: harPadded)
+    }
 
     let genInput = try MLDictionaryFeatureProvider(dictionary: [
         "x_pre": MLFeatureValue(multiArray: xPrePadded),
@@ -480,6 +550,14 @@ func runPipeline(
     let t17 = CFAbsoluteTimeGetCurrent()
     let tTrim = t17 - t16
 
+    try withTensorDump { writer in
+        let wPtr = waveformArr.dataPointer.assumingMemoryBound(to: Float.self)
+        var samples = [Float](repeating: 0, count: trimLen)
+        for i in 0..<trimLen { samples[i] = wPtr[i] }
+        try writer.writeMLMultiArray(name: "waveform_full", array: waveformArr)
+        try writer.writeFloatArray(name: "waveform", values: samples, shape: [trimLen])
+    }
+
     if let wavPath = wavOutputPath {
         let wPtr = waveformArr.dataPointer.assumingMemoryBound(to: Float.self)
         var samples = [Float](repeating: 0, count: trimLen)
@@ -491,7 +569,6 @@ func runPipeline(
     let wallTime = t17 - t0
     let canonicalDur = benchInput.canonical_duration_s ?? (Double(origF0Len) / 80.0)
     let observedDur = Double(trimLen) / 24000.0
-    try validateDurationAgreement(inputKey: inputKey, canonical: benchInput.canonical_duration_s, observed: observedDur)
 
     let result: [String: Any] = [
         "config": "f",
@@ -522,6 +599,33 @@ func runPipeline(
         "t_orchestration_s": NSNull(),
     ]
 
+    try withTensorDump { writer in
+        try writer.writeManifest(metadata: [
+            "producer": "swift",
+            "executable": "kokoro-bench",
+            "input_key": inputKey,
+            "text": benchInput.text,
+            "voice": benchInput.voice,
+            "speed": benchInput.speed,
+            "seed": seed,
+            "bucket_seconds": bucketSec,
+            "duration_token_length": T,
+            "num_tokens": benchInput.num_tokens,
+            "natural_frames": frames,
+            "canonical_duration_s": benchInput.canonical_duration_s ?? NSNull(),
+            "observed_audio_duration_s": observedDur,
+            "t_frames": tFrames,
+            "full_f0_len": fullF0Len,
+            "decoder_frame_count": frameCount,
+            "x_pre_expected_time": xPreExpTime,
+            "har_expected_time": harExpTime,
+            "trim_len": trimLen,
+            "hnsf_reference_command": "uv run python scripts/validate_hnsf_swift.py generate",
+        ])
+    }
+
+    try validateDurationAgreement(inputKey: inputKey, canonical: benchInput.canonical_duration_s, observed: observedDur)
+
     return try JSONSerialization.data(withJSONObject: result, options: [.sortedKeys])
 }
 
@@ -529,6 +633,7 @@ func runPipeline(
 
 func runSingleShot(modelsDir: String, inputsDir: String, hnsfWeightsPath: String,
                     inputKey: String, seed: UInt64, outputPath: String?, wavPath: String?,
+                    tensorDumpPath: String?,
                     warmupCount: Int,
                     computeUnits: MLComputeUnits = .all) throws {
     let weightsData = try Data(contentsOf: URL(fileURLWithPath: hnsfWeightsPath))
@@ -547,7 +652,8 @@ func runSingleShot(modelsDir: String, inputsDir: String, hnsfWeightsPath: String
         seed: seed,
         weights: weights,
         cache: cache,
-        wavOutputPath: wavPath
+        wavOutputPath: wavPath,
+        tensorDumpPath: tensorDumpPath
     )
 
     let jsonString = String(data: jsonData, encoding: .utf8)!
@@ -643,6 +749,7 @@ func main() throws {
     var inputKey: String?
     var outputPath: String?
     var wavPath: String?
+    var tensorDumpPath: String?
     var warmupCount = 1
     var seed: UInt64 = 42
     var batchMode = false
@@ -667,6 +774,8 @@ func main() throws {
             i += 1; outputPath = args[i]
         case "--wav":
             i += 1; wavPath = args[i]
+        case "--dump-tensors":
+            i += 1; tensorDumpPath = args[i]
         case "--batch":
             batchMode = true
         case "--compute-units":
@@ -706,6 +815,7 @@ func main() throws {
         }
         try runSingleShot(modelsDir: modelsDir, inputsDir: inputsDir, hnsfWeightsPath: hnsfWeightsPath,
                           inputKey: inputKey, seed: seed, outputPath: outputPath, wavPath: wavPath,
+                          tensorDumpPath: tensorDumpPath,
                           warmupCount: warmupCount,
                           computeUnits: computeUnits)
     }

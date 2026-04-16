@@ -36,4 +36,26 @@ final class MLMultiArrayBindingTests: XCTestCase {
             try validateDurationAgreement(inputKey: "15s", canonical: 13.9, observed: 13.7)
         )
     }
+
+    func testTensorDumpWriterWritesManifestAndPayloads() throws {
+        let dir = FileManager.default.temporaryDirectory
+            .appendingPathComponent("kokoro-tensor-dump-\(UUID().uuidString)")
+        defer { try? FileManager.default.removeItem(at: dir) }
+
+        var writer = try TensorDumpWriter(directory: dir)
+        try writer.writeInt32Array(name: "tokens", values: [1, 2, 3], shape: [1, 3])
+        try writer.writeFloatArray(name: "waveform", values: [0.0, 0.25, -0.5], shape: [3])
+        try writer.writeManifest(metadata: ["producer": "test"])
+
+        let manifestURL = dir.appendingPathComponent("tensor_manifest.json")
+        let manifestData = try Data(contentsOf: manifestURL)
+        let manifest = try JSONSerialization.jsonObject(with: manifestData) as? [String: Any]
+        let tensors = manifest?["tensors"] as? [[String: Any]]
+
+        XCTAssertEqual(manifest?["schema_version"] as? Int, 1)
+        XCTAssertEqual((manifest?["metadata"] as? [String: Any])?["producer"] as? String, "test")
+        XCTAssertEqual(tensors?.count, 2)
+        XCTAssertTrue(FileManager.default.fileExists(atPath: dir.appendingPathComponent("tokens.i32").path))
+        XCTAssertTrue(FileManager.default.fileExists(atPath: dir.appendingPathComponent("waveform.f32").path))
+    }
 }

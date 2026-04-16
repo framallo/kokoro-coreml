@@ -69,7 +69,7 @@ this plan document or for a completed fix set.
       listen to any generated sample.
 - [ ] Freeze the failing bakeoff WAVs and record objective waveform and
       spectrogram evidence for regression comparison.
-- [ ] Establish a stage-parity harness that can compare Python reference tensors
+- [x] Establish a stage-parity harness that can compare Python reference tensors
       with the Swift + Core ML winner at every boundary.
 - [ ] Identify and fix the first semantic audio divergence in the current
       post-update runtime.
@@ -296,19 +296,20 @@ obvious non-speech files are rejected before the user is asked to listen.
 
 **Tasks:**
 
-- [ ] Extend or add a Python capture script, likely
+- [x] Extend or add a Python capture script, likely
       `scripts/capture_audio_parity_tensors.py`, that dumps `tokens`, `ref_s`,
       duration output, alignment output, `asr`, `f0`, `n`, `x_pre`, `har`, and
       final waveform for one short input.
-- [ ] Extend `swift/Sources/KokoroBenchmark/main.swift` or add a debug subcommand
+- [x] Extend `swift/Sources/KokoroBenchmark/main.swift` or add a debug subcommand
       to dump the same boundaries from `KokoroPipeline`.
-- [ ] Add `scripts/compare_audio_parity_tensors.py` with shape, dtype, max error,
+- [x] Add `scripts/compare_audio_parity_tensors.py` with shape, dtype, max error,
       cosine similarity, and correlation checks.
-- [ ] Include the existing `scripts/validate_hnsf_swift.py generate` and Swift
+- [x] Include the existing `scripts/validate_hnsf_swift.py generate` and Swift
       harmonic-source comparison in the ladder.
 
-**Verification:** One command can show the first failing boundary between Python
-reference and the current Swift + Core ML path for the short sample.
+**Verification:** `uv run python scripts/run_audio_parity_ladder.py --input-key
+3s` can show the first failing boundary between Python reference and the current
+Swift + Core ML path for the short sample.
 
 ---
 
