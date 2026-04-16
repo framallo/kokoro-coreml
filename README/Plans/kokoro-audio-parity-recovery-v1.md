@@ -1,7 +1,7 @@
 # Kokoro Audio Parity Recovery Plan
 
 **Date:** 2026-04-16
-**Status:** Planned
+**Status:** In-Progress
 
 ## Executive Summary
 
@@ -212,27 +212,27 @@ it with one existing enumerated shape or bucket before using it as a comparator.
 
 **Tasks:**
 
-- [ ] Search git history for the demo artifact and generation breadcrumbs:
+- [x] Search git history for the demo artifact and generation breadcrumbs:
       `git log --all --full-history -- outputs/decoder_har_post_demo.wav`,
       `git log -S decoder_har_post_demo --all`, and related searches for
       `decoder_har_post`, `demo.wav`, and HAR-post smoke commands.
-- [ ] Use `git show` on candidate commits to inspect old scripts, notes, command
+- [x] Use `git show` on candidate commits to inspect old scripts, notes, command
       lines, text prompts, voice, speed, package names, and artifact hashes
       without mutating the current worktree.
-- [ ] Identify the enumerated shape or bucket that produced the demo. The likely
+- [x] Identify the enumerated shape or bucket that produced the demo. The likely
       first candidate is the `3s` HAR-post bucket because the demo is about
       `1.363s`, but the plan must follow the recovered provenance rather than
       assume that bucket.
-- [ ] Re-run the recovered command with the matching enumerated shape or bucket
+- [x] Re-run the recovered command with the matching enumerated shape or bucket
       and write the reproduction to
       `outputs/audio-parity/replicated/decoder_har_post_demo_repro.wav`.
-- [ ] Compare the original and reproduction by file SHA256, WAV header, PCM
+- [x] Compare the original and reproduction by file SHA256, WAV header, PCM
       SHA256, duration, RMS, peak, active fraction, zero-crossing rate, waveform
       plot, and spectrogram.
-- [ ] If byte-exact reproduction fails, compare after normalizing WAV container
+- [x] If byte-exact reproduction fails, compare after normalizing WAV container
       metadata and then compare intermediate tensors (`x_pre`, `ref_s`, `har`,
       and waveform) to locate the first remaining delta.
-- [ ] Record the exact recovered command, commit provenance, model artifact
+- [x] Record the exact recovered command, commit provenance, model artifact
       paths, artifact hashes, enumerated shape or bucket, text, voice, speed,
       and comparison result in `outputs/audio-parity/demo-provenance.json` and
       `outputs/audio-parity/demo-provenance.md`.
