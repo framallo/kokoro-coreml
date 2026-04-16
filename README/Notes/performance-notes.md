@@ -694,6 +694,113 @@ This anomaly does **not** appear on M2 Ultra (Config F is 1.2x faster than A at 
 
 ---
 
+## Bakeoff v5: Corrected benchmark (3s-30s) on M2 MacBook Air
+
+**First collected:** 2026-04-15
+**Status:** Complete
+
+### Summary
+
+Reruns the v4 extended-duration bakeoff on M2 Air after fixing **critical measurement bugs** discovered in the audit:
+
+1. **Config A only had 2 bucket models (3s, 10s)** — for 7s/15s/30s inputs, `_select_bucket_seconds` fell back to the 10s model. Config F had all 5 buckets. The v4 "Config F loses to Config A at long durations" was comparing different workloads.
+2. **Swift F0Ntrain tFrames mapping was wrong** — hardcoded `400` for all non-3s buckets instead of `560/1200/2400`. This silently truncated 28-64% of aligned features for 15s/30s inputs.
+3. **Duplicate matmul** inflated Config F wall time by one redundant 512×T×N matrix multiply.
+4. **ANE plan compilation** could contaminate timed blocks after bucket-switch eviction.
+
+With all bugs fixed, **Config F wins at every duration on M2 Air** — the v4 anomaly is eliminated.
+
+### End-to-end wall time (warm median, milliseconds)
+
+| Input | Audio | Bucket | A (Python HAR) | D (MPS) | E (CPU) | F (Swift) |
+| --- | --- | --- | --- | --- | --- | --- |
+| 3s | 2.80s | 3s | 355 ms | 394 ms | 736 ms | **200 ms** |
+| 7s | 6.75s | 7s | 544 ms | 812 ms | 1985 ms | **326 ms** |
+| 15s | 13.90s | 15s | 1178 ms | 1573 ms | 4002 ms | **783 ms** |
+| 30s | 27.38s | 30s | 2443 ms | 3350 ms | 8065 ms | **1829 ms** |
+
+### RTF and realtime factor
+
+| Input | Audio | A RTF | D RTF | E RTF | F RTF | F realtime |
+| --- | --- | --- | --- | --- | --- | --- |
+| 3s | 2.80s | 0.127 | 0.141 | 0.263 | **0.071** | **14x RT** |
+| 7s | 6.75s | 0.081 | 0.120 | 0.294 | **0.048** | **21x RT** |
+| 15s | 13.90s | 0.085 | 0.113 | 0.288 | **0.056** | **18x RT** |
+| 30s | 27.38s | 0.089 | 0.122 | 0.295 | **0.067** | **15x RT** |
+
+### Speedup: Config F vs baselines
+
+| Input | F vs A (Python HAR) | F vs D (MPS) | F vs E (CPU) |
+| --- | --- | --- | --- |
+| 3s | **1.8x** | **2.0x** | **3.7x** |
+| 7s | **1.7x** | **2.5x** | **6.1x** |
+| 15s | **1.5x** | **2.0x** | **5.1x** |
+| 30s | **1.3x** | **1.8x** | **4.4x** |
+
+### Config F stage breakdown (warm median, ms)
+
+| Stage | 3s | 7s | 15s | 30s |
+| --- | --- | --- | --- | --- |
+| Duration CoreML | 8 ms | 13 ms | 27 ms | 83 ms |
+| Matrix ops | 18 ms | 36 ms | 73 ms | 2 ms |
+| F0Ntrain CoreML | 3 ms | 32 ms | 70 ms | 140 ms |
+| Padding | 0.1 ms | 0.1 ms | 0.3 ms | 0.7 ms |
+| DecoderPre CoreML | 3 ms | 5 ms | 11 ms | 28 ms |
+| hn-nsf Swift | 9 ms | 22 ms | 47 ms | 100 ms |
+| GeneratorFromHar CoreML | 158 ms | 218 ms | 552 ms | 1471 ms |
+
+### Cross-machine comparison (Config F)
+
+| Input | M2 Ultra | M2 Air | Air/Ultra ratio |
+| --- | --- | --- | --- |
+| 3s | 65 ms | 200 ms | 3.1x slower |
+| 7s | 142 ms | 326 ms | 2.3x slower |
+| 15s | 254 ms | 783 ms | 3.1x slower |
+| 30s | 349 ms | 1829 ms | 5.2x slower |
+
+### Cross-machine comparison (Config A)
+
+| Input | M2 Ultra | M2 Air | Air/Ultra ratio |
+| --- | --- | --- | --- |
+| 3s | 161 ms | 355 ms | 2.2x slower |
+| 7s | 219 ms | 544 ms | 2.5x slower |
+| 15s | 276 ms | 1178 ms | 4.3x slower |
+| 30s | 435 ms | 2443 ms | 5.6x slower |
+
+### What changed from v4
+
+Config A at 15s went from 554 ms to 1178 ms (+624 ms) and at 30s from 854 ms to 2443 ms (+1589 ms) because it now runs the correct bucket model instead of the 10s fallback. Config F at 30s went from 2280 ms to 1829 ms (-451 ms) thanks to removing the duplicate matmul, fixing F0Ntrain truncation (which corrupted pitch predictions), and eliminating ANE plan compilation from timed blocks.
+
+### The v4 "GeneratorFromHar anomaly" — debunked
+
+The v4 finding that "Config F is slower than Config A at 15s/30s on M2 Air" was entirely an artifact of the bucket mismatch. Config A was running a 10s model for 15s/30s inputs while Config F ran the correctly-sized models. Additionally, Config F's F0Ntrain was fed truncated data (tFrames=400 instead of 1200/2400), producing corrupted pitch predictions that cascaded through the pipeline.
+
+With fair bucket parity, Config F is **1.3-1.8x faster than Config A** at every duration on M2 Air, consistent with the M2 Ultra pattern.
+
+### Interpretation
+
+1. **Config F wins everywhere on M2 Air.** The v4 anomaly was a measurement bug, not a hardware limitation. The Swift+CoreML pipeline is 1.3-1.8x faster than Python HAR-post at all durations.
+
+2. **GeneratorFromHar dominates at all durations.** It accounts for 79% of wall time at 3s and 80% at 30s. This is the primary optimization target.
+
+3. **Config F achieves 14-21x realtime on M2 Air.** Peak throughput is at 7s (21x RT). The 30s input drops to 15x RT because GeneratorFromHar scales superlinearly with duration.
+
+4. **Air/Ultra ratio for Config F is 2.3-5.2x.** This is wider than Config A's 2.2-5.6x ratio, but both show the same scaling pattern — the gap grows with duration because longer models stress the M2 Air's reduced ANE cores and memory bandwidth.
+
+5. **Config D (MPS) OOM'd in the main run** due to memory pressure from loading 5 bucket CoreML models simultaneously. A separate MPS-only pass succeeded; results in table above. Config F beats MPS by 1.8-2.5x.
+
+### Provenance
+
+- Machine: Apple M2 MacBook Air, 24 GB, macOS 15.7.5
+- Git: main branch, commit `61f1dc5` (audit fixes)
+- Swift: Apple Swift version 6.1
+- Torch: 2.6.0 / coremltools: 8.3.0
+- Order seed: 0, iterations: 5
+- Results: `outputs/bakeoff/results_m2_air_v5.json` (A, E, F), `outputs/bakeoff/results_m2_air_v5_mps.json` (D)
+- Config D ran in a separate pass due to MPS OOM in the combined run
+
+---
+
 ## Bakeoff v2: Controlled benchmark on M1 Mini
 
 **First collected:** 2026-04-15
