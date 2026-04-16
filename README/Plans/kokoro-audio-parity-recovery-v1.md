@@ -250,16 +250,16 @@ ones for comparison.
 
 **Tasks:**
 
-- [ ] Create `outputs/audio-parity/` with a manifest containing git commit,
+- [x] Create `outputs/audio-parity/` with a manifest containing git commit,
       dirty-tree status, machine info, voice, speed, text, and artifact paths.
-- [ ] Generate full PyTorch reference WAVs for the same short inputs used by
+- [x] Generate full PyTorch reference WAVs for the same short inputs used by
       `scripts/bakeoff_listen.py`.
-- [ ] Copy or link `outputs/decoder_har_post_demo.wav` into the report set with
+- [x] Copy or link `outputs/decoder_har_post_demo.wav` into the report set with
       Phase 0 provenance attached. If Phase 0 could not reproduce it exactly,
       label it as a secondary comparator, not primary truth.
-- [ ] Snapshot current failing files from `outputs/bakeoff/listen/` into
+- [x] Snapshot current failing files from `outputs/bakeoff/listen/` into
       `outputs/audio-parity/failing-current/`.
-- [ ] Write `outputs/audio-parity/index.md` listing the reference and failing
+- [x] Write `outputs/audio-parity/index.md` listing the reference and failing
       WAV paths for listening.
 
 **Verification:** The user has at least one PyTorch reference WAV and one failing
