@@ -1,6 +1,6 @@
 # kokoro-coreml
 
-**30 seconds of speech in 1.2 seconds. On a Mac Mini. No cloud, no API key, no network.**
+**30 seconds of speech in 1.2 seconds. On an M1 Mac Mini. No cloud, no API key, no network.**
 
 [Kokoro-82M](https://huggingface.co/hexgrad/Kokoro-82M) running natively on the Apple Neural Engine via CoreML. Five compiled models, one Swift pipeline, zero Python at inference time. Every Mac with Apple Silicon is a TTS server.
 
@@ -40,7 +40,17 @@ Counterbalanced ordering, 5 iterations, warm median. Full data: [bakeoff-results
 
 ## Architecture
 
-Five CoreML models chained with native Swift DSP. Zero Python at inference time.
+Five CoreML models chained with native Swift DSP. Text goes in, 24 kHz audio comes out. Zero Python at inference time.
+
+```
+Text → Phonemes → Duration (CoreML) → Alignment (Swift) → Matrix ops (Accelerate)
+  → F0Ntrain (CoreML) → DecoderPre (CoreML) + hn-nsf (Swift) → GeneratorFromHar (CoreML) → Audio
+```
+
+Four models run on the ANE. One DSP stage (harmonic source) runs in Swift with double-precision phase accumulation. The generator has zero `nn.Linear` ops — all replaced with `Conv1d(kernel_size=1)` to keep it on the ANE path (48 → 0 linear ops in the MIL graph).
+
+<details>
+<summary>Full pipeline diagram and model inventory</summary>
 
 ```
 Text --> Phonemes (tokenizer)
@@ -71,8 +81,6 @@ GeneratorFromHar CoreML --> waveform (24 kHz)
 Trim (Swift) --> final audio
 ```
 
-### Model inventory
-
 | Model | Sizes | Input | Output | Role |
 | --- | --- | --- | --- | --- |
 | `kokoro_duration_t{N}` | T=32, 64, 128, 256, 512 | input_ids, attention_mask, ref_s, speed | pred_dur, d, t_en, s, ref_s_out | BERT + prosody prediction |
@@ -82,17 +90,17 @@ Trim (Swift) --> final audio
 
 The Duration model uses per-size exports because E5RT (Apple Neural Engine runtime) cannot handle `RangeDim` or `EnumeratedShapes` with multiple variable inputs. The caller pads tokens to the nearest enumeration.
 
-The GeneratorFromHar model has all `nn.Linear` replaced with `nn.Conv1d(kernel_size=1)` in `AdaIN1d`, reducing MIL linear ops from 48 to 0. This keeps the entire generator on the ANE path.
+</details>
 
-## Quick start
-
-### One-command setup
+## Hear it yourself
 
 ```bash
-bash scripts/setup_bakeoff.sh
+bash scripts/setup_bakeoff.sh                     # deps, models, exports, Swift build (~10 min)
+uv run python scripts/bakeoff_listen.py            # render WAVs through the Swift+CoreML pipeline
+afplay outputs/bakeoff/listen/config_f_3s.wav      # listen
 ```
 
-This handles everything: Python deps, model downloads from HF, all model exports (Duration, F0Ntrain, DecoderPre, GeneratorFromHar), Swift binary build, and benchmark input preparation. Takes ~10 minutes. Use `--skip-download` if models are already local.
+Three commands. WAVs land in `outputs/bakeoff/listen/`. Use `--skip-download` if models are already local.
 
 ### Run the benchmark
 
@@ -102,49 +110,17 @@ uv run python scripts/bakeoff_harness.py run \
   --configs a,d,e,f --iterations 5 --order-seed 0
 ```
 
-Or use the `$bakeoff` skill — it walks through prerequisites, runs the harness, and updates performance-notes.md.
-
-### Listen to Config F audio (bakeoff inputs)
-
-The benchmark records timings only. To **render and hear** the same Swift+Core ML (Config F) outputs as the bakeoff, generate WAVs locally (not checked into git):
-
-```bash
-uv run python scripts/bakeoff_listen.py
-```
-
-**Output directory (repo root):** `outputs/bakeoff/listen/`
-
-| Bakeoff key | WAV (24 kHz mono PCM) | Metrics JSON |
-| --- | --- | --- |
-| `3s` | `outputs/bakeoff/listen/config_f_3s.wav` | `outputs/bakeoff/listen/config_f_3s.json` |
-| `7s` | `outputs/bakeoff/listen/config_f_7s.wav` | `outputs/bakeoff/listen/config_f_7s.json` |
-| `15s` | `outputs/bakeoff/listen/config_f_15s.wav` | `outputs/bakeoff/listen/config_f_15s.json` |
-| `30s` | `outputs/bakeoff/listen/config_f_30s.wav` | `outputs/bakeoff/listen/config_f_30s.json` |
-
-**Play on macOS:** open a file in Finder, or from the repo root run `open outputs/bakeoff/listen/config_f_3s.wav`, or `afplay outputs/bakeoff/listen/config_f_3s.wav`. Prereqs: Swift `kokoro-bench` built and Core ML models present (see setup above); the script runs `prepare_swift_bench_inputs.py` if inputs are missing.
-
-### Manual steps (if you prefer)
-
 <details>
-<summary>Individual setup commands</summary>
+<summary>Manual setup (step-by-step)</summary>
 
 ```bash
-# 1. Python deps
 uv sync
-
-# 2. Download base models from HF
 uv run python scripts/download_models.py --coreml
-
-# 3. Export all models
 uv run python export_duration.py
 uv run python export_f0ntrain.py --t-frames 120 400 560 1200 2400
 uv run python export_decoder_pre.py --buckets 3 7 10 15 30
 uv run python -m export_synth.main --buckets "3s,7s,10s,15s,30s" --mode decoder-har --output_dir coreml
-
-# 4. Build Swift binary
 cd swift && swift build -c release --product kokoro-bench && cd ..
-
-# 5. Prepare benchmark inputs
 uv run python scripts/bakeoff_harness.py prepare-inputs
 uv run python scripts/prepare_swift_bench_inputs.py
 ```
@@ -185,6 +161,9 @@ let result = try pipeline.synthesize(
 
 ## Bakeoff configs
 
+<details>
+<summary>Config details (A through F)</summary>
+
 | Config | What it measures | Pipeline | Status |
 | --- | --- | --- | --- |
 | **F** | Swift + CoreML (winner) | 5 CoreML models + Swift hn-nsf DSP | **Production** |
@@ -193,52 +172,13 @@ let result = try pipeline.synthesize(
 | **E** | PyTorch CPU | Full PyTorch on CPU | Comparison |
 | B/C | ANE participation (diagnostic) | Decoder-only CoreML under .all / .cpuAndGPU | Diagnostic |
 
-Config F is the recommended production path. The bakeoff harness uses a persistent batch subprocess for Config F — models compile once at startup and stay cached across all iterations. See [bakeoff-results.md](README/Notes/bakeoff-results.md) for the full cross-machine matrix.
+The bakeoff harness uses a persistent batch subprocess for Config F — models compile once at startup and stay cached across all iterations. See [bakeoff-results.md](README/Notes/bakeoff-results.md) for the full cross-machine matrix.
 
-## Repository structure
+</details>
 
-```
-kokoro-coreml/
-  coreml/                          # CoreML .mlpackage files (downloaded from HF)
-  swift/                           # Swift Package (KokoroPipeline)
-    Sources/KokoroPipeline/        # Pipeline library (production)
-    Sources/KokoroBenchmark/       # Benchmark CLI with batch mode + model cache
-    Tests/                         # Unit tests + benchmarks
-  kokoro/                          # Python TTS library (PyTorch)
-    coreml_pipeline.py             # Hybrid PyTorch+CoreML orchestrator
-    synthesis_backends.py          # HAR-post / decoder-only backends
-  export_duration.py               # Duration model export (enumerated sizes)
-  export_f0ntrain.py               # F0Ntrain export
-  export_decoder_pre.py            # DecoderPre export
-  export_synth/                    # GeneratorFromHar / full synth export
-  scripts/
-    bakeoff_harness.py             # Controlled benchmark harness (persistent batch subprocess)
-    bakeoff_summarize.py           # Results summary tables
-    download_models.py             # HF Hub downloader
-    prepare_swift_bench_inputs.py  # Pre-tokenize for Swift benchmark
-    setup_bakeoff.sh               # One-command setup (deps, models, exports, build)
-  README/
-    Notes/bakeoff-results.md       # Final v5 cross-machine comparison
-    Notes/performance-notes.md     # Full bakeoff history + stage breakdowns
-    Notes/debug-notes.md           # Active issues + resolved investigations
-    Plans/                         # Implementation plans (bakeoff, ANE opt, Swift rewrite)
-    Guides/                        # Apple Silicon / CoreML guides
-```
+## Python fallback
 
-## Documentation
-
-- **Bakeoff results:** [bakeoff-results.md](README/Notes/bakeoff-results.md) -- final corrected v5 cross-machine comparison (M2 Ultra, M2 Air, M1 Mini)
-- **Performance data:** [performance-notes.md](README/Notes/performance-notes.md) -- all bakeoff history (v2-v5), stage breakdowns, raw timings
-- **Bakeoff plan:** [kokoro-bakeoff-v2.md](README/Plans/kokoro-bakeoff-v2.md) -- benchmark methodology, Phases 0-7
-- **ANE optimization:** [ane-optimization-v1.md](README/Plans/ane-optimization-v1.md) -- Linear→Conv1d swap, MIL audit (48→0 linear ops)
-- **Swift pipeline plan:** [swift-prefix-rewrite-v1.md](README/Plans/swift-prefix-rewrite-v1.md) -- architecture, export strategy, per-stage validation
-- **Debug notes:** [debug-notes.md](README/Notes/debug-notes.md) -- decoder-only quality issues, hn-nsf CoreML failure, M1 Mini OOM workarounds
-- **Learnings:** [learnings.md](README/learnings.md) -- historical conversion challenges and solutions
-- **CoreML scheduling guide:** [CoreML-Compute-Unit-Scheduling-guide.md](README/Guides/apple-silicon/CoreML-Compute-Unit-Scheduling-guide.md)
-
-## Python usage
-
-The original Kokoro Python library works independently of the CoreML pipeline:
+Don't need CoreML? The original Kokoro Python library works standalone:
 
 ```python
 from kokoro import KPipeline
@@ -249,16 +189,49 @@ for i, (gs, ps, audio) in enumerate(pipeline('Hello world!', voice='af_heart')):
     sf.write(f'{i}.wav', audio, 24000)
 ```
 
-For MPS GPU acceleration on Apple Silicon:
+For MPS GPU acceleration: `PYTORCH_ENABLE_MPS_FALLBACK=1 python your_script.py`
 
-```bash
-PYTORCH_ENABLE_MPS_FALLBACK=1 python your_script.py
+## Deep dive
+
+<details>
+<summary>Repository structure</summary>
+
+```
+kokoro-coreml/
+  coreml/                          # CoreML .mlpackage files (downloaded from HF)
+  swift/                           # Swift Package (KokoroPipeline)
+    Sources/KokoroPipeline/        # Pipeline library (production)
+    Sources/KokoroBenchmark/       # Benchmark CLI with batch mode + model cache
+  kokoro/                          # Python TTS library (PyTorch)
+  export_duration.py               # Duration model export
+  export_f0ntrain.py               # F0Ntrain export
+  export_decoder_pre.py            # DecoderPre export
+  export_synth/                    # GeneratorFromHar export
+  scripts/
+    setup_bakeoff.sh               # One-command setup
+    bakeoff_harness.py             # Benchmark harness
+    bakeoff_listen.py              # Render WAVs from benchmark inputs
+    download_models.py             # HF Hub downloader
 ```
 
-## Acknowledgements
+</details>
 
-- [@yl4579](https://huggingface.co/yl4579) for architecting StyleTTS 2
-- [@Pendrokar](https://huggingface.co/Pendrokar) for TTS Spaces Arena
-- [hexgrad/Kokoro-82M](https://huggingface.co/hexgrad/Kokoro-82M) for the open-weight model
-- Apple's coremltools team
-- Discord: https://discord.gg/QuGxSWBfQy
+<details>
+<summary>Documentation index</summary>
+
+- [bakeoff-results.md](README/Notes/bakeoff-results.md) -- v5 cross-machine comparison (M2 Ultra, M2 Air, M1 Mini)
+- [performance-notes.md](README/Notes/performance-notes.md) -- full bakeoff history, stage breakdowns
+- [ane-optimization-v1.md](README/Plans/ane-optimization-v1.md) -- Linear→Conv1d swap (48→0 MIL linear ops)
+- [swift-prefix-rewrite-v1.md](README/Plans/swift-prefix-rewrite-v1.md) -- Swift pipeline architecture
+- [debug-notes.md](README/Notes/debug-notes.md) -- active issues and resolved investigations
+- [learnings.md](README/learnings.md) -- conversion challenges and solutions
+- [CoreML-Compute-Unit-Scheduling-guide.md](README/Guides/apple-silicon/CoreML-Compute-Unit-Scheduling-guide.md)
+
+</details>
+
+---
+
+Built on [Kokoro-82M](https://huggingface.co/hexgrad/Kokoro-82M) by [hexgrad](https://huggingface.co/hexgrad), [StyleTTS 2](https://github.com/yl4579/StyleTTS2) by [@yl4579](https://huggingface.co/yl4579), and Apple's coremltools.
+
+Run it on your Mac. [Tell us how fast it is.](https://discord.gg/QuGxSWBfQy)
+
