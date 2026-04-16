@@ -238,8 +238,12 @@ public class KokoroPipeline {
 
         // ---- Stage 3: Matrix ops (en = d @ alignment, asr = t_en @ alignment) ----
         let t4 = CFAbsoluteTimeGetCurrent()
+        // Duration model outputs d as (1, tokens, 640); matmul3D expects (1, M=640, K=tokens).
+        let dTransposed = try transpose3D(
+            source: dArray, dim1: PipelineConstants.hiddenDim, dim2: tokenCount
+        )
         let en = try matmul3D(
-            a: dArray,
+            a: dTransposed,
             b: alignment,
             M: PipelineConstants.hiddenDim,
             K: tokenCount,
