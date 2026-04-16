@@ -25,6 +25,28 @@ final class MLMultiArrayBindingTests: XCTestCase {
         XCTAssertEqual(try readDurationFrames(from: arr), [13, 1, 1, 2])
     }
 
+    func testFloatValuesReadsLogicalOrderForStridedArray() throws {
+        let storage = UnsafeMutablePointer<Float>.allocate(capacity: 6)
+        for idx in 0..<6 {
+            storage[idx] = -100.0 - Float(idx)
+        }
+        storage[0] = 1.0
+        storage[2] = 2.0
+        storage[4] = 3.0
+
+        let arr = try MLMultiArray(
+            dataPointer: UnsafeMutableRawPointer(storage),
+            shape: [1, 3],
+            dataType: .float32,
+            strides: [6, 2],
+            deallocator: { pointer in
+                pointer.deallocate()
+            }
+        )
+
+        XCTAssertEqual(floatValues(from: arr), [1.0, 2.0, 3.0])
+    }
+
     func testValidateDurationAgreementRejectsHalfLengthAudio() throws {
         XCTAssertThrowsError(
             try validateDurationAgreement(inputKey: "15s", canonical: 13.9, observed: 6.4)

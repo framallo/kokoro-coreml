@@ -327,16 +327,11 @@ public class KokoroPipeline {
         let t7 = CFAbsoluteTimeGetCurrent()
         timings.f0ntrainCoreML = t7 - t6
 
-        // Extract F0/N as flat arrays
-        let f0Len = f0PredArray.count
-        let f0Ptr = f0PredArray.dataPointer.assumingMemoryBound(to: Float.self)
-        let nPtr = nPredArray.dataPointer.assumingMemoryBound(to: Float.self)
-        var f0Curve = [Float](repeating: 0, count: f0Len)
-        var nCurve = [Float](repeating: 0, count: f0Len)
-        for i in 0..<f0Len {
-            f0Curve[i] = f0Ptr[i]
-            nCurve[i] = nPtr[i]
-        }
+        // Extract F0/N as flat arrays. Core ML outputs can be strided just like
+        // waveform outputs, so flatten through indexed access rather than raw
+        // pointer traversal.
+        let f0Curve = floatValues(from: f0PredArray)
+        let nCurve = floatValues(from: nPredArray)
 
         // ---- Stage 5: Padding to bucket geometry ----
         let t8 = CFAbsoluteTimeGetCurrent()

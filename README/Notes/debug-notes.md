@@ -20,7 +20,9 @@ flat contiguous buffer. The `GeneratorFromHar` output can be a non-contiguous
 `MLMultiArray`, so raw `dataPointer` traversal corrupted the trimmed audio. The
 runtime and benchmark now read waveform values through stride-aware
 `MLMultiArray` indexing before trimming, and regenerated short/medium samples
-pass objective speech-health gates and human listening.
+pass objective speech-health gates and human listening. The final audit also
+made F0/N Core ML output reads stride-aware and forced the Config F benchmark to
+materialize the trimmed waveform during the timed path.
 
 ### Symptom
 
@@ -85,6 +87,11 @@ regenerate the old broken output even after the Swift source fix.
   `floatValues(from:)`.
 - Replaced raw pointer extraction in the benchmark WAV writer with
   `floatValues(from:)`.
+- Replaced F0/N Core ML output raw pointer reads with `floatValues(from:)` so
+  every Core ML float output that feeds audio generation respects logical
+  `MLMultiArray` strides.
+- Made `kokoro-bench` materialize the trimmed waveform even when it is not
+  writing a WAV, so Config F bakeoff timings include output extraction.
 - Kept tensor dumps on the same helper so debug and production reads agree.
 
 **Gate fix:**
@@ -138,7 +145,7 @@ Observed after the fix:
 - Human listening confirmed the regenerated short and medium samples sound
   recognizably human.
 - `uv run pytest`: `41 passed`.
-- `swift test --package-path swift`: `15 passed`.
+- `swift test --package-path swift`: `16 passed`.
 
 ### Investigation Log
 

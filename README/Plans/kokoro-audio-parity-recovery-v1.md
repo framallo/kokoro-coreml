@@ -1,18 +1,17 @@
 # Kokoro Audio Parity Recovery Plan
 
 **Date:** 2026-04-16
-**Status:** In-Progress
+**Status:** Complete
 
 ## Executive Summary
 
 Recover human-sounding Kokoro audio before doing any more performance claims. The
-current post-update Core ML and Swift bakeoff samples are unproven and the
-available waveform statistics show near-inactive output compared with the known
-HAR-post demo, so this plan first inspects waveforms and spectrograms directly,
-creates listenable reference samples only when the files pass basic speech-health
-checks, then
-bisects the Python-to-Swift/Core ML runtime until the first semantic audio
-divergence is identified and fixed.
+post-update Core ML and Swift bakeoff samples were unproven and the available
+waveform statistics showed near-inactive output compared with the known HAR-post
+demo, so this plan inspected waveforms and spectrograms directly, created
+listenable reference samples only when the files passed basic speech-health
+checks, then bisected the Python-to-Swift/Core ML runtime until the first
+semantic audio divergence was identified and fixed.
 
 ## Problem Statement
 
@@ -454,8 +453,10 @@ and `config_f_30s.wav` all have `quality_pass=true` and
 `quality_decision=needs_listening`. The user confirmed the short and medium
 samples sound human. The complete A/D/E/F bakeoff ran on the M2 Ultra with
 `--iterations 5 --order-seed 0 --machine-id m2_ultra_v6`; all 80 records
-completed with `status=ok`, and Config F was fastest at every enumerated shape.
-Results are recorded in
+completed with `status=ok`. After the audit tightened Config F to materialize
+the trimmed waveform inside the timed path, Config F remained faster than
+PyTorch CPU/MPS at every enumerated shape, was faster than Config A at 3s/7s,
+and was slower than Config A at 15s/30s. Results are recorded in
 [performance-notes.md](../Notes/performance-notes.md#bakeoff-v6-audio-fixed-config-f-on-m2-ultra).
 
 ## Success Criteria

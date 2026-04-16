@@ -448,13 +448,11 @@ func runPipeline(
     let t7 = CFAbsoluteTimeGetCurrent()
     let tF0Ntrain = t7 - t6
 
-    // Extract F0/N
-    let f0Len = f0PredArr.count
-    let f0P = f0PredArr.dataPointer.assumingMemoryBound(to: Float.self)
-    let nP = nPredArr.dataPointer.assumingMemoryBound(to: Float.self)
-    var f0Curve = [Float](repeating: 0, count: f0Len)
-    var nCurve = [Float](repeating: 0, count: f0Len)
-    for j in 0..<f0Len { f0Curve[j] = f0P[j]; nCurve[j] = nP[j] }
+    // Extract F0/N. Core ML outputs can be strided, so use the same logical
+    // flattening helper as waveform export.
+    let f0Curve = floatValues(from: f0PredArr)
+    let nCurve = floatValues(from: nPredArr)
+    let f0Len = f0Curve.count
 
     try withTensorDump { writer in
         try writer.writeFloatArray(name: "f0", values: f0Curve, shape: [1, f0Len])
@@ -574,20 +572,22 @@ func runPipeline(
     let waveformArr = genOutput.featureValue(for: waveformKey)!.multiArrayValue!
     let origF0Len = frames * 2
     let targetLen = Int(round(Double(origF0Len) / 80.0 * 24000.0))
-    let trimLen = min(waveformArr.count, targetLen)
+    let waveformValues = floatValues(from: waveformArr)
+    let trimLen = min(waveformValues.count, targetLen)
+    let samples = Array(waveformValues.prefix(trimLen))
     let t17 = CFAbsoluteTimeGetCurrent()
     let tTrim = t17 - t16
 
     try withTensorDump { writer in
-        let waveformValues = floatValues(from: waveformArr)
-        let samples = Array(waveformValues.prefix(trimLen))
-        try writer.writeMLMultiArray(name: "waveform_full", array: waveformArr)
+        try writer.writeFloatArray(
+            name: "waveform_full",
+            values: waveformValues,
+            shape: waveformArr.shape.map { $0.intValue }
+        )
         try writer.writeFloatArray(name: "waveform", values: samples, shape: [trimLen])
     }
 
     if let wavPath = wavOutputPath {
-        let waveformValues = floatValues(from: waveformArr)
-        let samples = Array(waveformValues.prefix(trimLen))
         try writeWavMono16(path: wavPath, samples: samples, sampleRate: 24000)
         fputs("  WAV written: \(wavPath)\n", stderr)
     }

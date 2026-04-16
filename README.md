@@ -269,4 +269,3 @@ kokoro-coreml/
 Built on [Kokoro-82M](https://huggingface.co/hexgrad/Kokoro-82M) by [hexgrad](https://huggingface.co/hexgrad), [StyleTTS 2](https://github.com/yl4579/StyleTTS2) by [@yl4579](https://huggingface.co/yl4579), and Apple's coremltools.
 
 Run it on your Mac. [Tell us how fast it is.](https://discord.gg/QuGxSWBfQy)
-

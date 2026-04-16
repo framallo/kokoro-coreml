@@ -46,16 +46,18 @@ Inputs used:
 ### Summary
 
 Reran the complete A/D/E/F bakeoff on the Mac Studio M2 Ultra after fixing the
-Config F waveform extraction bug and replacing the weak listen gate. This run is
-the first post-fix M2 Ultra bakeoff where Config F listen samples were generated
-with the stride-safe Swift runtime, all four enumerated listen shapes passed the
-objective audio gate, and the short/medium samples were human-confirmed before
-performance numbers were accepted.
+Config F waveform extraction bug, replacing the weak listen gate, and tightening
+the benchmark so Config F always materializes the trimmed waveform inside the
+timed path. This run is the first post-fix M2 Ultra bakeoff where Config F
+listen samples were generated with the stride-safe Swift runtime, all four
+enumerated listen shapes passed the objective audio gate, and the short/medium
+samples were human-confirmed before performance numbers were accepted.
 
-**Config F wins at every duration on M2 Ultra**, with median wall time from
-`57 ms` on the 3s input to `451 ms` on the 30s input. Relative to Config A
-(Python HAR-post), the Swift/Core ML path is `2.6x`, `1.9x`, `1.7x`, and `1.5x`
-faster from 3s through 30s. Relative to PyTorch CPU, it is `4.8-6.0x` faster.
+**Config F produces human-sounding audio and beats PyTorch CPU/MPS at every
+duration**, but it is not the universal winner against Config A once waveform
+extraction is included in the timed Swift path. Relative to Config A (Python
+HAR-post), the Swift/Core ML path is `1.5x` faster at 3s, roughly tied at 7s,
+and slower at 15s/30s. Relative to PyTorch CPU, it remains `2.5-3.3x` faster.
 
 ### Audio gate
 
@@ -79,28 +81,28 @@ All four listen samples recorded `quality_pass=true` and
 
 | Input | Audio | Bucket | A (Python HAR) | D (MPS) | E (CPU) | F (Swift) |
 | --- | --- | --- | ---: | ---: | ---: | ---: |
-| 3s | 2.80s | 3s | 147 ms | 184 ms | 344 ms | **57 ms** |
-| 7s | 6.75s | 7s | 229 ms | 334 ms | 629 ms | **120 ms** |
-| 15s | 13.90s | 15s | 392 ms | 639 ms | 1195 ms | **234 ms** |
-| 30s | 27.38s | 30s | 692 ms | 1304 ms | 2170 ms | **451 ms** |
+| 3s | 2.80s | 3s | 148 ms | 183 ms | 319 ms | **98 ms** |
+| 7s | 6.75s | 7s | 228 ms | 327 ms | 612 ms | **216 ms** |
+| 15s | 13.90s | 15s | **422 ms** | 618 ms | 1195 ms | 453 ms |
+| 30s | 27.38s | 30s | **692 ms** | 1288 ms | 2190 ms | 881 ms |
 
 ### RTF and realtime factor
 
 | Input | Audio | A RTF | D RTF | E RTF | F RTF | F realtime |
 | --- | --- | ---: | ---: | ---: | ---: | ---: |
-| 3s | 2.80s | 0.052 | 0.066 | 0.123 | **0.020** | **49x RT** |
-| 7s | 6.75s | 0.034 | 0.050 | 0.093 | **0.018** | **56x RT** |
-| 15s | 13.90s | 0.028 | 0.046 | 0.086 | **0.017** | **59x RT** |
-| 30s | 27.38s | 0.025 | 0.048 | 0.079 | **0.016** | **61x RT** |
+| 3s | 2.80s | 0.053 | 0.065 | 0.114 | **0.035** | **29x RT** |
+| 7s | 6.75s | 0.034 | 0.049 | 0.091 | **0.032** | **31x RT** |
+| 15s | 13.90s | **0.030** | 0.045 | 0.086 | 0.033 | 31x RT |
+| 30s | 27.38s | **0.025** | 0.047 | 0.080 | 0.032 | 31x RT |
 
 ### Speedup: Config F vs baselines
 
 | Input | F vs A (Python HAR) | F vs D (MPS) | F vs E (CPU) |
 | --- | ---: | ---: | ---: |
-| 3s | **2.6x** | **3.2x** | **6.0x** |
-| 7s | **1.9x** | **2.8x** | **5.2x** |
-| 15s | **1.7x** | **2.7x** | **5.1x** |
-| 30s | **1.5x** | **2.9x** | **4.8x** |
+| 3s | **1.5x** | **1.9x** | **3.3x** |
+| 7s | **1.1x** | **1.5x** | **2.8x** |
+| 15s | 0.9x | **1.4x** | **2.6x** |
+| 30s | 0.8x | **1.5x** | **2.5x** |
 
 ### Interpretation
 
@@ -109,24 +111,25 @@ All four listen samples recorded `quality_pass=true` and
    v6 run was only accepted after objective gates passed and short/medium clips
    were human-confirmed.
 
-2. **Config F remains the fastest path on M2 Ultra.** The Swift/Core ML pipeline
-   beats Python HAR-post, PyTorch MPS, and PyTorch CPU at every enumerated shape.
+2. **Config F remains a valid fast path, but not always the fastest path.** The
+   Swift/Core ML pipeline beats PyTorch CPU and PyTorch MPS at every enumerated
+   shape, but Config A is faster at 15s and 30s on this M2 Ultra run.
 
-3. **The margin over Config A is meaningful but not enormous at long duration.**
-   Config F is 1.5x faster than Config A at 30s. Future optimization should
-   focus on stage costs and model lifetime rather than assuming an order-of-
-   magnitude gap over the Python HAR-post hybrid.
+3. **The benchmark now includes waveform extraction.** The earlier post-fix
+   timing that showed Config F winning everywhere did not materialize the
+   waveform in the timed Config F path. The corrected measurement is stricter
+   and more product-representative.
 
 4. **MPS fallback remains slower than Config F.** The PyTorch MPS path emitted
-   the expected `aten::angle` CPU fallback warning and was 2.7-3.2x slower than
+   the expected `aten::angle` CPU fallback warning and was 1.4-1.9x slower than
    Config F across the enumerated shapes.
 
 ### Provenance
 
 - Machine: Apple M2 Ultra Mac Studio, 64 GB, macOS 26.4.1
 - Command: `BAKEOFF_SKIP_SMOKE=1 PYTORCH_ENABLE_MPS_FALLBACK=1 uv run python scripts/bakeoff_harness.py run --configs a,d,e,f --iterations 5 --order-seed 0 --machine-id m2_ultra_v6`
-- Git: `bce080fe5bd6`, dirty tree contained documentation/plan updates from the
-  active recovery workflow
+- Git recorded in results: `b722798e9995`, with a dirty tree containing the
+  stride-safety audit fix and notes updates from the active recovery workflow
 - Python: 3.12.13
 - Torch: 2.6.0 / coremltools: 8.3.0
 - Order seed: 0, iterations: 5
