@@ -572,7 +572,7 @@ class SwiftPipelineContext:
             ready, _, _ = select.select([proc.stdout], [], [], min(remaining, 1.0))
             if ready:
                 line = proc.stdout.readline().decode().strip()
-                if line in ("DONE", "ERROR"):
+                if line in ("DONE", "ERROR") or line.endswith("DONE") or line.endswith("ERROR"):
                     return cmd["output"]
             # Check if process died
             if proc.poll() is not None:

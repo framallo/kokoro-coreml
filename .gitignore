@@ -177,6 +177,9 @@ outputs/**
 # Local MPS / device debug samples (same idea as outputs/)
 outputs_mps/
 
+# SwiftPM build output
+swift/.build/
+
 # CoreML model packages — downloaded from HF Hub, not stored in git.
 # Run: python scripts/download_models.py
 coreml/

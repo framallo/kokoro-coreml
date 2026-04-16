@@ -52,6 +52,22 @@ ls outputs/swift_bench_inputs/hnsf_weights.json && \
 echo "Ready"
 ```
 
+Always rebuild the Swift benchmark binary before a publication run. The
+checked-out Swift sources may be newer than `swift/.build/release/kokoro-bench`;
+an old binary can lack `--batch` support and will make Config F fail with the
+single-shot usage message.
+
+```bash
+(cd swift && swift build -c release --product kokoro-bench)
+swift/.build/release/kokoro-bench --help
+```
+
+The help output must include:
+
+```text
+[--input-key KEY | --batch]
+```
+
 ## Procedure
 
 ### 1. Run setup (if needed)
@@ -71,7 +87,36 @@ Record:
 
 Choose a `--machine-id` slug: `m1_mini`, `m2_ultra`, `m2_air`, etc.
 
-### 3. Run the bakeoff
+### 3. Rebuild and sanity-check Config F
+
+Rebuild the Swift benchmark binary even if setup was already run:
+
+```bash
+(cd swift && swift build -c release --product kokoro-bench)
+```
+
+Then run a focused Config F batch warmup. This catches stale binaries, missing
+inputs, and batch protocol issues before the full benchmark spends time loading
+all Python baselines:
+
+```bash
+uv run python - <<'PY'
+from scripts.bakeoff_harness import SwiftPipelineContext
+
+ctx = SwiftPipelineContext()
+ctx.warmup("")
+ctx.close()
+print("Config F batch warmup completed")
+PY
+```
+
+If this stalls after an ANE compiler diagnostic, check
+`scripts/bakeoff_harness.py`: the batch reader must accept stdout lines that
+end with `DONE` or `ERROR`, not only lines equal to those exact strings. Core ML
+can emit diagnostics such as `E5RT encountered an STL exception...` onto stdout
+immediately before `DONE`, yielding one combined line.
+
+### 4. Run the bakeoff
 
 Config D (MPS) requires `PYTORCH_ENABLE_MPS_FALLBACK=1`. Set it for
 all runs to keep the command uniform.
@@ -88,29 +133,42 @@ uv run python scripts/bakeoff_harness.py run \
 
 Expected runtime: 10–20 minutes depending on machine speed.
 
-### 4. Verify results
+### 5. Verify results
 
 ```bash
-python3 -c "
+uv run python - <<'PY'
 import json, statistics
 from collections import defaultdict
 
 data = json.load(open('outputs/bakeoff/results_<machine_id>.json'))
-results = [r for r in data['results'] if r.get('status') == 'ok']
+statuses = defaultdict(int)
 groups = defaultdict(list)
-for r in results:
-    groups[(r['config'], r['input_key'])].append(r['wall_time_s'] * 1000)
 
-for ik in ['tiny', 'short', 'medium', 'long']:
-    row = {c: statistics.median(groups.get((c, ik), [0])) for c in ['a','d','e','f']}
-    print(f'{ik:8s}  A={row[\"a\"]:.0f}ms  D={row[\"d\"]:.0f}ms  E={row[\"e\"]:.0f}ms  F={row[\"f\"]:.0f}ms')
-"
+for r in data['results']:
+    statuses[(r.get('config'), r.get('status'))] += 1
+    if r.get('status') == 'ok':
+        groups[(r['config'], r['input_key'])].append(r['wall_time_s'] * 1000)
+
+print('statuses:')
+for key, count in sorted(statuses.items()):
+    print(f'  {key}: {count}')
+
+for ik in ['3s', '7s', '15s', '30s']:
+    row = {
+        c: statistics.median(groups.get((c, ik), [0]))
+        for c in ['a', 'd', 'e', 'f']
+    }
+    print(
+        f'{ik:4s}  A={row["a"]:.0f}ms  D={row["d"]:.0f}ms  '
+        f'E={row["e"]:.0f}ms  F={row["f"]:.0f}ms'
+    )
+PY
 ```
 
 All configs should show `status: ok` for all inputs. Config D may show
 `config_unavailable` if MPS fallback wasn't set — that's acceptable.
 
-### 5. Update performance-notes.md
+### 6. Update performance-notes.md
 
 Add a new section to `README/Notes/performance-notes.md` following the
 existing pattern (see "Bakeoff v2: Controlled benchmark on M2 MacBook Air"
@@ -123,7 +181,7 @@ or "Bakeoff v3: Swift pipeline" for the template). Include:
 - Cross-machine comparison table (if prior machine data exists)
 - Interpretation (2-4 bullet points)
 
-### 6. Commit and push
+### 7. Commit and push
 
 Use `git-commit` to stage the results file and performance-notes changes.
 Then `git-push` to sync with origin.
