@@ -1,19 +1,22 @@
 /// Kokoro Swift pipeline benchmark CLI.
 ///
 /// Called by ``scripts/bakeoff_harness.py`` as a subprocess for Config F.
-/// Loads all CoreML models once, runs each input with timing, and outputs
-/// JSON results to stdout.
 ///
-/// Usage::
+/// **Single-shot mode** (original):
 ///
-///     kokoro-bench --models-dir /path/to/coreml \
-///                  --inputs-dir /path/to/swift_bench_inputs \
-///                  --hnsf-weights /path/to/hnsf_weights.json \
-///                  --input-key tiny \
-///                  --seed 42
+///     kokoro-bench --models-dir DIR --inputs-dir DIR \
+///                  --hnsf-weights FILE --input-key KEY --seed 42
 ///
-/// Output: single JSON object on stdout with timing fields matching the
-/// bakeoff results schema.
+/// **Batch mode** (persistent subprocess — models compiled once):
+///
+///     kokoro-bench --models-dir DIR --inputs-dir DIR \
+///                  --hnsf-weights FILE --batch
+///
+///     Then send JSON commands on stdin, one per line:
+///       {"input_key":"3s","seed":42,"output":"/tmp/result.json"}
+///     The binary prints "READY\n" to stdout after loading weights,
+///     and "DONE\n" after each command completes.
+///     Close stdin (EOF) to exit.
 
 import Foundation
 import CoreML
@@ -40,85 +43,163 @@ struct HnsfWeights: Decodable {
     let linear_bias: Float
 }
 
-// MARK: - Main
+/// JSON command received on stdin in batch mode.
+struct BatchCommand: Decodable {
+    let input_key: String
+    let seed: UInt64?
+    let output: String
+    let warmup: Bool?
+}
 
-func main() throws {
-    // Parse arguments
-    let args = CommandLine.arguments
-    var modelsDir: String?
-    var inputsDir: String?
-    var hnsfWeightsPath: String?
-    var inputKey: String?
-    var outputPath: String?  // Write JSON to file instead of stdout (avoids E5RT noise)
-    var warmupCount = 1
-    var seed: UInt64 = 42
+// MARK: - Model Cache
 
-    var i = 1
-    while i < args.count {
-        switch args[i] {
-        case "--models-dir":
-            i += 1; modelsDir = args[i]
-        case "--inputs-dir":
-            i += 1; inputsDir = args[i]
-        case "--hnsf-weights":
-            i += 1; hnsfWeightsPath = args[i]
-        case "--input-key":
-            i += 1; inputKey = args[i]
-        case "--warmup":
-            i += 1; warmupCount = Int(args[i]) ?? 1
-        case "--seed":
-            i += 1; seed = UInt64(args[i]) ?? 42
-        case "--output":
-            i += 1; outputPath = args[i]
-        default:
-            break
+/// Two-layer cache: compiled model URLs (.mlmodelc) persist across the whole
+/// session so we never pay compilation twice. Loaded MLModel instances are
+/// evicted when switching buckets to keep memory footprint low — critical on
+/// 24GB machines where keeping all bucket models resident causes the ANE
+/// scheduler to fall back to CPU.
+class ModelCache {
+    let modelsDir: URL
+    let config: MLModelConfiguration
+
+    // Layer 1: Compiled URLs (persist forever — compilation is expensive)
+    private var compiledDuration: [Int: URL] = [:]
+    private var compiledF0n: [Int: URL] = [:]
+    private var compiledDecPre: [Int: URL] = [:]
+    private var compiledGen: [Int: URL] = [:]
+
+    // Layer 2: Loaded MLModel instances (evicted on bucket switch)
+    var durationModels: [Int: MLModel] = [:]  // kept across buckets (small)
+    var f0nModels: [Int: MLModel] = [:]
+    var decPreModels: [Int: MLModel] = [:]
+    var genModels: [Int: MLModel] = [:]
+
+    init(modelsDir: URL, computeUnits: MLComputeUnits = .all) {
+        self.modelsDir = modelsDir
+        self.config = MLModelConfiguration()
+        self.config.computeUnits = computeUnits
+        fputs("  Compute units: \(computeUnits == .all ? "all" : computeUnits == .cpuAndNeuralEngine ? "cpuAndNeuralEngine" : computeUnits == .cpuAndGPU ? "cpuAndGPU" : "cpuOnly")\n", stderr)
+    }
+
+    // -- Compiled URL helpers (compile once, cache the .mlmodelc path) --
+
+    private func compiledDurationURL(T: Int) throws -> URL {
+        if let url = compiledDuration[T] { return url }
+        let pkgURL = modelsDir.appendingPathComponent("kokoro_duration_t\(T).mlpackage")
+        let actualURL = FileManager.default.fileExists(atPath: pkgURL.path)
+            ? pkgURL
+            : modelsDir.appendingPathComponent("kokoro_duration.mlpackage")
+        fputs("  Compiling duration T=\(T)...\n", stderr)
+        let compiled = try MLModel.compileModel(at: actualURL)
+        compiledDuration[T] = compiled
+        return compiled
+    }
+
+    private func compiledF0nURL(tFrames: Int) throws -> URL {
+        if let url = compiledF0n[tFrames] { return url }
+        let pkgURL = modelsDir.appendingPathComponent("kokoro_f0ntrain_t\(tFrames).mlpackage")
+        fputs("  Compiling f0ntrain tFrames=\(tFrames)...\n", stderr)
+        let compiled = try MLModel.compileModel(at: pkgURL)
+        compiledF0n[tFrames] = compiled
+        return compiled
+    }
+
+    private func compiledDecPreURL(bucket: Int) throws -> URL {
+        if let url = compiledDecPre[bucket] { return url }
+        let pkgURL = modelsDir.appendingPathComponent("kokoro_decoder_pre_\(bucket)s.mlpackage")
+        fputs("  Compiling decoder_pre \(bucket)s...\n", stderr)
+        let compiled = try MLModel.compileModel(at: pkgURL)
+        compiledDecPre[bucket] = compiled
+        return compiled
+    }
+
+    private func compiledGenURL(bucket: Int) throws -> URL {
+        if let url = compiledGen[bucket] { return url }
+        let pkgURL = modelsDir.appendingPathComponent("kokoro_decoder_har_post_\(bucket)s.mlpackage")
+        fputs("  Compiling generator \(bucket)s...\n", stderr)
+        let compiled = try MLModel.compileModel(at: pkgURL)
+        compiledGen[bucket] = compiled
+        return compiled
+    }
+
+    // -- Model accessors (load from cached compiled URL) --
+
+    func durationModel(T: Int) throws -> MLModel {
+        if let cached = durationModels[T] { return cached }
+        let compiled = try compiledDurationURL(T: T)
+        fputs("  Loading duration T=\(T)...\n", stderr)
+        let model = try MLModel(contentsOf: compiled, configuration: config)
+        durationModels[T] = model
+        return model
+    }
+
+    func f0nModel(tFrames: Int) throws -> MLModel {
+        if let cached = f0nModels[tFrames] { return cached }
+        let compiled = try compiledF0nURL(tFrames: tFrames)
+        fputs("  Loading f0ntrain tFrames=\(tFrames)...\n", stderr)
+        let model = try MLModel(contentsOf: compiled, configuration: config)
+        f0nModels[tFrames] = model
+        return model
+    }
+
+    func decoderPreModel(bucket: Int) throws -> MLModel {
+        if let cached = decPreModels[bucket] { return cached }
+        let compiled = try compiledDecPreURL(bucket: bucket)
+        fputs("  Loading decoder_pre \(bucket)s...\n", stderr)
+        let model = try MLModel(contentsOf: compiled, configuration: config)
+        decPreModels[bucket] = model
+        return model
+    }
+
+    func generatorModel(bucket: Int) throws -> MLModel {
+        if let cached = genModels[bucket] { return cached }
+        let compiled = try compiledGenURL(bucket: bucket)
+        fputs("  Loading generator \(bucket)s...\n", stderr)
+        let model = try MLModel(contentsOf: compiled, configuration: config)
+        genModels[bucket] = model
+        return model
+    }
+
+    /// Evict loaded MLModel instances for all buckets except the given one.
+    /// Duration models are kept (small). Compiled URLs are preserved so
+    /// reloading is just `MLModel(contentsOf:)` — no recompilation.
+    func evictExcept(bucket: Int, tFrames: Int) {
+        let f0nBefore = f0nModels.count
+        let decBefore = decPreModels.count
+        let genBefore = genModels.count
+
+        f0nModels = f0nModels.filter { $0.key == tFrames }
+        decPreModels = decPreModels.filter { $0.key == bucket }
+        genModels = genModels.filter { $0.key == bucket }
+
+        let evicted = (f0nBefore - f0nModels.count) + (decBefore - decPreModels.count) + (genBefore - genModels.count)
+        if evicted > 0 {
+            fputs("  Evicted \(evicted) loaded model(s) from other buckets (compiled URLs retained)\n", stderr)
         }
-        i += 1
     }
+}
 
-    guard let modelsDir = modelsDir,
-          let inputsDir = inputsDir,
-          let hnsfWeightsPath = hnsfWeightsPath,
-          let inputKey = inputKey else {
-        fputs("Usage: kokoro-bench --models-dir DIR --inputs-dir DIR --hnsf-weights FILE --input-key KEY\n", stderr)
-        exit(1)
-    }
+// MARK: - Pipeline run (shared between single-shot and batch)
 
-    // Load hn-nsf weights
-    let weightsData = try Data(contentsOf: URL(fileURLWithPath: hnsfWeightsPath))
-    let weights = try JSONDecoder().decode(HnsfWeights.self, from: weightsData)
-
-    // Load input
-    let inputPath = URL(fileURLWithPath: inputsDir).appendingPathComponent("\(inputKey).json")
-    let inputData = try Data(contentsOf: inputPath)
-    let benchInput = try JSONDecoder().decode(BenchInput.self, from: inputData)
-
-    // Load CoreML models manually (not through KokoroPipeline init to control timing)
-    let modelsURL = URL(fileURLWithPath: modelsDir)
-    let config = MLModelConfiguration()
-    config.computeUnits = .all
-
-    // Pick the smallest Duration model enumeration that fits the token count.
-    // Duration models are exported per size: kokoro_duration_t{32,64,128,256,512}.mlpackage
+/// Runs the full timed pipeline for one input. Returns the result dictionary as JSON Data.
+func runPipeline(
+    benchInput: BenchInput,
+    inputKey: String,
+    seed: UInt64,
+    weights: HnsfWeights,
+    cache: ModelCache
+) throws -> Data {
+    // Pick duration T
     let enumSizes = [32, 64, 128, 256, 512]
     let actualTokens = benchInput.num_tokens
     guard let T = enumSizes.first(where: { $0 >= actualTokens }) else {
         fputs("Token count \(actualTokens) exceeds max enumeration 512\n", stderr)
-        exit(1)
+        throw NSError(domain: "kokoro-bench", code: 1, userInfo: [NSLocalizedDescriptionKey: "Token count exceeds 512"])
     }
 
-    fputs("Loading models (duration T=\(T))...\n", stderr)
-    let durURL = modelsURL.appendingPathComponent("kokoro_duration_t\(T).mlpackage")
-    if !FileManager.default.fileExists(atPath: durURL.path) {
-        // Fall back to default (backward compat)
-        fputs("  Duration T=\(T) not found, trying default\n", stderr)
-    }
-    let durActualURL = FileManager.default.fileExists(atPath: durURL.path)
-        ? durURL
-        : modelsURL.appendingPathComponent("kokoro_duration.mlpackage")
-    let durationModel = try MLModel(contentsOf: try MLModel.compileModel(at: durActualURL), configuration: config)
+    let durModel = try cache.durationModel(T: T)
 
-    // Build duration input at the selected T
+    // Build duration input
     let idsArray = try MLMultiArray(shape: [1, NSNumber(value: T)], dataType: .int32)
     let maskArray = try MLMultiArray(shape: [1, NSNumber(value: T)], dataType: .int32)
     let refSArray = try MLMultiArray(shape: [1, 256], dataType: .float32)
@@ -128,15 +209,9 @@ func main() throws {
     let maskPtr = maskArray.dataPointer.assumingMemoryBound(to: Int32.self)
     let refSPtr = refSArray.dataPointer.assumingMemoryBound(to: Float.self)
 
-    for j in 0..<min(benchInput.input_ids.count, T) {
-        idsPtr[j] = benchInput.input_ids[j]
-    }
-    for j in 0..<min(benchInput.attention_mask.count, T) {
-        maskPtr[j] = benchInput.attention_mask[j]
-    }
-    for j in 0..<min(benchInput.ref_s.count, 256) {
-        refSPtr[j] = benchInput.ref_s[j]
-    }
+    for j in 0..<min(benchInput.input_ids.count, T) { idsPtr[j] = benchInput.input_ids[j] }
+    for j in 0..<min(benchInput.attention_mask.count, T) { maskPtr[j] = benchInput.attention_mask[j] }
+    for j in 0..<min(benchInput.ref_s.count, 256) { refSPtr[j] = benchInput.ref_s[j] }
     speedArray[0] = NSNumber(value: benchInput.speed)
 
     let durInput = try MLDictionaryFeatureProvider(dictionary: [
@@ -147,82 +222,92 @@ func main() throws {
     ])
 
     // Quick duration prediction to determine bucket
-    let durOut = try durationModel.prediction(from: durInput)
+    let durOut = try durModel.prediction(from: durInput)
     let predDurArr = durOut.featureValue(for: "pred_dur")!.multiArrayValue!
     let predDurPtr = predDurArr.dataPointer.assumingMemoryBound(to: Float.self)
     let tokenCount = predDurArr.shape.last!.intValue
     var totalFrames = 0
-    for j in 0..<tokenCount {
-        totalFrames += max(1, Int(round(predDurPtr[j])))
-    }
-    // Use canonical duration from manifest for bucket selection
+    for j in 0..<tokenCount { totalFrames += max(1, Int(round(predDurPtr[j]))) }
     let canonicalDurForBucket = benchInput.canonical_duration_s ?? (Double(totalFrames) / 80.0)
-    // Select smallest bucket >= ceil(canonical duration)
     let availableBuckets = [3, 7, 10, 15, 30]
     let bucketThreshold = Int(ceil(canonicalDurForBucket))
     let bucketSec = availableBuckets.first(where: { $0 >= bucketThreshold }) ?? availableBuckets.last!
 
     fputs("  Input: \(inputKey), tokens: \(actualTokens)/\(T), canonical=\(String(format: "%.1f", canonicalDurForBucket))s, bucket: \(bucketSec)s\n", stderr)
 
-    // Load bucket-specific models
-    let tFrames = bucketSec == 3 ? 120 : 400
-    let f0nURL = modelsURL.appendingPathComponent("kokoro_f0ntrain_t\(tFrames).mlpackage")
-    let f0nModel = try MLModel(contentsOf: try MLModel.compileModel(at: f0nURL), configuration: config)
+    // Evict models from other buckets before loading this bucket's models.
+    // On memory-constrained machines (24GB M2 Air), keeping all bucket models
+    // resident causes the ANE scheduler to fall back to CPU for large models.
+    // tFrames must match the exported F0Ntrain model for this bucket.
+    // Canonical source: PipelineConstants.tFramesForBucket in KokoroPipeline.
+    // Using a too-small tFrames silently truncates aligned features via zeroPad3D.
+    let tFrames: Int = {
+        switch bucketSec {
+        case 3: return 120    // kokoro_f0ntrain_t120.mlpackage
+        case 7: return 560    // kokoro_f0ntrain_t560.mlpackage
+        case 10: return 400   // kokoro_f0ntrain_t400.mlpackage
+        case 15: return 1200  // kokoro_f0ntrain_t1200.mlpackage
+        case 30: return 2400  // kokoro_f0ntrain_t2400.mlpackage
+        default: return 400
+        }
+    }()
+    cache.evictExcept(bucket: bucketSec, tFrames: tFrames)
 
-    let decPreURL = modelsURL.appendingPathComponent("kokoro_decoder_pre_\(bucketSec)s.mlpackage")
-    let decPreModel = try MLModel(contentsOf: try MLModel.compileModel(at: decPreURL), configuration: config)
+    // Load bucket-specific models (cached if same bucket as last run)
+    let f0nModel = try cache.f0nModel(tFrames: tFrames)
+    let decPreModel = try cache.decoderPreModel(bucket: bucketSec)
+    let genModel = try cache.generatorModel(bucket: bucketSec)
 
-    let genURL = modelsURL.appendingPathComponent("kokoro_decoder_har_post_\(bucketSec)s.mlpackage")
-    let genModel = try MLModel(contentsOf: try MLModel.compileModel(at: genURL), configuration: config)
-
-    // Compute bucket geometry for warmup and timed run
     let bucketSamples = bucketSec * 24000
     let fullF0Len = Int(round(Double(bucketSamples) / 300.0))
 
-    // Warmup all models (not just duration — Generator needs compilation warmup)
-    fputs("Warming up (\(warmupCount) calls)...\n", stderr)
-    for _ in 0..<warmupCount {
-        let _ = try durationModel.prediction(from: durInput)
-    }
-    // Warm F0Ntrain
-    let warmEnArr = try makeZeroArray3D(channels: 640, time: tFrames)
-    let warmSArr = try makeZeroArray2D(dim: 128)
-    let warmF0nIn = try MLDictionaryFeatureProvider(dictionary: [
-        "en": MLFeatureValue(multiArray: warmEnArr),
-        "s": MLFeatureValue(multiArray: warmSArr),
-    ])
-    let _ = try f0nModel.prediction(from: warmF0nIn)
-    // Warm DecoderPre
-    let warmFC = (fullF0Len - 1) / 2 + 1
-    let warmAsr = try makeZeroArray3D(channels: 512, time: warmFC)
-    let warmF0 = try makeZeroArray3D(channels: 1, time: fullF0Len)
-    let warmN = try makeZeroArray3D(channels: 1, time: fullF0Len)
-    let warmRefS = try makeZeroArray2D(dim: 256)
-    let warmDecIn = try MLDictionaryFeatureProvider(dictionary: [
-        "asr": MLFeatureValue(multiArray: warmAsr),
-        "f0": MLFeatureValue(multiArray: warmF0),
-        "n_input": MLFeatureValue(multiArray: warmN),
-        "ref_s": MLFeatureValue(multiArray: warmRefS),
-    ])
-    let _ = try decPreModel.prediction(from: warmDecIn)
-    // Warm GeneratorFromHar
-    let genShapesWarm = inputShapes(from: genModel)
-    var warmGenInputs: [String: MLFeatureValue] = [:]
-    for (name, shape) in genShapesWarm {
-        if shape.count == 3 {
-            warmGenInputs[name] = MLFeatureValue(multiArray: try makeZeroArray3D(channels: shape[1], time: shape[2]))
-        } else if shape.count == 2 {
-            warmGenInputs[name] = MLFeatureValue(multiArray: try makeZeroArray2D(dim: shape[1]))
+    // Always warm models before the timed block. Even if the harness already
+    // sent a warmup command for this bucket, evictExcept may have dropped the
+    // MLModel instances, and freshly loaded instances need one prediction to
+    // trigger ANE plan compilation. This is cheap (~1ms) if already warm.
+    do {
+        fputs("  Ensuring models are warm...\n", stderr)
+        let _ = try durModel.prediction(from: durInput)
+        // Warm F0Ntrain
+        let warmEnArr = try makeZeroArray3D(channels: 640, time: tFrames)
+        let warmSArr = try makeZeroArray2D(dim: 128)
+        let warmF0nIn = try MLDictionaryFeatureProvider(dictionary: [
+            "en": MLFeatureValue(multiArray: warmEnArr),
+            "s": MLFeatureValue(multiArray: warmSArr),
+        ])
+        let _ = try f0nModel.prediction(from: warmF0nIn)
+        // Warm DecoderPre
+        let warmFC = (fullF0Len - 1) / 2 + 1
+        let warmAsr = try makeZeroArray3D(channels: 512, time: warmFC)
+        let warmF0 = try makeZeroArray3D(channels: 1, time: fullF0Len)
+        let warmN = try makeZeroArray3D(channels: 1, time: fullF0Len)
+        let warmRefS = try makeZeroArray2D(dim: 256)
+        let warmDecIn = try MLDictionaryFeatureProvider(dictionary: [
+            "asr": MLFeatureValue(multiArray: warmAsr),
+            "f0": MLFeatureValue(multiArray: warmF0),
+            "n_input": MLFeatureValue(multiArray: warmN),
+            "ref_s": MLFeatureValue(multiArray: warmRefS),
+        ])
+        let _ = try decPreModel.prediction(from: warmDecIn)
+        // Warm GeneratorFromHar
+        let genShapesWarm = inputShapes(from: genModel)
+        var warmGenInputs: [String: MLFeatureValue] = [:]
+        for (name, shape) in genShapesWarm {
+            if shape.count == 3 {
+                warmGenInputs[name] = MLFeatureValue(multiArray: try makeZeroArray3D(channels: shape[1], time: shape[2]))
+            } else if shape.count == 2 {
+                warmGenInputs[name] = MLFeatureValue(multiArray: try makeZeroArray2D(dim: shape[1]))
+            }
         }
+        let _ = try genModel.prediction(from: try MLDictionaryFeatureProvider(dictionary: warmGenInputs))
     }
-    let _ = try genModel.prediction(from: try MLDictionaryFeatureProvider(dictionary: warmGenInputs))
 
     // --- Timed run ---
-    fputs("Running timed iteration...\n", stderr)
+    fputs("  Running timed iteration...\n", stderr)
 
     // Stage 1: Duration CoreML
     let t0 = CFAbsoluteTimeGetCurrent()
-    let durOutput = try durationModel.prediction(from: durInput)
+    let durOutput = try durModel.prediction(from: durInput)
     let t1 = CFAbsoluteTimeGetCurrent()
     let tDuration = t1 - t0
 
@@ -234,11 +319,8 @@ func main() throws {
     let pdPtr = predDurArray.dataPointer.assumingMemoryBound(to: Float.self)
     let tc = predDurArray.shape.last!.intValue
     var predDur = [Int](repeating: 0, count: tc)
-    for j in 0..<tc {
-        predDur[j] = max(1, Int(round(pdPtr[j])))
-    }
+    for j in 0..<tc { predDur[j] = max(1, Int(round(pdPtr[j]))) }
     let frames = predDur.reduce(0, +)
-    let secs = Double(frames) / 80.0
 
     // Stage 2: Alignment
     let t2 = CFAbsoluteTimeGetCurrent()
@@ -247,16 +329,11 @@ func main() throws {
     let tAlignment = t3 - t2
 
     // Stage 3: Matrix ops
-    // Duration model outputs d as (1, tokens, 640) and t_en as (1, tokens, 512).
-    // We need: en = d_transposed @ alignment = (1, 640, tokens) @ (tokens, frames) = (1, 640, frames)
-    // Since matmul3D expects (1, M, K), we need to transpose d first.
     let t4 = CFAbsoluteTimeGetCurrent()
-    // Transpose d: (1, tokens, 640) -> (1, 640, tokens)
     let dTransposed = try transpose3D(source: dArray, dim1: 640, dim2: tc)
     let en = try matmul3D(a: dTransposed, b: alignment, M: 640, K: tc, N: frames)
-    // Transpose t_en: (1, tokens, 512) -> (1, 512, tokens)
     let tEnTransposed = try transpose3D(source: tEnArray, dim1: 512, dim2: tc)
-    let _ = try matmul3D(a: tEnTransposed, b: alignment, M: 512, K: tc, N: frames)
+    let asr = try matmul3D(a: tEnTransposed, b: alignment, M: 512, K: tc, N: frames)
     let t5 = CFAbsoluteTimeGetCurrent()
     let tMatrixOps = t5 - t4
 
@@ -289,10 +366,8 @@ func main() throws {
     let t8 = CFAbsoluteTimeGetCurrent()
     let f0Padded = zeroPad1D(source: f0Curve, targetLength: fullF0Len)
     let nPadded = zeroPad1D(source: nCurve, targetLength: fullF0Len)
-
-    // ASR padding for DecoderPre (recompute with transposed t_en)
-    let asr = try matmul3D(a: tEnTransposed, b: alignment, M: 512, K: tc, N: frames)
-    let frameCount = (fullF0Len - 1) / 2 + 1  // Conv1d(k=3,s=2,p=1) output length
+    // asr was computed in Stage 3 (reused here, not recomputed)
+    let frameCount = (fullF0Len - 1) / 2 + 1
     let asrPadded = try zeroPad3D(source: asr, channels: 512, targetTime: frameCount)
     let t9 = CFAbsoluteTimeGetCurrent()
     let tPadding = t9 - t8
@@ -337,7 +412,6 @@ func main() throws {
     let genRefSP = genRefS.dataPointer.assumingMemoryBound(to: Float.self)
     for j in 0..<256 { genRefSP[j] = benchInput.ref_s[j] }
 
-    // Read expected shapes from model
     let genShapes = inputShapes(from: genModel)
     let xPreExpTime = genShapes["x_pre"]?.last ?? xPre.shape.last!.intValue
     let harExpTime = genShapes["har"]?.last ?? harFrames
@@ -357,19 +431,16 @@ func main() throws {
     let t16 = CFAbsoluteTimeGetCurrent()
     let waveformKey = genOutput.featureNames.contains("waveform") ? "waveform" : genOutput.featureNames.first!
     let waveformArr = genOutput.featureValue(for: waveformKey)!.multiArrayValue!
-    let origF0Len = frames * 2  // F0Ntrain 2x upsample
+    let origF0Len = frames * 2
     let targetLen = Int(round(Double(origF0Len) / 80.0 * 24000.0))
     let trimLen = min(waveformArr.count, targetLen)
     let t17 = CFAbsoluteTimeGetCurrent()
     let tTrim = t17 - t16
 
     let wallTime = t17 - t0
-    // Use canonical duration from manifest (Python pipeline's T_f0 / 80.0) if available.
-    // Fall back to model-derived duration (less accurate due to padding token effects).
     let canonicalDur = benchInput.canonical_duration_s ?? (Double(origF0Len) / 80.0)
     let observedDur = Double(trimLen) / 24000.0
 
-    // Output JSON matching bakeoff results schema
     let result: [String: Any] = [
         "config": "f",
         "input_key": inputKey,
@@ -391,21 +462,192 @@ func main() throws {
         "t_hnsf_swift_s": round(tHnsf * 1e6) / 1e6,
         "t_coreml_predict_s": round(tGenerator * 1e6) / 1e6,
         "t_trim_s": round(tTrim * 1e6) / 1e6,
-        // Legacy fields (set to nil for compatibility)
         "t_prefix_extract_s": NSNull(),
         "t_decoder_pre_cpu_s": NSNull(),
         "t_har_builder_cpu_s": NSNull(),
         "t_orchestration_s": NSNull(),
     ]
 
-    let jsonData = try JSONSerialization.data(withJSONObject: result, options: [.sortedKeys])
-    let jsonString = String(data: jsonData, encoding: .utf8)!
+    return try JSONSerialization.data(withJSONObject: result, options: [.sortedKeys])
+}
 
+// MARK: - Single-shot mode
+
+func runSingleShot(modelsDir: String, inputsDir: String, hnsfWeightsPath: String,
+                    inputKey: String, seed: UInt64, outputPath: String?, warmupCount: Int,
+                    computeUnits: MLComputeUnits = .all) throws {
+    let weightsData = try Data(contentsOf: URL(fileURLWithPath: hnsfWeightsPath))
+    let weights = try JSONDecoder().decode(HnsfWeights.self, from: weightsData)
+
+    let inputPath = URL(fileURLWithPath: inputsDir).appendingPathComponent("\(inputKey).json")
+    let inputData = try Data(contentsOf: inputPath)
+    let benchInput = try JSONDecoder().decode(BenchInput.self, from: inputData)
+
+    let cache = ModelCache(modelsDir: URL(fileURLWithPath: modelsDir), computeUnits: computeUnits)
+
+    fputs("Loading models...\n", stderr)
+    let jsonData = try runPipeline(
+        benchInput: benchInput,
+        inputKey: inputKey,
+        seed: seed,
+        weights: weights,
+        cache: cache
+    )
+
+    let jsonString = String(data: jsonData, encoding: .utf8)!
     if let outputPath = outputPath {
         try jsonString.write(toFile: outputPath, atomically: true, encoding: .utf8)
         fputs("Result written to: \(outputPath)\n", stderr)
     } else {
         print(jsonString)
+    }
+}
+
+// MARK: - Batch mode
+
+func runBatch(modelsDir: String, inputsDir: String, hnsfWeightsPath: String,
+              computeUnits: MLComputeUnits = .all) throws {
+    let weightsData = try Data(contentsOf: URL(fileURLWithPath: hnsfWeightsPath))
+    let weights = try JSONDecoder().decode(HnsfWeights.self, from: weightsData)
+    let cache = ModelCache(modelsDir: URL(fileURLWithPath: modelsDir), computeUnits: computeUnits)
+    let inputsDirURL = URL(fileURLWithPath: inputsDir)
+
+    fputs("Batch mode ready. Waiting for commands on stdin...\n", stderr)
+    // Signal to parent process that we're ready to receive commands
+    print("READY")
+    fflush(stdout)
+
+    while let line = readLine() {
+        let trimmed = line.trimmingCharacters(in: .whitespacesAndNewlines)
+        if trimmed.isEmpty { continue }
+
+        guard let cmdData = trimmed.data(using: .utf8) else {
+            fputs("  Invalid UTF-8 in command\n", stderr)
+            print("ERROR")
+            fflush(stdout)
+            continue
+        }
+
+        do {
+            let cmd = try JSONDecoder().decode(BatchCommand.self, from: cmdData)
+            let seed = cmd.seed ?? 42
+            let isWarmup = cmd.warmup ?? false
+
+            // Load input
+            let inputPath = inputsDirURL.appendingPathComponent("\(cmd.input_key).json")
+            let inputFileData = try Data(contentsOf: inputPath)
+            let benchInput = try JSONDecoder().decode(BenchInput.self, from: inputFileData)
+
+            fputs("  Processing: \(cmd.input_key) (warmup=\(isWarmup))\n", stderr)
+
+            let jsonData = try runPipeline(
+                benchInput: benchInput,
+                inputKey: cmd.input_key,
+                seed: seed,
+                weights: weights,
+                cache: cache
+            )
+
+            let jsonString = String(data: jsonData, encoding: .utf8)!
+            try jsonString.write(toFile: cmd.output, atomically: true, encoding: .utf8)
+
+            print("DONE")
+            fflush(stdout)
+        } catch {
+            fputs("  Error processing command: \(error)\n", stderr)
+            // Write error result to output file if possible
+            if let cmdData = trimmed.data(using: .utf8),
+               let cmd = try? JSONDecoder().decode(BatchCommand.self, from: cmdData) {
+                let errorResult: [String: Any] = [
+                    "config": "f",
+                    "input_key": cmd.input_key,
+                    "status": "swift_error",
+                    "error": String(describing: error),
+                ]
+                if let errData = try? JSONSerialization.data(withJSONObject: errorResult),
+                   let errStr = String(data: errData, encoding: .utf8) {
+                    try? errStr.write(toFile: cmd.output, atomically: true, encoding: .utf8)
+                }
+            }
+            print("DONE")
+            fflush(stdout)
+        }
+    }
+
+    fputs("Batch mode: stdin closed, exiting.\n", stderr)
+}
+
+// MARK: - Main
+
+func main() throws {
+    let args = CommandLine.arguments
+    var modelsDir: String?
+    var inputsDir: String?
+    var hnsfWeightsPath: String?
+    var inputKey: String?
+    var outputPath: String?
+    var warmupCount = 1
+    var seed: UInt64 = 42
+    var batchMode = false
+    var computeUnitsStr = "all"
+
+    var i = 1
+    while i < args.count {
+        switch args[i] {
+        case "--models-dir":
+            i += 1; modelsDir = args[i]
+        case "--inputs-dir":
+            i += 1; inputsDir = args[i]
+        case "--hnsf-weights":
+            i += 1; hnsfWeightsPath = args[i]
+        case "--input-key":
+            i += 1; inputKey = args[i]
+        case "--warmup":
+            i += 1; warmupCount = Int(args[i]) ?? 1
+        case "--seed":
+            i += 1; seed = UInt64(args[i]) ?? 42
+        case "--output":
+            i += 1; outputPath = args[i]
+        case "--batch":
+            batchMode = true
+        case "--compute-units":
+            i += 1; computeUnitsStr = args[i]
+        default:
+            break
+        }
+        i += 1
+    }
+
+    guard let modelsDir = modelsDir,
+          let inputsDir = inputsDir,
+          let hnsfWeightsPath = hnsfWeightsPath else {
+        fputs("Usage: kokoro-bench --models-dir DIR --inputs-dir DIR --hnsf-weights FILE [--input-key KEY | --batch]\n", stderr)
+        exit(1)
+    }
+
+    // Parse compute units
+    let computeUnits: MLComputeUnits
+    switch computeUnitsStr.lowercased() {
+    case "all": computeUnits = .all
+    case "cpuandneuralengine": computeUnits = .cpuAndNeuralEngine
+    case "cpuandgpu": computeUnits = .cpuAndGPU
+    case "cpuonly": computeUnits = .cpuOnly
+    default:
+        fputs("Unknown compute units: \(computeUnitsStr). Use: all, cpuAndNeuralEngine, cpuAndGPU, cpuOnly\n", stderr)
+        exit(1)
+    }
+
+    if batchMode {
+        try runBatch(modelsDir: modelsDir, inputsDir: inputsDir, hnsfWeightsPath: hnsfWeightsPath,
+                     computeUnits: computeUnits)
+    } else {
+        guard let inputKey = inputKey else {
+            fputs("Error: --input-key required in single-shot mode (or use --batch)\n", stderr)
+            exit(1)
+        }
+        try runSingleShot(modelsDir: modelsDir, inputsDir: inputsDir, hnsfWeightsPath: hnsfWeightsPath,
+                          inputKey: inputKey, seed: seed, outputPath: outputPath, warmupCount: warmupCount,
+                          computeUnits: computeUnits)
     }
 }
 

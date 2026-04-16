@@ -57,9 +57,17 @@ _INPUT_MANIFEST_PATH = _BAKEOFF_DIR / "input_manifest.json"
 # The decoder-only control artifact exported by Phase 2.
 DECODER_ONLY_ARTIFACT = str(_BAKEOFF_MODELS_DIR / "kokoro_decoder_only_10s.mlpackage")
 
-# Shipping HAR-post bucket paths.
-HAR_POST_3S = str(_REPO_ROOT / "coreml" / "kokoro_decoder_har_post_3s.mlpackage")
-HAR_POST_10S = str(_REPO_ROOT / "coreml" / "kokoro_decoder_har_post_10s.mlpackage")
+# Shipping HAR-post bucket paths — all 5 buckets must be loaded for fair
+# comparison with Config F (Swift), which uses all 5.  Previous versions only
+# loaded 3s and 10s, causing _select_bucket_seconds to fall back to 10s for
+# 7s/15s/30s inputs — a silent workload mismatch.
+HAR_POST_BUCKETS: dict[int, str] = {
+    3:  str(_REPO_ROOT / "coreml" / "kokoro_decoder_har_post_3s.mlpackage"),
+    7:  str(_REPO_ROOT / "coreml" / "kokoro_decoder_har_post_7s.mlpackage"),
+    10: str(_REPO_ROOT / "coreml" / "kokoro_decoder_har_post_10s.mlpackage"),
+    15: str(_REPO_ROOT / "coreml" / "kokoro_decoder_har_post_15s.mlpackage"),
+    30: str(_REPO_ROOT / "coreml" / "kokoro_decoder_har_post_30s.mlpackage"),
+}
 
 # ---------------------------------------------------------------------------
 # Benchmark Inputs -- frozen text, voice, and speed for every config.
@@ -221,7 +229,7 @@ def cmd_prepare_inputs(args: argparse.Namespace) -> None:
             self.pipeline = kp
             self.coreml_synth_buckets = {}
             self.coreml_decoder_har_buckets = {}
-            self.coreml_decoder_har_post_buckets = {3: None, 10: None}
+            self.coreml_decoder_har_post_buckets = {sec: None for sec in HAR_POST_BUCKETS}
 
         extract_vocoder_inputs = HybridTTSPipeline.extract_vocoder_inputs
         _select_bucket_seconds = HybridTTSPipeline._select_bucket_seconds
@@ -244,7 +252,7 @@ def cmd_prepare_inputs(args: argparse.Namespace) -> None:
 
         T_f0 = int(vi["f0_curve"].shape[-1])
         canonical_duration_s = T_f0 / 80.0
-        expected_bucket = _select_bucket_seconds_standalone(canonical_duration_s, [3, 7, 10, 15, 30])
+        expected_bucket = _select_bucket_seconds_standalone(canonical_duration_s, sorted(HAR_POST_BUCKETS))
 
         print(f"  T_f0={T_f0}, canonical_duration={canonical_duration_s:.3f}s, bucket={expected_bucket}s")
 
@@ -266,7 +274,7 @@ def cmd_prepare_inputs(args: argparse.Namespace) -> None:
                 )
 
         # Smoke assertion: bucket must be in the available set.
-        available_buckets = {3, 7, 10, 15, 30}
+        available_buckets = set(HAR_POST_BUCKETS)
         if expected_bucket not in available_buckets:
             print(
                 f"  FAIL: expected bucket {expected_bucket}s is not in {sorted(available_buckets)} -- "
@@ -325,27 +333,26 @@ class ConfigAContext:
         self.unavailable_reason = ""
         self.artifacts: dict[str, dict] = {}
 
-        # Check that HAR-post artifacts exist.
-        for label, path in [("3s", HAR_POST_3S), ("10s", HAR_POST_10S)]:
+        # Check that all 5 HAR-post bucket artifacts exist.
+        for sec, path in HAR_POST_BUCKETS.items():
             if not Path(path).exists():
                 self.available = False
-                self.unavailable_reason = f"HAR-post {label} artifact not found: {path}"
+                self.unavailable_reason = f"HAR-post {sec}s artifact not found: {path}"
                 return
 
         # Full pipeline init — loads PyTorch + auto-discovers CoreML.
         self.pipe = HybridTTSPipeline()
 
-        # Override with explicit loads so SHA256 is tied to known paths.
+        # Override with explicit loads of all 5 buckets so Config A uses the
+        # same bucket set as Config F (fair comparison).
         self.pipe.coreml_decoder_har_post_buckets = {
-            3: ct.models.MLModel(HAR_POST_3S),
-            10: ct.models.MLModel(HAR_POST_10S),
+            sec: ct.models.MLModel(path)
+            for sec, path in HAR_POST_BUCKETS.items()
         }
 
         # Record artifact metadata.
-        for label, path, sec in [
-            ("config_a_har_post_3s", HAR_POST_3S, 3),
-            ("config_a_har_post_10s", HAR_POST_10S, 10),
-        ]:
+        for sec, path in HAR_POST_BUCKETS.items():
+            label = f"config_a_har_post_{sec}s"
             model = self.pipe.coreml_decoder_har_post_buckets[sec]
             spec = model.get_spec()
             shapes = {
@@ -464,13 +471,21 @@ class PyTorchContext:
         _run_pytorch(self, text)
 
 class SwiftPipelineContext:
-    """Config F: Swift + CoreML pipeline via kokoro-bench subprocess."""
+    """Config F: Swift + CoreML pipeline via persistent kokoro-bench subprocess.
 
-    def __init__(self) -> None:
+    Uses ``--batch`` mode so CoreML models are compiled once and cached across
+    iterations. The subprocess stays alive for the entire bakeoff run. Commands
+    are sent as JSON on stdin; the binary writes results to temp files and
+    prints "DONE\\n" on stdout when each command completes.
+    """
+
+    def __init__(self, compute_units: str = "all") -> None:
         self.config_id = "f"
         self.available = True
         self.unavailable_reason = ""
         self.artifacts: dict[str, dict] = {}
+        self._proc: subprocess.Popen | None = None
+        self._compute_units = compute_units
 
         # Locate the built Swift binary
         self._swift_binary = _REPO_ROOT / "swift" / ".build" / "release" / "kokoro-bench"
@@ -504,38 +519,124 @@ class SwiftPipelineContext:
         else:
             self._first_input_key = "3s"  # fallback
 
-    def warmup(self, text: str) -> None:
-        """Warmup by running one input through the Swift binary."""
-        import subprocess
-        import tempfile
-        out_file = tempfile.NamedTemporaryFile(suffix=".json", delete=False)
-        out_file.close()
-        try:
-            subprocess.run(
-                [
-                    str(self._swift_binary),
-                    "--models-dir", str(self._models_dir),
-                    "--inputs-dir", str(self._inputs_dir),
-                    "--hnsf-weights", str(self._hnsf_weights),
-                    "--input-key", self._first_input_key,
-                    "--output", out_file.name,
-                    "--seed", "0",
-                ],
-                check=True,
-                capture_output=True,
-                timeout=300,
+    def _ensure_subprocess(self) -> subprocess.Popen:
+        """Start the persistent batch subprocess if not already running."""
+        if self._proc is not None and self._proc.poll() is None:
+            return self._proc
+
+        import subprocess as _sp
+        # stderr must NOT be PIPE — the Swift binary writes verbose compilation
+        # logs to stderr, and if the pipe buffer fills (64KB) it deadlocks.
+        # Let stderr flow to the parent's stderr so the user sees progress.
+        self._proc = _sp.Popen(
+            [
+                str(self._swift_binary),
+                "--models-dir", str(self._models_dir),
+                "--inputs-dir", str(self._inputs_dir),
+                "--hnsf-weights", str(self._hnsf_weights),
+                "--batch",
+                "--compute-units", self._compute_units,
+            ],
+            stdin=_sp.PIPE,
+            stdout=_sp.PIPE,
+            stderr=None,  # inherit parent stderr
+        )
+        # Wait for "READY" signal from the Swift binary
+        ready_line = self._proc.stdout.readline().decode().strip()
+        if ready_line != "READY":
+            raise RuntimeError(
+                f"Swift batch subprocess did not send READY, got: {ready_line!r}"
             )
-        except Exception as exc:
-            print(f"  Swift warmup failed: {exc}")
-        finally:
-            os.unlink(out_file.name)
+        print("  Swift batch subprocess started (pid={})".format(self._proc.pid))
+        return self._proc
+
+    def _send_command(self, cmd: dict, timeout: float = 300) -> str:
+        """Send a JSON command to the batch subprocess and wait for DONE.
+
+        Returns the path to the output file (caller reads it).
+        """
+        proc = self._ensure_subprocess()
+        cmd_json = json.dumps(cmd) + "\n"
+        proc.stdin.write(cmd_json.encode())
+        proc.stdin.flush()
+
+        # Wait for "DONE" response with timeout
+        import select
+        import time
+        deadline = time.monotonic() + timeout
+        while True:
+            remaining = deadline - time.monotonic()
+            if remaining <= 0:
+                raise TimeoutError(f"Swift batch subprocess timed out after {timeout}s")
+            # Use select to wait for stdout with timeout
+            ready, _, _ = select.select([proc.stdout], [], [], min(remaining, 1.0))
+            if ready:
+                line = proc.stdout.readline().decode().strip()
+                if line in ("DONE", "ERROR"):
+                    return cmd["output"]
+            # Check if process died
+            if proc.poll() is not None:
+                raise RuntimeError(
+                    f"Swift batch subprocess died (rc={proc.returncode})"
+                )
+
+    def warmup(self, text: str) -> None:
+        """Warmup by running each input key through the persistent subprocess.
+
+        This triggers model compilation and warmup for all buckets, so timed
+        runs don't pay the compilation cost.
+        """
+        import tempfile
+        manifest_path = _REPO_ROOT / "outputs" / "bakeoff" / "input_manifest.json"
+        if manifest_path.exists():
+            with open(manifest_path) as f:
+                manifest = json.load(f)
+            input_keys = list(manifest["inputs"].keys())
+        else:
+            input_keys = [self._first_input_key]
+
+        for ik in input_keys:
+            out_file = tempfile.NamedTemporaryFile(suffix=".json", delete=False)
+            out_file.close()
+            try:
+                print(f"  Swift warmup: {ik} (compiling models for this bucket)...")
+                self._send_command({
+                    "input_key": ik,
+                    "seed": 0,
+                    "output": out_file.name,
+                    "warmup": True,
+                }, timeout=600)
+            except Exception as exc:
+                print(f"  Swift warmup failed for {ik}: {exc}")
+            finally:
+                try:
+                    os.unlink(out_file.name)
+                except OSError:
+                    pass
+
+    def close(self) -> None:
+        """Shut down the persistent subprocess."""
+        if self._proc is not None and self._proc.poll() is None:
+            self._proc.stdin.close()
+            self._proc.wait(timeout=10)
+            print(f"  Swift batch subprocess exited (rc={self._proc.returncode})")
+            self._proc = None
+
+    def __del__(self) -> None:
+        try:
+            self.close()
+        except Exception:
+            pass
 
 
 def _run_swift_timed(
     ctx: SwiftPipelineContext, input_key: str, manifest_entry: dict
 ) -> dict[str, Any]:
-    """Run Config F via Swift subprocess."""
-    import subprocess
+    """Run Config F via the persistent Swift batch subprocess.
+
+    Models are already compiled and cached in the subprocess — this only
+    measures inference time.
+    """
     import tempfile
 
     record: dict[str, Any] = {
@@ -555,34 +656,21 @@ def _run_swift_timed(
     out_file.close()
 
     try:
-        result = subprocess.run(
-            [
-                str(ctx._swift_binary),
-                "--models-dir", str(ctx._models_dir),
-                "--inputs-dir", str(ctx._inputs_dir),
-                "--hnsf-weights", str(ctx._hnsf_weights),
-                "--input-key", input_key,
-                "--output", out_file.name,
-                "--seed", "42",
-            ],
-            capture_output=True,
-            timeout=300,
-        )
-        if result.returncode != 0:
-            record.update(
-                status="swift_error",
-                error=result.stderr.decode("utf-8", errors="replace")[:500],
-            )
-            return record
+        ctx._send_command({
+            "input_key": input_key,
+            "seed": 0,
+            "output": out_file.name,
+            "warmup": False,
+        })
 
         swift_result = json.loads(Path(out_file.name).read_text())
         record.update(swift_result)
-        record["config"] = "f"  # Ensure config ID is correct
+        record["config"] = "f"
         record["input_key"] = input_key
         return record
 
-    except subprocess.TimeoutExpired:
-        record.update(status="timeout", error="Swift binary timed out after 300s")
+    except TimeoutError:
+        record.update(status="timeout", error="Swift batch subprocess timed out")
         return record
     except Exception as exc:
         record.update(status="exception", error=str(exc))
@@ -1073,6 +1161,14 @@ def cmd_run(args: argparse.Namespace) -> None:
                 torch.mps.empty_cache()
 
         print(f" [rep {rep}]")
+
+    # --- Clean up persistent subprocesses ---
+    for ctx in contexts.values():
+        if ctx and hasattr(ctx, "close"):
+            try:
+                ctx.close()
+            except Exception:
+                pass
 
     # --- Collect artifacts from all contexts ---
     all_artifacts: dict[str, dict] = {}

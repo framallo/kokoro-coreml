@@ -332,6 +332,38 @@ Discrete `pred_dur` is sensitive to FP16 drift before rounding; `d` and `t_en` a
 
 ---
 
+## Issue: Subprocess pipe deadlock when Swift binary writes to stderr — Resolved
+
+**First spotted:** 2026-04-15
+**Status:** Resolved
+
+### Summary
+
+The bakeoff harness's persistent Swift subprocess (batch mode) deadlocked during model compilation. The parent Python process blocked reading stdout while the child blocked writing to stderr.
+
+### Symptom
+
+- `ps` showed 0% CPU on both parent (Python) and child (Swift `kokoro-bench`) processes
+- The first stdin command (3s warmup) completed, but the second (7s warmup) hung forever
+- Process RSS showed models were loaded (~500MB) but no progress
+
+### Root Cause
+
+Classic subprocess pipe deadlock. `subprocess.Popen` with `stdout=PIPE, stderr=PIPE` gives each pipe a ~64KB kernel buffer. During CoreML `MLModel.compileModel()`, the Swift binary writes verbose compilation logs to stderr via `fputs(...)`. When compiling larger models (7s+ bucket), the stderr output exceeds 64KB, filling the pipe buffer. The child blocks on `fputs()` waiting for the parent to drain stderr, but the parent is blocked on `stdout.readline()` waiting for "DONE" — neither can make progress.
+
+### Fix
+
+Set `stderr=None` (inherit parent stderr) in the `Popen` call so Swift's compilation logs flow directly to the terminal. The parent only needs to read stdout (the "READY"/"DONE" protocol).
+
+### If This Recurs
+
+Any time you use `Popen` with both `stdout=PIPE` and `stderr=PIPE`, the child must not write more than ~64KB to either pipe without the parent draining it. Options:
+1. Inherit one of the pipes (`stderr=None`)
+2. Use `communicate()` (but that waits for process exit — no good for persistent subprocesses)
+3. Use threads or `asyncio` to drain both pipes concurrently
+
+---
+
 <!--
 USAGE: See README/Templates/Notes-template.md
 -->
