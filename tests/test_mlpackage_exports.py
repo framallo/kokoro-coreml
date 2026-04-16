@@ -28,6 +28,27 @@ def _multiarray_shape(desc) -> tuple[int, ...]:
         return ()
 
 
+@pytest.mark.parametrize("bucket_sec", [3, 7, 10, 15, 30])
+def test_decoder_har_post_bucket_shape_matches_advertised_duration(bucket_sec):
+    """GeneratorFromHar package names must mean enough waveform capacity for that duration."""
+    post_pkg = _ROOT / f"coreml/kokoro_decoder_har_post_{bucket_sec}s.mlpackage"
+    pre_pkg = _ROOT / f"coreml/kokoro_decoder_pre_{bucket_sec}s.mlpackage"
+    if not post_pkg.is_dir() or not pre_pkg.is_dir():
+        pytest.skip(f"Core ML packages for {bucket_sec}s bucket not in tree")
+
+    post_spec = ct.utils.load_spec(str(post_pkg))
+    pre_spec = ct.utils.load_spec(str(pre_pkg))
+
+    post_inputs = {i.name: _multiarray_shape(i) for i in post_spec.description.input}
+    post_outputs = {o.name: _multiarray_shape(o) for o in post_spec.description.output}
+    pre_outputs = {o.name: _multiarray_shape(o) for o in pre_spec.description.output}
+
+    expected_har_time = bucket_sec * 24_000 * 2 // 5 + 1
+    assert post_inputs["x_pre"][-1] == pre_outputs["x_pre"][-1]
+    assert post_inputs["har"][-1] == expected_har_time
+    assert post_outputs["waveform"][-1] >= bucket_sec * 24_000
+
+
 @pytest.mark.skipif(not _DURATION_PKG.is_dir(), reason="coreml/kokoro_duration.mlpackage not in tree")
 def test_kokoro_duration_mlpackage_loads_and_predict_shapes():
     """Load duration model, run predict, assert output keys and array shapes."""
@@ -153,4 +174,3 @@ def test_kokoro_decoder_har_post_10s_mlpackage_loads_and_predict_shapes():
     expected = _multiarray_shape(out_specs["waveform"])
     if expected:
         assert tuple(waveform.shape) == expected
-

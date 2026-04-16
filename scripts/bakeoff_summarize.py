@@ -31,6 +31,7 @@ CONFIG_LABELS = {
     "c": "Config C (decoder-only .cpuAndGPU)",
     "d": "Config D (PyTorch MPS)",
     "e": "Config E (PyTorch CPU)",
+    "f": "Config F (Swift + CoreML)",
     "bcpu": "Config Bcpu (decoder-only .cpuOnly)",
 }
 
@@ -109,6 +110,19 @@ def _format_table(headers: list[str], rows: list[list[str]], align: list[str] | 
     return "\n".join([header_line, sep_line] + body_lines)
 
 
+def _ordered_input_keys(data: dict) -> list[str]:
+    """Return manifest input order, falling back to result order for legacy files."""
+    keys: list[str] = []
+    for key in data.get("inputs", {}):
+        if key not in keys:
+            keys.append(key)
+    for result in data.get("results", []):
+        key = result.get("input_key")
+        if key and key not in keys:
+            keys.append(key)
+    return keys
+
+
 def cmd_summarize(args: argparse.Namespace) -> None:
     """Read results files and emit tables + gate answers."""
     results_paths = args.results
@@ -149,6 +163,7 @@ def cmd_summarize(args: argparse.Namespace) -> None:
 
         results = [r for r in data.get("results", []) if r.get("status") == "ok"]
         configs_present = sorted(set(r["config"] for r in results))
+        input_keys = _ordered_input_keys(data)
 
         # Wall time table.
         lines.append("\n### Wall Time (seconds)\n")
@@ -156,7 +171,7 @@ def cmd_summarize(args: argparse.Namespace) -> None:
         align = ["l", "l", "r", "r", "r", "r", "r", "r"]
         rows = []
         for cfg in configs_present:
-            for ik in ["tiny", "short", "medium", "long"]:
+            for ik in input_keys:
                 vals = [r["wall_time_s"] for r in results
                         if r["config"] == cfg and r.get("input_key") == ik and r["wall_time_s"] is not None]
                 s = _stats(vals)
@@ -175,7 +190,7 @@ def cmd_summarize(args: argparse.Namespace) -> None:
         align = ["l", "l", "r", "r", "r", "r", "r"]
         rows = []
         for cfg in configs_present:
-            for ik in ["tiny", "short", "medium", "long"]:
+            for ik in input_keys:
                 vals = [r["rtf_canonical"] for r in results
                         if r["config"] == cfg and r.get("input_key") == ik and r.get("rtf_canonical") is not None]
                 s = _stats(vals)
@@ -225,6 +240,11 @@ def cmd_summarize(args: argparse.Namespace) -> None:
 
     # Collect aggregate stats for gate analysis.
     ok_results = [r for r in all_results if r.get("status") == "ok"]
+    gate_input_keys: list[str] = []
+    for data in all_data:
+        for key in _ordered_input_keys(data):
+            if key not in gate_input_keys:
+                gate_input_keys.append(key)
 
     def _config_median(cfg: str, field: str = "wall_time_s") -> float | None:
         vals = [r[field] for r in ok_results if r["config"] == cfg and r.get(field) is not None]
@@ -305,7 +325,7 @@ def cmd_summarize(args: argparse.Namespace) -> None:
         headers = ["Input", "Duration (s)", "A wall (s)", "E wall (s)", "Speedup"]
         align = ["l", "r", "r", "r", "r"]
         rows = []
-        for ik in ["tiny", "short", "medium", "long"]:
+        for ik in gate_input_keys:
             a_ik = _config_median_by_input("a", ik)
             e_ik = _config_median_by_input("e", ik)
             # Get canonical duration from first result.

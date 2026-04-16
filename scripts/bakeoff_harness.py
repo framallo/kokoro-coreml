@@ -101,6 +101,7 @@ BAKEOFF_INPUTS: dict[str, str] = {
 
 # Maximum canonical audio duration (seconds).  prepare-inputs hard-fails above this.
 MAX_CANONICAL_DURATION_S = 30.0
+CONFIG_F_DURATION_TOLERANCE_FRACTION = 0.15
 
 # Headline config IDs valid for ``run --configs``.
 HEADLINE_CONFIGS = {"a", "b", "c", "d", "e", "f"}
@@ -197,6 +198,52 @@ def _select_bucket_seconds_standalone(
         if sec >= threshold:
             return sec
     return available[-1] if available else None
+
+def _hnsf_weights_sha256(path: Path) -> str | None:
+    try:
+        data = json.loads(path.read_text())
+    except (FileNotFoundError, json.JSONDecodeError):
+        return None
+    if "linear_weights" not in data or "linear_bias" not in data:
+        return None
+    payload = json.dumps(
+        {"linear_weights": data["linear_weights"], "linear_bias": data["linear_bias"]},
+        sort_keys=True,
+        separators=(",", ":"),
+    )
+    return hashlib.sha256(payload.encode("utf-8")).hexdigest()
+
+def _swift_input_staleness(input_json: Path, hnsf_weights: Path, manifest_entry: dict[str, Any]) -> str | None:
+    """Return a mismatch reason if a prepared Swift input does not match the manifest."""
+    try:
+        prepared = json.loads(input_json.read_text())
+    except json.JSONDecodeError as exc:
+        return f"invalid JSON in {input_json}: {exc}"
+
+    for field in ("text", "voice"):
+        expected = manifest_entry.get(field)
+        if expected is not None and prepared.get(field) != expected:
+            return f"{input_json.name} {field} does not match manifest"
+
+    expected_speed = manifest_entry.get("speed")
+    if expected_speed is not None and abs(float(prepared.get("speed", -1)) - float(expected_speed)) > 1e-6:
+        return f"{input_json.name} speed does not match manifest"
+
+    expected_duration = manifest_entry.get("canonical_duration_s")
+    prepared_duration = prepared.get("canonical_duration_s")
+    if (
+        isinstance(expected_duration, (int, float))
+        and isinstance(prepared_duration, (int, float))
+        and abs(float(prepared_duration) - float(expected_duration)) > 1e-3
+    ):
+        return f"{input_json.name} canonical duration does not match manifest"
+
+    prepared_hnsf_hash = prepared.get("hnsf_weights_sha256")
+    current_hnsf_hash = _hnsf_weights_sha256(hnsf_weights)
+    if not prepared_hnsf_hash or prepared_hnsf_hash != current_hnsf_hash:
+        return f"{input_json.name} does not match current hn-nsf weights"
+
+    return None
 
 # ---------------------------------------------------------------------------
 # prepare-inputs mode
@@ -651,6 +698,9 @@ def _run_swift_timed(
     if not input_json.exists():
         record.update(status="input_missing", error=f"No pre-tokenized input for {input_key}")
         return record
+    if staleness := _swift_input_staleness(input_json, ctx._hnsf_weights, manifest_entry):
+        record.update(status="input_stale", error=staleness)
+        return record
 
     out_file = tempfile.NamedTemporaryFile(suffix=".json", delete=False)
     out_file.close()
@@ -667,6 +717,17 @@ def _run_swift_timed(
         record.update(swift_result)
         record["config"] = "f"
         record["input_key"] = input_key
+        if record.get("status") == "ok" and not _duration_agreement_ok(
+            record.get("observed_audio_duration_s"),
+            manifest_entry.get("canonical_duration_s"),
+        ):
+            record.update(
+                status="duration_mismatch",
+                error=(
+                    f"observed={record.get('observed_audio_duration_s')}s vs "
+                    f"canonical={manifest_entry.get('canonical_duration_s')}s"
+                ),
+            )
         return record
 
     except TimeoutError:
@@ -946,6 +1007,13 @@ def _run_pytorch_timed(
 # Smoke checks
 # ---------------------------------------------------------------------------
 
+def _duration_agreement_ok(observed: Any, canonical: Any) -> bool:
+    if not isinstance(observed, (int, float)) or not isinstance(canonical, (int, float)):
+        return False
+    if observed <= 0 or canonical <= 0:
+        return False
+    return abs(float(observed) - float(canonical)) / float(canonical) <= CONFIG_F_DURATION_TOLERANCE_FRACTION
+
 def _smoke_check_config_a(ctx: ConfigAContext, text: str) -> None:
     """Verify timed runner agrees with production function.
 
@@ -981,6 +1049,28 @@ def _smoke_check_config_a(ctx: ConfigAContext, text: str) -> None:
         f"(ratio={ratio:.3f}, must be 0.5-1.5)"
     )
     print(f"  Config A smoke check passed: timed={timed_wall:.4f}s, prod={prod_time:.4f}s, ratio={ratio:.3f}")
+
+def _smoke_check_config_f(ctx: SwiftPipelineContext, manifest: dict) -> None:
+    """Verify Config F does not mark invalid-duration audio as successful."""
+    for input_key, entry in manifest["inputs"].items():
+        record = _run_swift_timed(ctx, input_key, {**entry, "_input_key": input_key})
+        if record["status"] != "ok":
+            raise RuntimeError(
+                f"Config F smoke failed for {input_key}: "
+                f"{record.get('status')} {record.get('error')}"
+            )
+        if not _duration_agreement_ok(
+            record.get("observed_audio_duration_s"),
+            entry.get("canonical_duration_s"),
+        ):
+            raise RuntimeError(
+                f"Config F smoke duration mismatch for {input_key}: "
+                f"observed={record.get('observed_audio_duration_s')}s, "
+                f"canonical={entry.get('canonical_duration_s')}s"
+            )
+        if record.get("wall_time_s", 0) <= 0:
+            raise RuntimeError(f"Config F smoke has no wall time for {input_key}")
+    print(f"  Config F smoke check passed: {len(manifest['inputs'])} input(s)")
 
 # ---------------------------------------------------------------------------
 # run mode
@@ -1086,6 +1176,13 @@ def cmd_run(args: argparse.Namespace) -> None:
         else:
             print("\nRunning Config A smoke check...")
             _smoke_check_config_a(contexts["a"], warmup_text)
+
+    if "f" in contexts and contexts["f"].available:
+        if os.environ.get("BAKEOFF_SKIP_SMOKE") == "1":
+            print("\nSkipping Config F smoke check (BAKEOFF_SKIP_SMOKE=1)")
+        else:
+            print("\nRunning Config F smoke check...")
+            _smoke_check_config_f(contexts["f"], manifest)
 
     # --- Timed iterations with independently shuffled config and input order ---
     # Note: configs and inputs are shuffled separately per plan spec. All inputs
@@ -1302,7 +1399,7 @@ def main() -> None:
     # run
     p_run = sub.add_parser("run", help="Run timed benchmark iterations")
     p_run.add_argument(
-        "--configs", required=True, help="Comma-separated config IDs (a,b,c,d,e)"
+        "--configs", required=True, help="Comma-separated config IDs (a,b,c,d,e,f)"
     )
     p_run.add_argument(
         "--iterations", type=int, default=5, help="Iterations per config/input pair"

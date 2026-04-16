@@ -31,7 +31,7 @@ public enum PipelineConstants {
     public static let sampleRate: Int = 24000
     /// F0 frame rate (Hz). Converts F0 frame count to seconds.
     public static let f0FrameRate: Double = 80.0
-    /// Duration model fixed token length.
+    /// Legacy duration model fixed token length.
     public static let durationTokenLength: Int = 128
     /// Voice embedding total dimension.
     public static let voiceEmbeddingDim: Int = 256
@@ -49,7 +49,7 @@ public enum PipelineConstants {
     /// then F0Ntrain's 2× upsample means T_frames = full_f0_len / 2.
     /// Single source of truth — used by both init() and synthesize().
     public static let tFramesForBucket: [Int: Int] = [
-        3: 120, 7: 560, 10: 400, 15: 1200, 30: 2400, 45: 1800,
+        3: 120, 7: 280, 10: 400, 15: 600, 30: 1200, 45: 1800,
     ]
 
     /// Duration model enumerated token sizes. Caller pads to nearest.
@@ -107,7 +107,8 @@ public struct SynthesisResult {
 /// hundreds of milliseconds per model. For app integration, call init
 /// on a background thread or use pre-compiled ``.mlmodelc`` bundles.
 public class KokoroPipeline {
-    private let durationModel: MLModel
+    private let durationModels: [Int: MLModel] // keyed by token length
+    private let availableDurationTokenSizes: [Int]
     private let f0ntrainModels: [Int: MLModel]  // keyed by T_frames
     private let decoderPreModels: [Int: MLModel] // keyed by bucket seconds
     private let generatorModels: [Int: MLModel]  // keyed by bucket seconds
@@ -122,7 +123,7 @@ public class KokoroPipeline {
     /// Load all models from a directory.
     ///
     /// Expected files:
-    /// - ``kokoro_duration.mlpackage``
+    /// - ``kokoro_duration_t{T}.mlpackage`` for each token size, or legacy ``kokoro_duration.mlpackage``
     /// - ``kokoro_f0ntrain_t{T}.mlpackage`` for each bucket's T_frames
     /// - ``kokoro_decoder_pre_{N}s.mlpackage`` for each bucket
     /// - ``kokoro_decoder_har_post_{N}s.mlpackage`` for each bucket
@@ -132,15 +133,37 @@ public class KokoroPipeline {
     /// ``.mlmodelc`` bundles to avoid blocking the main thread.
     public init(
         modelsDirectory: URL,
-        buckets: [Int] = [3, 10],
+        buckets: [Int] = [3, 7, 10, 15, 30],
         linearWeights: [Float],
         linearBias: Float
     ) throws {
-        // Duration model
-        let durURL = modelsDirectory.appendingPathComponent("kokoro_duration.mlpackage")
-        let durConfig = MLModelConfiguration()
-        durConfig.computeUnits = .all
-        self.durationModel = try MLModel(contentsOf: MLModel.compileModel(at: durURL), configuration: durConfig)
+        // Duration models. Prefer enumerated T-specific packages and keep the
+        // legacy 128-token package as a compatibility fallback.
+        var durModels: [Int: MLModel] = [:]
+        for tokenSize in PipelineConstants.durationTokenSizes {
+            let specificURL = modelsDirectory.appendingPathComponent("kokoro_duration_t\(tokenSize).mlpackage")
+            let legacyURL = modelsDirectory.appendingPathComponent("kokoro_duration.mlpackage")
+            let url: URL?
+            if FileManager.default.fileExists(atPath: specificURL.path) {
+                url = specificURL
+            } else if tokenSize == PipelineConstants.durationTokenLength,
+                      FileManager.default.fileExists(atPath: legacyURL.path) {
+                url = legacyURL
+            } else {
+                url = nil
+            }
+
+            if let url {
+                let config = MLModelConfiguration()
+                config.computeUnits = .all
+                durModels[tokenSize] = try MLModel(contentsOf: MLModel.compileModel(at: url), configuration: config)
+            }
+        }
+        guard !durModels.isEmpty else {
+            throw PipelineError.modelNotLoaded("duration")
+        }
+        self.durationModels = durModels
+        self.availableDurationTokenSizes = Array(durModels.keys.sorted())
 
         // F0Ntrain models (one per bucket's T_frames)
         var f0Models: [Int: MLModel] = [:]
@@ -188,8 +211,8 @@ public class KokoroPipeline {
     /// Synthesize audio from pre-tokenized input.
     ///
     /// - Parameters:
-    ///   - inputIds: Token IDs, padded/truncated to 128. Shape semantics: (128,).
-    ///   - attentionMask: Mask for actual tokens (1) vs padding (0). Shape: (128,).
+    ///   - inputIds: Token IDs, optionally padded to one of ``PipelineConstants.durationTokenSizes``.
+    ///   - attentionMask: Mask for actual tokens (1) vs padding (0).
     ///   - refS: Voice embedding, shape (256,).
     ///   - speed: Speech rate multiplier.
     /// - Returns: SynthesisResult with audio and timing breakdown.
@@ -203,7 +226,21 @@ public class KokoroPipeline {
 
         // ---- Stage 1: Duration CoreML ----
         let t0 = CFAbsoluteTimeGetCurrent()
-        let durInput = try buildDurationInput(inputIds: inputIds, attentionMask: attentionMask, refS: refS, speed: speed)
+        let durationTokenLength = try selectDurationTokenLength(
+            inputIds: inputIds,
+            attentionMask: attentionMask,
+            availableSizes: availableDurationTokenSizes
+        )
+        guard let durationModel = durationModels[durationTokenLength] else {
+            throw PipelineError.modelNotLoaded("duration_t\(durationTokenLength)")
+        }
+        let durInput = try buildDurationInput(
+            inputIds: inputIds,
+            attentionMask: attentionMask,
+            refS: refS,
+            speed: speed,
+            tokenLength: durationTokenLength
+        )
         let durOutput = try durationModel.prediction(from: durInput)
         let t1 = CFAbsoluteTimeGetCurrent()
         timings.durationCoreML = t1 - t0
@@ -216,15 +253,14 @@ public class KokoroPipeline {
         let dArray = durOutput.featureValue(for: "d")!.multiArrayValue!
         let tEnArray = durOutput.featureValue(for: "t_en")!.multiArrayValue!
 
-        // Parse pred_dur into integer array
-        let predDurPtr = predDurArray.dataPointer.assumingMemoryBound(to: Float.self)
+        // Parse only non-padding token durations. The static Core ML model
+        // returns a full T-sized integer tensor; padded positions must not
+        // contribute one frame each.
         let tokenCount = predDurArray.shape.last!.intValue
-        var predDur = [Int](repeating: 0, count: tokenCount)
-        for i in 0..<tokenCount {
-            predDur[i] = max(1, Int(round(predDurPtr[i])))
-        }
+        let validTokenCount = min(tokenCount, attentionMask.reduce(0) { $0 + ($1 == 0 ? 0 : 1) })
+        let predDur = try readDurationFrames(from: predDurArray, validCount: validTokenCount)
         let totalFrames = predDur.reduce(0, +)
-        let totalSeconds = Double(totalFrames) / PipelineConstants.f0FrameRate
+        let totalSeconds = Double(totalFrames * 2) / PipelineConstants.f0FrameRate
 
         // ---- Stage 2: Alignment ----
         let t2 = CFAbsoluteTimeGetCurrent()
@@ -444,9 +480,10 @@ public class KokoroPipeline {
         inputIds: [Int32],
         attentionMask: [Int32],
         refS: [Float],
-        speed: Float
+        speed: Float,
+        tokenLength: Int
     ) throws -> MLDictionaryFeatureProvider {
-        let T = PipelineConstants.durationTokenLength
+        let T = tokenLength
 
         let idsArray = try MLMultiArray(shape: [1, NSNumber(value: T)], dataType: .int32)
         let maskArray = try MLMultiArray(shape: [1, NSNumber(value: T)], dataType: .int32)
@@ -475,6 +512,24 @@ public class KokoroPipeline {
             "speed": MLFeatureValue(multiArray: speedArray),
         ])
     }
+
+    private func selectDurationTokenLength(
+        inputIds: [Int32],
+        attentionMask: [Int32],
+        availableSizes: [Int]
+    ) throws -> Int {
+        let maskedTokenCount = attentionMask.reduce(0) { $0 + ($1 == 0 ? 0 : 1) }
+        let requestedTokenCount = maskedTokenCount > 0 ? maskedTokenCount : inputIds.count
+
+        for size in availableSizes.sorted() where requestedTokenCount <= size {
+            return size
+        }
+
+        throw PipelineError.inputTooLong(
+            tokens: requestedTokenCount,
+            maxTokens: availableSizes.max() ?? 0
+        )
+    }
 }
 
 // MARK: - Errors
@@ -482,6 +537,7 @@ public class KokoroPipeline {
 public enum PipelineError: Error, LocalizedError {
     case noBucketAvailable
     case modelNotLoaded(String)
+    case inputTooLong(tokens: Int, maxTokens: Int)
 
     public var errorDescription: String? {
         switch self {
@@ -489,6 +545,8 @@ public enum PipelineError: Error, LocalizedError {
             return "No bucket available for the requested duration"
         case .modelNotLoaded(let name):
             return "Model not loaded: \(name)"
+        case .inputTooLong(let tokens, let maxTokens):
+            return "Input has \(tokens) tokens, but the largest loaded duration model supports \(maxTokens)"
         }
     }
 }

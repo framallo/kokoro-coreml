@@ -8,6 +8,75 @@
 import CoreML
 import Accelerate
 
+// MARK: - Validation
+
+public enum PipelineValidationError: Error, LocalizedError {
+    case unsupportedDurationDataType(MLMultiArrayDataType)
+    case invalidDurationAgreement(inputKey: String, canonical: Double, observed: Double, toleranceFraction: Double)
+
+    public var errorDescription: String? {
+        switch self {
+        case .unsupportedDurationDataType(let dataType):
+            return "Unsupported pred_dur MLMultiArray data type: \(dataType)"
+        case .invalidDurationAgreement(let inputKey, let canonical, let observed, let toleranceFraction):
+            return "Config F duration mismatch for \(inputKey): observed \(String(format: "%.3f", observed))s vs canonical \(String(format: "%.3f", canonical))s exceeds \(Int(toleranceFraction * 100))% tolerance"
+        }
+    }
+}
+
+/// Read Core ML ``pred_dur`` output into positive integer duration frames.
+///
+/// ``export_duration.py`` returns ``pred_dur`` as an integer tensor. Reading the
+/// raw buffer as Float corrupts every value into a tiny subnormal number, which
+/// then rounds to zero and collapses the utterance to one frame per token. Use
+/// MLMultiArray indexed access instead of raw pointer traversal so Core ML output
+/// strides are respected too.
+public func readDurationFrames(from array: MLMultiArray, validCount: Int? = nil) throws -> [Int] {
+    let count = max(0, min(validCount ?? array.count, array.count))
+    var frames = [Int](repeating: 0, count: count)
+    let rank = array.shape.count
+
+    for i in 0..<count {
+        let index: [NSNumber]
+        if rank == 1 {
+            index = [NSNumber(value: i)]
+        } else if rank == 2 {
+            index = [NSNumber(value: 0), NSNumber(value: i)]
+        } else {
+            throw PipelineValidationError.unsupportedDurationDataType(array.dataType)
+        }
+
+        let value = array[index]
+        if array.dataType == .int32 {
+            frames[i] = max(1, value.intValue)
+        } else {
+            frames[i] = max(1, Int(round(value.doubleValue)))
+        }
+    }
+
+    return frames
+}
+
+/// Fail fast when Config F produces an audio length that cannot be the same
+/// utterance measured by the bakeoff manifest.
+public func validateDurationAgreement(
+    inputKey: String,
+    canonical: Double?,
+    observed: Double,
+    toleranceFraction: Double = 0.15
+) throws {
+    guard let canonical, canonical > 0, observed > 0 else { return }
+    let delta = abs(observed - canonical) / canonical
+    if delta > toleranceFraction {
+        throw PipelineValidationError.invalidDurationAgreement(
+            inputKey: inputKey,
+            canonical: canonical,
+            observed: observed,
+            toleranceFraction: toleranceFraction
+        )
+    }
+}
+
 // MARK: - MLMultiArray Construction
 
 /// Create a 3D MLMultiArray of shape (1, channels, time) filled with zeros.

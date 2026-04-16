@@ -53,11 +53,15 @@ uv run python export_duration.py
 
 echo
 echo "--- Step 3/6: Export F0Ntrain models ---"
-uv run python export_f0ntrain.py --t-frames 120 400 560 1200 2400
+uv run python export_f0ntrain.py --t-frames 120 280 400 600 1200
 
 echo
 echo "--- Step 3/6: Export DecoderPre models ---"
 uv run python export_decoder_pre.py --buckets 3 7 10 15 30
+
+echo
+echo "--- Step 3/6: Export GeneratorFromHar models ---"
+uv run python -m export_synth.main --mode decoder-har --buckets 3s,7s,10s,15s,30s -o coreml
 
 # 4. Build Swift binary
 echo
@@ -93,6 +97,13 @@ for bucket in 3 7 10 15 30; do
     fi
 done
 
+for tframes in 120 280 400 600 1200; do
+    if [ ! -d "coreml/kokoro_f0ntrain_t${tframes}.mlpackage" ]; then
+        echo "  MISSING: F0Ntrain T=${tframes}"
+        READY=false
+    fi
+done
+
 if [ ! -f "swift/.build/release/kokoro-bench" ]; then
     echo "  MISSING: Swift binary"
     READY=false
@@ -106,6 +117,13 @@ fi
 if [ ! -f "outputs/swift_bench_inputs/hnsf_weights.json" ]; then
     echo "  MISSING: hn-nsf weights"
     READY=false
+fi
+
+if [ "$READY" = true ]; then
+    echo "  Verifying Core ML package shape contracts..."
+    if ! uv run pytest -q tests/test_mlpackage_exports.py::test_decoder_har_post_bucket_shape_matches_advertised_duration; then
+        READY=false
+    fi
 fi
 
 if [ "$READY" = true ]; then

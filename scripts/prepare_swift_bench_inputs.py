@@ -13,6 +13,7 @@ Output: outputs/swift_bench_inputs/{key}.json
 from __future__ import annotations
 
 import json
+import hashlib
 from pathlib import Path
 
 import numpy as np
@@ -47,6 +48,15 @@ VOICE = "af_heart"
 SPEED = 1.0
 
 
+def _hnsf_weights_sha256(linear_weights: list[float], linear_bias: float) -> str:
+    payload = json.dumps(
+        {"linear_weights": linear_weights, "linear_bias": linear_bias},
+        sort_keys=True,
+        separators=(",", ":"),
+    )
+    return hashlib.sha256(payload.encode("utf-8")).hexdigest()
+
+
 def main():
     from kokoro import KModel, KPipeline
     from kokoro.pipeline import voice_embedding_for_phoneme_string
@@ -61,10 +71,12 @@ def main():
     gen = kmodel.decoder.generator
     linear_w = gen.m_source.l_linear.weight.detach().numpy().flatten().tolist()
     linear_b = float(gen.m_source.l_linear.bias.detach().numpy().flatten()[0])
+    hnsf_hash = _hnsf_weights_sha256(linear_w, linear_b)
 
     hnsf_config = {
         "linear_weights": linear_w,
         "linear_bias": linear_b,
+        "weights_sha256": hnsf_hash,
     }
     with open(output_dir / "hnsf_weights.json", "w") as f:
         json.dump(hnsf_config, f)
@@ -134,6 +146,7 @@ def main():
             "ref_s": ref_s_list,
             "canonical_duration_s": canonical_dur,
             "num_tokens": len(input_ids),
+            "hnsf_weights_sha256": hnsf_hash,
         }
 
         with open(output_dir / f"{key}.json", "w") as f:

@@ -258,15 +258,22 @@ def export_synthesizers(output_dir, buckets_str, debug=False, trace_length: int 
         if mode in ("decoder", "decoder-har"):
             # Decoder-only buckets follow runtime audio geometry, not trace_length.
             # Generator upsamples each F0 step by `f0_upsamp.scale_factor` audio samples.
+            #
+            # GeneratorFromHar starts after DecoderPre. Its iSTFT tail emits half
+            # as many samples as the F0/HAR geometry nominally covers, so
+            # decoder-har exports must trace with 2x internal geometry for the
+            # package name to mean "can emit N seconds of waveform."
+            geometry_samples = bucket_samples * 2 if mode == "decoder-har" else bucket_samples
             f0_samples_per_step = int(round(float(kmodel.decoder.generator.f0_upsamp.scale_factor)))
             if f0_samples_per_step <= 0:
                 raise ValueError(f"invalid f0_upsamp scale: {kmodel.decoder.generator.f0_upsamp.scale_factor}")
-            full_f0_len = int(round(bucket_samples / float(f0_samples_per_step)))
+            full_f0_len = int(round(geometry_samples / float(f0_samples_per_step)))
             frame_count = conv1d_output_length_from_module(
                 full_f0_len, kmodel.decoder.F0_conv
             )
             print(
-                f"Decoder-only geometry: {bucket_samples} samples -> "
+                f"{mode} geometry: {bucket_samples} output samples "
+                f"({geometry_samples} internal samples) -> "
                 f"F0/N length {full_f0_len} -> ASR length {frame_count}"
             )
         elif mode == "full":
@@ -344,6 +351,17 @@ def export_synthesizers(output_dir, buckets_str, debug=False, trace_length: int 
                         (x_pre, ref_s_out, har_in),
                         strict=False,
                         check_trace=False,
+                    )
+                    traced_out = traced_model(x_pre, ref_s_out, har_in)
+                    traced_samples = int(traced_out.shape[-1])
+                    if traced_samples < bucket_samples:
+                        raise ValueError(
+                            f"decoder-har {name} traced waveform has {traced_samples} samples, "
+                            f"less than advertised bucket {bucket_samples}"
+                        )
+                    print(
+                        f"decoder-har {name} traced waveform samples: "
+                        f"{traced_samples} (advertised {bucket_samples})"
                     )
                 elif mode == "full":
                     traced_model = torch.jit.trace(

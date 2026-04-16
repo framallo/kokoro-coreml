@@ -269,11 +269,11 @@ func runPipeline(
     // Quick duration prediction to determine bucket
     let durOut = try durModel.prediction(from: durInput)
     let predDurArr = durOut.featureValue(for: "pred_dur")!.multiArrayValue!
-    let predDurPtr = predDurArr.dataPointer.assumingMemoryBound(to: Float.self)
     let tokenCount = predDurArr.shape.last!.intValue
-    var totalFrames = 0
-    for j in 0..<tokenCount { totalFrames += max(1, Int(round(predDurPtr[j]))) }
-    let canonicalDurForBucket = benchInput.canonical_duration_s ?? (Double(totalFrames) / 80.0)
+    let validTokenCount = min(tokenCount, benchInput.num_tokens)
+    let durationFramesForBucket = try readDurationFrames(from: predDurArr, validCount: validTokenCount)
+    let totalFrames = durationFramesForBucket.reduce(0, +)
+    let canonicalDurForBucket = benchInput.canonical_duration_s ?? (Double(totalFrames * 2) / 80.0)
     let availableBuckets = [3, 7, 10, 15, 30]
     let bucketThreshold = Int(ceil(canonicalDurForBucket))
     let bucketSec = availableBuckets.first(where: { $0 >= bucketThreshold }) ?? availableBuckets.last!
@@ -289,10 +289,10 @@ func runPipeline(
     let tFrames: Int = {
         switch bucketSec {
         case 3: return 120    // kokoro_f0ntrain_t120.mlpackage
-        case 7: return 560    // kokoro_f0ntrain_t560.mlpackage
+        case 7: return 280    // kokoro_f0ntrain_t280.mlpackage
         case 10: return 400   // kokoro_f0ntrain_t400.mlpackage
-        case 15: return 1200  // kokoro_f0ntrain_t1200.mlpackage
-        case 30: return 2400  // kokoro_f0ntrain_t2400.mlpackage
+        case 15: return 600   // kokoro_f0ntrain_t600.mlpackage
+        case 30: return 1200  // kokoro_f0ntrain_t1200.mlpackage
         default: return 400
         }
     }()
@@ -361,10 +361,9 @@ func runPipeline(
     let dArray = durOutput.featureValue(for: "d")!.multiArrayValue!
     let tEnArray = durOutput.featureValue(for: "t_en")!.multiArrayValue!
 
-    let pdPtr = predDurArray.dataPointer.assumingMemoryBound(to: Float.self)
     let tc = predDurArray.shape.last!.intValue
-    var predDur = [Int](repeating: 0, count: tc)
-    for j in 0..<tc { predDur[j] = max(1, Int(round(pdPtr[j]))) }
+    let validTokens = min(tc, benchInput.num_tokens)
+    let predDur = try readDurationFrames(from: predDurArray, validCount: validTokens)
     let frames = predDur.reduce(0, +)
 
     // Stage 2: Alignment
@@ -377,8 +376,7 @@ func runPipeline(
     let t4 = CFAbsoluteTimeGetCurrent()
     let dTransposed = try transpose3D(source: dArray, dim1: 640, dim2: tc)
     let en = try matmul3D(a: dTransposed, b: alignment, M: 640, K: tc, N: frames)
-    let tEnTransposed = try transpose3D(source: tEnArray, dim1: 512, dim2: tc)
-    let asr = try matmul3D(a: tEnTransposed, b: alignment, M: 512, K: tc, N: frames)
+    let asr = try matmul3D(a: tEnArray, b: alignment, M: 512, K: tc, N: frames)
     let t5 = CFAbsoluteTimeGetCurrent()
     let tMatrixOps = t5 - t4
 
@@ -493,6 +491,7 @@ func runPipeline(
     let wallTime = t17 - t0
     let canonicalDur = benchInput.canonical_duration_s ?? (Double(origF0Len) / 80.0)
     let observedDur = Double(trimLen) / 24000.0
+    try validateDurationAgreement(inputKey: inputKey, canonical: benchInput.canonical_duration_s, observed: observedDur)
 
     let result: [String: Any] = [
         "config": "f",
@@ -502,6 +501,8 @@ func runPipeline(
         "wall_time_s": round(wallTime * 1e6) / 1e6,
         "canonical_audio_duration_s": round(canonicalDur * 1e6) / 1e6,
         "observed_audio_duration_s": round(observedDur * 1e6) / 1e6,
+        "predicted_duration_frames": frames,
+        "predicted_duration_tokens": predDur.count,
         "rtf_canonical": canonicalDur > 0 ? round((wallTime / canonicalDur) * 1e6) / 1e6 : NSNull(),
         "rtf_observed": observedDur > 0 ? round((wallTime / observedDur) * 1e6) / 1e6 : NSNull(),
         "speed_vs_realtime_canonical": wallTime > 0 ? round((canonicalDur / wallTime) * 100) / 100 : NSNull(),
