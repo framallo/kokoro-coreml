@@ -189,16 +189,6 @@ public func makeFloatArray(shape: [Int], values: [Float]) throws -> MLMultiArray
     return arr
 }
 
-public func floatValues(from array: MLMultiArray) -> [Float] {
-    let shape = array.shape.map { $0.intValue }
-    var values = [Float]()
-    values.reserveCapacity(array.count)
-    for offset in 0..<array.count {
-        values.append(array[multiIndex(offset: offset, shape: shape)].floatValue)
-    }
-    return values
-}
-
 private func safeTensorName(_ name: String) -> String {
     let allowed = CharacterSet.alphanumerics.union(CharacterSet(charactersIn: "._-"))
     let scalars = name.unicodeScalars.map { allowed.contains($0) ? Character($0) : "_" }

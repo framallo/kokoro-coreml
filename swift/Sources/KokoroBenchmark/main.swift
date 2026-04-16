@@ -586,9 +586,8 @@ func runPipeline(
     }
 
     if let wavPath = wavOutputPath {
-        let wPtr = waveformArr.dataPointer.assumingMemoryBound(to: Float.self)
-        var samples = [Float](repeating: 0, count: trimLen)
-        for i in 0..<trimLen { samples[i] = wPtr[i] }
+        let waveformValues = floatValues(from: waveformArr)
+        let samples = Array(waveformValues.prefix(trimLen))
         try writeWavMono16(path: wavPath, samples: samples, sampleRate: 24000)
         fputs("  WAV written: \(wavPath)\n", stderr)
     }

@@ -438,19 +438,15 @@ public class KokoroPipeline {
         let t16 = CFAbsoluteTimeGetCurrent()
         let waveformKey = genOutput.featureNames.contains("waveform") ? "waveform" : genOutput.featureNames.first!
         let waveformArray = genOutput.featureValue(for: waveformKey)!.multiArrayValue!
-        let waveformPtr = waveformArray.dataPointer.assumingMemoryBound(to: Float.self)
-        let waveformLen = waveformArray.count
+        let waveformValues = floatValues(from: waveformArray)
 
         // Trim to natural utterance length: T_f0 / 80.0 * 24000
         // T_f0 is the ORIGINAL (unpadded) F0 length = totalFrames * 2 (from F0Ntrain 2x upsample)
         let originalF0Len = totalFrames * 2  // F0Ntrain doubles the frame count
         let targetLen = Int(round(Double(originalF0Len) / PipelineConstants.f0FrameRate * Double(PipelineConstants.sampleRate)))
-        let trimLen = min(waveformLen, targetLen)
+        let trimLen = min(waveformValues.count, targetLen)
 
-        var audio = [Float](repeating: 0, count: trimLen)
-        for i in 0..<trimLen {
-            audio[i] = waveformPtr[i]
-        }
+        let audio = Array(waveformValues.prefix(trimLen))
         let t17 = CFAbsoluteTimeGetCurrent()
         timings.trim = t17 - t16
 

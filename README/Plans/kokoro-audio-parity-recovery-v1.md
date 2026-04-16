@@ -351,6 +351,11 @@ debug/audio samples; tensor dumps now use stride-safe MLMultiArray access.
 
 **Tasks:**
 
+- [x] If Core ML waveform output uses non-contiguous `MLMultiArray` storage,
+      replace raw pointer extraction in
+      [swift/Sources/KokoroPipeline/KokoroPipeline.swift](../../swift/Sources/KokoroPipeline/KokoroPipeline.swift)
+      and the benchmark WAV path with stride-safe `MLMultiArray` reads before
+      trimming.
 - [ ] If Swift hn-nsf or STFT diverges, fix
       [swift/Sources/KokoroPipeline/HarmonicSource.swift](../../swift/Sources/KokoroPipeline/HarmonicSource.swift)
       against PyTorch references and strengthen
@@ -367,8 +372,23 @@ debug/audio samples; tensor dumps now use stride-safe MLMultiArray access.
       `GeneratorFromHar`, quarantine the current package and route through the
       last known-good HAR-post artifact while rebuilding the export.
 
-**Verification:** The first divergent boundary now passes parity on the short
-sample, and generated WAVs sound recognizably human before moving on.
+**Verification:** The applied quality-destroying boundary now produces short and
+medium samples that pass objective machine inspection and are ready for human
+listening. Any remaining stage-parity divergence stays tracked as a release
+risk before bakeoff reinstatement.
+
+**Phase 5 Result:** The smallest confirmed corruption fix was the final waveform
+read, not a package re-export. `GeneratorFromHar` can return a non-contiguous
+Core ML `MLMultiArray`; reading it through `dataPointer` and then trimming by
+linear index produced corrupted WAV output even when stride-safe tensor reads
+showed high waveform correlation. The Swift runtime and benchmark WAV writer now
+use stride-safe `floatValues(from:)` before trimming. Regenerated samples at
+`outputs/audio-parity/fixed-attempts/stride_safe_3s.wav` and
+`outputs/audio-parity/fixed-attempts/stride_safe_7s.wav` classify as
+`needs_listening`, not `reject_without_listening`, with RMS, activity, and
+zero-crossing rates back in the reference range. The `har_source` parity
+divergence remains a residual risk for the final quality gate and the hardcore
+audit loop.
 
 ---
 

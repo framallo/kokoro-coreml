@@ -57,6 +57,21 @@ public func readDurationFrames(from array: MLMultiArray, validCount: Int? = nil)
     return frames
 }
 
+/// Read a float MLMultiArray in logical row-major order.
+///
+/// Core ML outputs may have non-trivial strides, so callers that need a flat
+/// waveform or tensor snapshot must not assume `dataPointer` is linearly
+/// addressable in logical index order.
+public func floatValues(from array: MLMultiArray) -> [Float] {
+    let shape = array.shape.map { $0.intValue }
+    var values = [Float]()
+    values.reserveCapacity(array.count)
+    for offset in 0..<array.count {
+        values.append(array[multiIndex(offset: offset, shape: shape)].floatValue)
+    }
+    return values
+}
+
 /// Fail fast when Config F produces an audio length that cannot be the same
 /// utterance measured by the bakeoff manifest.
 public func validateDurationAgreement(
@@ -75,6 +90,18 @@ public func validateDurationAgreement(
             toleranceFraction: toleranceFraction
         )
     }
+}
+
+private func multiIndex(offset: Int, shape: [Int]) -> [NSNumber] {
+    guard !shape.isEmpty else { return [] }
+    var remainder = offset
+    var result = [Int](repeating: 0, count: shape.count)
+    for dimIndex in stride(from: shape.count - 1, through: 0, by: -1) {
+        let dim = max(1, shape[dimIndex])
+        result[dimIndex] = remainder % dim
+        remainder /= dim
+    }
+    return result.map { NSNumber(value: $0) }
 }
 
 // MARK: - MLMultiArray Construction
