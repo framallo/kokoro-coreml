@@ -1293,3 +1293,82 @@ Same corrected v5 harness as the M2 Air run (all audit bugs fixed: bucket parity
 ### Plan reference
 
 Bakeoff plan Phase 7: `README/Plans/kokoro-bakeoff-v2.md`
+
+---
+
+## Bakeoff v5: Corrected benchmark (3s-30s) on M2 Ultra
+
+**First collected:** 2026-04-15
+**Status:** Complete
+
+### Summary
+
+Reran the corrected v5 bakeoff on M2 Ultra after the same audit fixes used for
+the M2 Air and M1 Mini runs: bucket parity, corrected Swift F0Ntrain frame
+mapping, duplicate matmul removal, and ANE plan compilation kept out of timed
+blocks. All four configs completed successfully across all four inputs.
+
+**Config F wins at every duration on M2 Ultra**, achieving **48-70x realtime**.
+The margin over Config A is largest at 3s (2.0x) and tightest at 15s (1.1x),
+while Config F remains **2.2-3.0x faster than MPS** and **3.5-4.4x faster than
+CPU** across the corrected duration range.
+
+### End-to-end wall time (warm median, milliseconds)
+
+| Input | Audio | Bucket | A (Python HAR) | D (MPS) | E (CPU) | F (Swift) |
+| --- | --- | --- | --- | --- | --- | --- |
+| 3s | 2.80s | 3s | 117 ms | 176 ms | 255 ms | **59 ms** |
+| 7s | 6.75s | 7s | 179 ms | 319 ms | 501 ms | **136 ms** |
+| 15s | 13.90s | 15s | 309 ms | 602 ms | 975 ms | **278 ms** |
+| 30s | 27.38s | 30s | 555 ms | 1233 ms | 1870 ms | **422 ms** |
+
+### RTF and realtime factor
+
+| Input | Audio | A RTF | D RTF | E RTF | F RTF | F realtime |
+| --- | --- | --- | --- | --- | --- | --- |
+| 3s | 2.80s | 0.042 (24x RT) | 0.063 | 0.091 | **0.021** | **48x RT** |
+| 7s | 6.75s | 0.027 (38x RT) | 0.047 | 0.074 | **0.020** | **50x RT** |
+| 15s | 13.90s | 0.022 (45x RT) | 0.043 | 0.070 | **0.020** | **50x RT** |
+| 30s | 27.38s | 0.020 (49x RT) | 0.045 | 0.068 | **0.015** | **70x RT** |
+
+### Speedup: Config F vs baselines
+
+| Input | F vs A (Python HAR) | F vs D (MPS) | F vs E (CPU) |
+| --- | --- | --- | --- |
+| 3s | **2.0x** | **3.0x** | **4.3x** |
+| 7s | **1.3x** | **2.3x** | **3.7x** |
+| 15s | **1.1x** | **2.2x** | **3.5x** |
+| 30s | **1.3x** | **2.9x** | **4.4x** |
+
+### Interpretation
+
+1. **Config F wins everywhere on M2 Ultra.** The corrected Swift+CoreML path is
+   faster than Python HAR-post, MPS, and CPU for all measured durations.
+
+2. **The MPS gap remains large.** Config F is 2.2-3.0x faster than the PyTorch
+   MPS baseline, preserving the core bakeoff result that the Swift+CoreML path
+   beats the "just use the GPU" path.
+
+3. **The Config A margin is now more conservative than v4.** With corrected
+   bucket parity and v5 fixes, Config F is 1.1-2.0x faster than Config A. The
+   15s/30s results are close enough that future optimization work should focus
+   on stage-level costs rather than assuming large end-to-end headroom.
+
+4. **Config F remains extremely realtime.** Even the 30s input completes in
+   422 ms, roughly 70x realtime on M2 Ultra.
+
+### Provenance
+
+- Machine: Apple M2 Ultra, 64 GB, macOS 26.4.1
+- Git: main branch, commit `f9276800`
+- Python: 3.12.13
+- Torch: 2.6.0 / coremltools: 8.3.0
+- Order seed: 0, iterations: 5
+- Results: `outputs/bakeoff/results_m2_ultra_v5.json`
+- Note: Config F batch harness required the stdout sentinel parser fix in
+  `scripts/bakeoff_harness.py` because Core ML may emit ANE diagnostics on the
+  same stdout line as `DONE`.
+
+### Plan reference
+
+Bakeoff plan Phase 7: `README/Plans/kokoro-bakeoff-v2.md`
