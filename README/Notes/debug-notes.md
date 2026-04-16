@@ -364,6 +364,65 @@ Any time you use `Popen` with both `stdout=PIPE` and `stderr=PIPE`, the child mu
 
 ---
 
+## Issue: M1 Mini bakeoff v5 — OOM, missing models, tooling breakage — Active
+
+**First spotted:** 2026-04-15
+**Status:** Active
+
+### Summary
+
+Multiple issues encountered running bakeoff v5 on M1 Mini (16 GB). Config A + D + E together exceeded physical RAM due to double model loading, HAR-post buckets for 7s/15s/30s were missing from HF Hub and the export script, `uv sync` kept removing pip, some mlpackages lacked Manifest.json after HF download, and Config F's input keys were stale from a prior session.
+
+### 1. M1 Mini OOM with Config A (16 GB)
+
+**Symptom:** 0% CPU, ~14% MEM, heavy swap thrashing — bakeoff harness hangs.
+
+**Root cause:** `HybridTTSPipeline()` auto-discovers ALL `.mlpackage` files from `coreml/` glob patterns on init. Config A then explicitly loads all 5 HAR-post bucket `MLModel`s on top. Combined with Configs D and E each loading a full PyTorch model, total resident memory exceeds 16 GB.
+
+**Workaround:** Run D/E/F separately without Config A. The real fix is to stop double-loading: `HybridTTSPipeline` auto-discovers models that Config A then re-loads explicitly.
+
+### 2. Missing HAR-post 7s/15s/30s models
+
+**Symptom:** Bakeoff harness fails to find `kokoro_decoder_har_post_7s.mlpackage`, `*_15s`, `*_30s`.
+
+**Root cause:** Only 3s and 10s HAR-post models exist on HF Hub. The `setup_bakeoff.sh` script exports Duration, F0Ntrain, and DecoderPre but not `GeneratorFromHar` buckets.
+
+**Workaround:** Manually export with `--mode decoder-har --buckets 7s,15s,30s`. The FP16 export produces non-finite waveform warnings on synthetic gate inputs but models work correctly at runtime.
+
+### 3. `uv sync` removes pip
+
+**Symptom:** `No module named pip` when running spacy model download after `uv sync`.
+
+**Root cause:** pip is not in `pyproject.toml` dependencies and `uv` treats it as an extraneous package, removing it on every sync.
+
+**Workaround:** `uv pip install pip` after every `uv sync`.
+
+### 4. Missing Manifest.json in mlpackages
+
+**Symptom:** `coremltools` fails to load mlpackages downloaded from HF Hub — `Data/` directories present but no `Manifest.json`.
+
+**Root cause:** HF Hub download creates `Data/` directories but omits `Manifest.json` for some packages.
+
+**Workaround:** Generate manifests programmatically with UUID-based entries matching the `Data/` contents.
+
+### 5. Config F input key mismatch (earlier run)
+
+**Symptom:** Config F's Swift binary returns errors on input lookup — keys not found.
+
+**Root cause:** The bakeoff harness was updated to use `3s/7s/15s/30s` input keys but the input manifest from a prior session still had `tiny/short/medium/long`. Config F's Swift binary only knows the new keys.
+
+**Fix:** Re-run `prepare-inputs` to regenerate the input manifest with current key names.
+
+### If This Recurs
+
+- [ ] Before running all configs together on 16 GB machines, check total model footprint with `ps aux | grep -E 'python|kokoro'` and watch `vm_stat` for pageouts.
+- [ ] After `setup_bakeoff.sh`, verify all expected bucket sizes exist: `ls coreml/kokoro_decoder_har_post_*s.mlpackage`.
+- [ ] After `uv sync`, confirm pip is available: `.venv/bin/python -m pip --version`.
+- [ ] After HF download, verify Manifest.json: `find coreml/ -name '*.mlpackage' -exec test -f {}/Manifest.json \; -print`.
+- [ ] After updating input key naming, re-run `prepare-inputs` before any bakeoff run.
+
+---
+
 <!--
 USAGE: See README/Templates/Notes-template.md
 -->
