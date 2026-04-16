@@ -5,7 +5,8 @@
 /// **Single-shot mode** (original):
 ///
 ///     kokoro-bench --models-dir DIR --inputs-dir DIR \
-///                  --hnsf-weights FILE --input-key KEY --seed 42
+///                  --hnsf-weights FILE --input-key KEY --seed 42 \
+///                  [--output metrics.json] [--wav out.wav]
 ///
 /// **Batch mode** (persistent subprocess — models compiled once):
 ///
@@ -179,6 +180,49 @@ class ModelCache {
     }
 }
 
+// MARK: - WAV export (Config F listening checks)
+
+/// Writes mono 16-bit PCM WAV at `sampleRate` Hz, peak-normalized like ``examples/example_synthesis.py``.
+func writeWavMono16(path: String, samples: [Float], sampleRate: UInt32) throws {
+    let n = samples.count
+    var peak: Float = 1e-7
+    for s in samples {
+        let a = abs(s)
+        if a > peak { peak = a }
+    }
+    var pcm = [Int16](repeating: 0, count: n)
+    for i in 0..<n {
+        let x = max(-1.0, min(1.0, samples[i] / peak))
+        pcm[i] = Int16((x * 32767.0).rounded())
+    }
+    let dataSize = UInt32(n * 2)
+    let byteRate = sampleRate * 2
+
+    var d = Data()
+    d.append(contentsOf: "RIFF".utf8)
+    let riffChunkSize: UInt32 = 36 + dataSize
+    withUnsafeBytes(of: riffChunkSize.littleEndian) { d.append(contentsOf: $0) }
+    d.append(contentsOf: "WAVE".utf8)
+    d.append(contentsOf: "fmt ".utf8)
+    let subchunk1Size: UInt32 = 16
+    withUnsafeBytes(of: subchunk1Size.littleEndian) { d.append(contentsOf: $0) }
+    let audioFormat: UInt16 = 1
+    withUnsafeBytes(of: audioFormat.littleEndian) { d.append(contentsOf: $0) }
+    let numChannels: UInt16 = 1
+    withUnsafeBytes(of: numChannels.littleEndian) { d.append(contentsOf: $0) }
+    withUnsafeBytes(of: sampleRate.littleEndian) { d.append(contentsOf: $0) }
+    withUnsafeBytes(of: byteRate.littleEndian) { d.append(contentsOf: $0) }
+    let blockAlign: UInt16 = 2
+    withUnsafeBytes(of: blockAlign.littleEndian) { d.append(contentsOf: $0) }
+    let bitsPerSample: UInt16 = 16
+    withUnsafeBytes(of: bitsPerSample.littleEndian) { d.append(contentsOf: $0) }
+    d.append(contentsOf: "data".utf8)
+    withUnsafeBytes(of: dataSize.littleEndian) { d.append(contentsOf: $0) }
+    pcm.withUnsafeBytes { d.append(contentsOf: $0) }
+
+    try d.write(to: URL(fileURLWithPath: path))
+}
+
 // MARK: - Pipeline run (shared between single-shot and batch)
 
 /// Runs the full timed pipeline for one input. Returns the result dictionary as JSON Data.
@@ -187,7 +231,8 @@ func runPipeline(
     inputKey: String,
     seed: UInt64,
     weights: HnsfWeights,
-    cache: ModelCache
+    cache: ModelCache,
+    wavOutputPath: String? = nil
 ) throws -> Data {
     // Pick duration T
     let enumSizes = [32, 64, 128, 256, 512]
@@ -437,6 +482,14 @@ func runPipeline(
     let t17 = CFAbsoluteTimeGetCurrent()
     let tTrim = t17 - t16
 
+    if let wavPath = wavOutputPath {
+        let wPtr = waveformArr.dataPointer.assumingMemoryBound(to: Float.self)
+        var samples = [Float](repeating: 0, count: trimLen)
+        for i in 0..<trimLen { samples[i] = wPtr[i] }
+        try writeWavMono16(path: wavPath, samples: samples, sampleRate: 24000)
+        fputs("  WAV written: \(wavPath)\n", stderr)
+    }
+
     let wallTime = t17 - t0
     let canonicalDur = benchInput.canonical_duration_s ?? (Double(origF0Len) / 80.0)
     let observedDur = Double(trimLen) / 24000.0
@@ -474,7 +527,8 @@ func runPipeline(
 // MARK: - Single-shot mode
 
 func runSingleShot(modelsDir: String, inputsDir: String, hnsfWeightsPath: String,
-                    inputKey: String, seed: UInt64, outputPath: String?, warmupCount: Int,
+                    inputKey: String, seed: UInt64, outputPath: String?, wavPath: String?,
+                    warmupCount: Int,
                     computeUnits: MLComputeUnits = .all) throws {
     let weightsData = try Data(contentsOf: URL(fileURLWithPath: hnsfWeightsPath))
     let weights = try JSONDecoder().decode(HnsfWeights.self, from: weightsData)
@@ -491,7 +545,8 @@ func runSingleShot(modelsDir: String, inputsDir: String, hnsfWeightsPath: String
         inputKey: inputKey,
         seed: seed,
         weights: weights,
-        cache: cache
+        cache: cache,
+        wavOutputPath: wavPath
     )
 
     let jsonString = String(data: jsonData, encoding: .utf8)!
@@ -586,6 +641,7 @@ func main() throws {
     var hnsfWeightsPath: String?
     var inputKey: String?
     var outputPath: String?
+    var wavPath: String?
     var warmupCount = 1
     var seed: UInt64 = 42
     var batchMode = false
@@ -608,6 +664,8 @@ func main() throws {
             i += 1; seed = UInt64(args[i]) ?? 42
         case "--output":
             i += 1; outputPath = args[i]
+        case "--wav":
+            i += 1; wavPath = args[i]
         case "--batch":
             batchMode = true
         case "--compute-units":
@@ -646,7 +704,8 @@ func main() throws {
             exit(1)
         }
         try runSingleShot(modelsDir: modelsDir, inputsDir: inputsDir, hnsfWeightsPath: hnsfWeightsPath,
-                          inputKey: inputKey, seed: seed, outputPath: outputPath, warmupCount: warmupCount,
+                          inputKey: inputKey, seed: seed, outputPath: outputPath, wavPath: wavPath,
+                          warmupCount: warmupCount,
                           computeUnits: computeUnits)
     }
 }

@@ -1,38 +1,40 @@
 # kokoro-coreml
 
-A production-ready PyTorch-to-CoreML conversion pipeline for [Kokoro-82M](https://huggingface.co/hexgrad/Kokoro-82M), enabling on-device text-to-speech on Apple Silicon with Apple Neural Engine acceleration.
+**30 seconds of speech in 1.2 seconds. On a Mac Mini. No cloud, no API key, no network.**
+
+[Kokoro-82M](https://huggingface.co/hexgrad/Kokoro-82M) running natively on the Apple Neural Engine via CoreML. Five compiled models, one Swift pipeline, zero Python at inference time. Every Mac with Apple Silicon is a TTS server.
 
 > **Pre-converted `.mlpackage` files:** [huggingface.co/mattmireles/kokoro-coreml](https://huggingface.co/mattmireles/kokoro-coreml)
 
+## Why not just use PyTorch MPS?
+
+"Just use the GPU" is the obvious move on Apple Silicon. Two problems:
+
+1. **`aten::angle` doesn't exist on MPS.** The vocoder hits unsupported ops, forcing per-op CPU fallbacks. Every fallback is a round-trip data transfer that kills throughput.
+2. **Python is the bottleneck.** Five `model.forward()` calls through the GIL and eager-mode dispatch. The interpreter overhead alone costs more than the M1 Mini's total inference time.
+
+Swift+CoreML eliminates both: models run on the ANE with no fallback, orchestration is native Swift with no Python.
+
 ## Performance
 
-The Swift+CoreML pipeline (Config F) is **1.8-3.4x faster than PyTorch MPS** and **13-70x realtime** across the Apple Silicon range. It wins on every machine at every duration.
+An M1 Mac Mini with 16 GB of RAM — the cheapest Apple Silicon Mac you can buy — synthesizes 30 seconds of speech in 1.2 seconds. That's 22x realtime.
 
-### Config F wall time (warm median, milliseconds)
-
-| Audio | M2 Ultra (64 GB) | M2 Air (24 GB) | M1 Mini (16 GB) |
+| Audio | M1 Mini (16 GB) | M2 Air (24 GB) | M2 Ultra (64 GB) |
 | --- | --- | --- | --- |
-| 3s | **59 ms** | 200 ms | 157 ms |
-| 7s | **136 ms** | 326 ms | 511 ms |
-| 15s | **278 ms** | 783 ms | 691 ms |
-| 30s | **422 ms** | 1829 ms | 1229 ms |
+| 3s | 157 ms | 200 ms | **59 ms** |
+| 7s | 511 ms | 326 ms | **136 ms** |
+| 15s | 691 ms | 783 ms | **278 ms** |
+| 30s | **1,229 ms** | 1,829 ms | **422 ms** |
 
-### Realtime factor
+13-70x realtime across the lineup. The M2 Ultra finishes 30s of audio in 422 ms (70x RT), but the M1 Mini is the number that matters — it proves the pipeline ships on hardware people already own.
 
-| Audio | M2 Ultra | M2 Air | M1 Mini |
-| --- | --- | --- | --- |
-| 3s | 48x RT | 14x RT | 18x RT |
-| 7s | 50x RT | 21x RT | 13x RT |
-| 15s | 50x RT | 18x RT | 20x RT |
-| 30s | 70x RT | 15x RT | 22x RT |
+### vs alternatives
 
-### Config F vs alternatives
-
-| Baseline | Speedup range |
+| Baseline | Speedup |
 | --- | --- |
 | PyTorch MPS (GPU) | **1.8-3.4x** faster |
 | PyTorch CPU | **3.5-7.3x** faster |
-| Python HAR-post hybrid | **1.1-2.0x** faster |
+| Python+CoreML hybrid | **1.1-2.0x** faster |
 
 Counterbalanced ordering, 5 iterations, warm median. Full data: [bakeoff-results.md](README/Notes/bakeoff-results.md).
 
@@ -82,15 +84,6 @@ The Duration model uses per-size exports because E5RT (Apple Neural Engine runti
 
 The GeneratorFromHar model has all `nn.Linear` replaced with `nn.Conv1d(kernel_size=1)` in `AdaIN1d`, reducing MIL linear ops from 48 to 0. This keeps the entire generator on the ANE path.
 
-### Why not just use MPS?
-
-PyTorch MPS ("just use the GPU") is the obvious first choice on Apple Silicon, but it has two problems:
-
-1. **`aten::angle` CPU fallback.** The vocoder's iSTFTNet uses operations that MPS doesn't support, forcing per-op fallbacks to CPU. This kills throughput with data transfers.
-2. **Python interpreter overhead.** Every `model.forward()` call goes through Python's GIL and eager-mode dispatch. For a 5-model pipeline, this adds up.
-
-The Swift+CoreML path solves both: models run on the ANE (no fallback), and orchestration is native Swift (no Python).
-
 ## Quick start
 
 ### One-command setup
@@ -110,6 +103,25 @@ uv run python scripts/bakeoff_harness.py run \
 ```
 
 Or use the `$bakeoff` skill — it walks through prerequisites, runs the harness, and updates performance-notes.md.
+
+### Listen to Config F audio (bakeoff inputs)
+
+The benchmark records timings only. To **render and hear** the same Swift+Core ML (Config F) outputs as the bakeoff, generate WAVs locally (not checked into git):
+
+```bash
+uv run python scripts/bakeoff_listen.py
+```
+
+**Output directory (repo root):** `outputs/bakeoff/listen/`
+
+| Bakeoff key | WAV (24 kHz mono PCM) | Metrics JSON |
+| --- | --- | --- |
+| `3s` | `outputs/bakeoff/listen/config_f_3s.wav` | `outputs/bakeoff/listen/config_f_3s.json` |
+| `7s` | `outputs/bakeoff/listen/config_f_7s.wav` | `outputs/bakeoff/listen/config_f_7s.json` |
+| `15s` | `outputs/bakeoff/listen/config_f_15s.wav` | `outputs/bakeoff/listen/config_f_15s.json` |
+| `30s` | `outputs/bakeoff/listen/config_f_30s.wav` | `outputs/bakeoff/listen/config_f_30s.json` |
+
+**Play on macOS:** open a file in Finder, or from the repo root run `open outputs/bakeoff/listen/config_f_3s.wav`, or `afplay outputs/bakeoff/listen/config_f_3s.wav`. Prereqs: Swift `kokoro-bench` built and Core ML models present (see setup above); the script runs `prepare_swift_bench_inputs.py` if inputs are missing.
 
 ### Manual steps (if you prefer)
 
