@@ -8,7 +8,9 @@
 Recover human-sounding Kokoro audio before doing any more performance claims. The
 current post-update Core ML and Swift bakeoff samples are unproven and the
 available waveform statistics show near-inactive output compared with the known
-HAR-post demo, so this plan first creates listenable reference samples, then
+HAR-post demo, so this plan first inspects waveforms and spectrograms directly,
+creates listenable reference samples only when the files pass basic speech-health
+checks, then
 bisects the Python-to-Swift/Core ML runtime until the first semantic audio
 divergence is identified and fixed.
 
@@ -30,6 +32,7 @@ divergence is identified and fixed.
 | Mode | Behavior | Why it matters |
 | --- | --- | --- |
 | Reference generation | Produce PyTorch and known-good HAR-post WAVs plus objective reports. | Gives the user listenable samples quickly and anchors all thresholds. |
+| Direct waveform inspection | Inspect PCM samples, waveform plots, and spectrograms before human listening. | Rejects obvious non-speech failures without wasting the user's listening time. |
 | Stage parity | Run identical tensors through Python, Core ML, and Swift boundaries. | Finds the first layer where speech semantics are lost. |
 | Recovery implementation | Apply the smallest fix to the first divergent boundary. | Avoids rewriting the pipeline around an assumed bug. |
 | Bakeoff reinstatement | Re-run performance comparisons only after audio proof passes. | Prevents speed numbers from masking broken synthesis. |
@@ -59,6 +62,11 @@ this plan document or for a completed fix set.
 ### Goals
 
 - [ ] Produce reference WAVs the user can listen to before changing model code.
+- [ ] Trace `outputs/decoder_har_post_demo.wav` through git history and attempt
+      an exact reproduction using one existing enumerated shape or bucket before
+      broader recovery work begins.
+- [ ] Inspect waveforms and spectrograms directly before asking the user to
+      listen to any generated sample.
 - [ ] Freeze the failing bakeoff WAVs and record objective waveform and
       spectrogram evidence for regression comparison.
 - [ ] Establish a stage-parity harness that can compare Python reference tensors
@@ -100,6 +108,12 @@ this plan document or for a completed fix set.
   reference.
 - **Known-good local comparator:** `outputs/decoder_har_post_demo.wav` is a
   useful comparator only after its provenance is recorded in the recovery report.
+- **Demo reproduction first:** Before treating
+  `outputs/decoder_har_post_demo.wav` as a quality anchor, the agent must dig
+  through git history to recover how it was generated and try to reproduce it
+  with an existing enumerated shape or bucket. A byte-identical match is the
+  target; if that is impossible, the exact PCM, tensor, artifact, and command
+  deltas must be recorded before moving on.
 - **Current bakeoff samples are failing evidence:** Files under
   `outputs/bakeoff/listen/` are regression artifacts, not acceptable output.
 - **Post-update outputs are unproven:** No Core ML or Swift model produced after
@@ -110,6 +124,10 @@ this plan document or for a completed fix set.
   at the same boundary.
 - **Quality before speed:** A faster runtime that emits non-human audio fails the
   plan.
+- **Machine inspection before human listening:** The agent must inspect waveform
+  and spectrogram evidence first. Samples with obvious silence, impulse spikes,
+  clipping, DC-heavy output, or missing voiced-band structure are rejected before
+  asking the user to listen.
 - **DSP split stays intentional:** If `SourceModuleHnNSF` / `SineGen` is involved
   in the divergence, keep that path off full-decoder Core ML unless a new
   parity proof shows Core ML can carry it.
@@ -151,12 +169,20 @@ this plan document or for a completed fix set.
 ## Solution Overview
 
 ```text
+Demo provenance
+  git history -> command/artifacts/text/voice/speed -> enumerated-shape rerun
+        |
+        v
 Reference WAVs
   PyTorch full path + known HAR-post demo
         |
         v
 Objective report
   waveform stats + spectrogram snapshots + provenance
+        |
+        v
+Machine rejection gate
+  silence / spikes / clipping / missing speech-band structure
         |
         v
 Stage parity ladder
@@ -179,7 +205,45 @@ measurable, then compare identical tensors, then patch the earliest bad boundary
 
 > Do one phase at a time. Verify before proceeding.
 
-### Phase 0: Freeze Evidence and Produce Listen References
+### Phase 0: Demo Provenance and Exact HAR-Post Replication
+
+**Goal:** Recover how `outputs/decoder_har_post_demo.wav` was made and reproduce
+it with one existing enumerated shape or bucket before using it as a comparator.
+
+**Tasks:**
+
+- [ ] Search git history for the demo artifact and generation breadcrumbs:
+      `git log --all --full-history -- outputs/decoder_har_post_demo.wav`,
+      `git log -S decoder_har_post_demo --all`, and related searches for
+      `decoder_har_post`, `demo.wav`, and HAR-post smoke commands.
+- [ ] Use `git show` on candidate commits to inspect old scripts, notes, command
+      lines, text prompts, voice, speed, package names, and artifact hashes
+      without mutating the current worktree.
+- [ ] Identify the enumerated shape or bucket that produced the demo. The likely
+      first candidate is the `3s` HAR-post bucket because the demo is about
+      `1.363s`, but the plan must follow the recovered provenance rather than
+      assume that bucket.
+- [ ] Re-run the recovered command with the matching enumerated shape or bucket
+      and write the reproduction to
+      `outputs/audio-parity/replicated/decoder_har_post_demo_repro.wav`.
+- [ ] Compare the original and reproduction by file SHA256, WAV header, PCM
+      SHA256, duration, RMS, peak, active fraction, zero-crossing rate, waveform
+      plot, and spectrogram.
+- [ ] If byte-exact reproduction fails, compare after normalizing WAV container
+      metadata and then compare intermediate tensors (`x_pre`, `ref_s`, `har`,
+      and waveform) to locate the first remaining delta.
+- [ ] Record the exact recovered command, commit provenance, model artifact
+      paths, artifact hashes, enumerated shape or bucket, text, voice, speed,
+      and comparison result in `outputs/audio-parity/demo-provenance.json` and
+      `outputs/audio-parity/demo-provenance.md`.
+
+**Verification:** `outputs/audio-parity/demo-provenance.md` states whether the
+reproduction is byte-exact. If not exact, it names the smallest observed delta
+and explains whether the demo can still be used as a secondary comparator.
+
+---
+
+### Phase 1: Freeze Evidence and Produce Listen References
 
 **Goal:** Give the user trustworthy samples immediately and preserve the failing
 ones for comparison.
@@ -191,7 +255,8 @@ ones for comparison.
 - [ ] Generate full PyTorch reference WAVs for the same short inputs used by
       `scripts/bakeoff_listen.py`.
 - [ ] Copy or link `outputs/decoder_har_post_demo.wav` into the report set with
-      its provenance stated as known-local comparator, not primary truth.
+      Phase 0 provenance attached. If Phase 0 could not reproduce it exactly,
+      label it as a secondary comparator, not primary truth.
 - [ ] Snapshot current failing files from `outputs/bakeoff/listen/` into
       `outputs/audio-parity/failing-current/`.
 - [ ] Write `outputs/audio-parity/index.md` listing the reference and failing
@@ -202,7 +267,7 @@ Config F WAV for the same text, plus a manifest tying both to the repo state.
 
 ---
 
-### Phase 1: Add Objective Audio Inspection
+### Phase 2: Add Objective Audio Inspection
 
 **Goal:** Turn "sounds like garbage" into repeatable numeric and visual evidence.
 
@@ -213,16 +278,19 @@ Config F WAV for the same text, plus a manifest tying both to the repo state.
       rate, spectral centroid, voiced-band energy, and optional spectrogram PNGs.
 - [ ] Run the probe over PyTorch reference WAVs, `outputs/decoder_har_post_demo.wav`,
       and all files under `outputs/bakeoff/listen/`.
+- [ ] Inspect waveform and spectrogram outputs directly and classify each sample
+      as `reject_without_listening`, `needs_listening`, or `reference_pass`.
 - [ ] Store reports under `outputs/audio-parity/reports/`.
 - [ ] Derive provisional speech-health thresholds from the reference set; do not
       hard-code thresholds from the broken samples.
 
 **Verification:** The report clearly separates PyTorch or known HAR-post speech
-from the current bakeoff outputs without using subjective listening alone.
+from the current bakeoff outputs without using subjective listening alone, and
+obvious non-speech files are rejected before the user is asked to listen.
 
 ---
 
-### Phase 2: Build the Stage-Parity Ladder
+### Phase 3: Build the Stage-Parity Ladder
 
 **Goal:** Compare identical tensors across Python and Swift/Core ML boundaries.
 
@@ -244,7 +312,7 @@ reference and the current Swift + Core ML path for the short sample.
 
 ---
 
-### Phase 3: Diagnose the First Divergence
+### Phase 4: Diagnose the First Divergence
 
 **Goal:** Decide which subsystem is responsible before applying a fix.
 
@@ -265,7 +333,7 @@ or records a ranked list if two boundaries fail independently.
 
 ---
 
-### Phase 4: Apply the Smallest Correctness Fix
+### Phase 5: Apply the Smallest Correctness Fix
 
 **Goal:** Restore human speech with minimal architecture churn.
 
@@ -292,18 +360,20 @@ sample, and generated WAVs sound recognizably human before moving on.
 
 ---
 
-### Phase 5: Replace Weak Listen Gates
+### Phase 6: Replace Weak Listen Gates
 
 **Goal:** Prevent future bakeoff winners from passing with non-human audio.
 
 **Tasks:**
 
 - [ ] Update [scripts/bakeoff_listen.py](../../scripts/bakeoff_listen.py) to use
-      thresholds derived in Phase 1 and to emit the full audio-quality report.
+      thresholds derived in Phase 2 and to emit the full audio-quality report.
 - [ ] Add tests for silence, impulses, clipped output, and a known-good reference
       fixture where practical.
 - [ ] Add a manifest field that marks listen samples as `quality_pass: true` only
       when both duration and speech-health gates pass.
+- [ ] Add a manifest field that records the machine-inspection decision:
+      `reject_without_listening`, `needs_listening`, or `reference_pass`.
 - [ ] Document that these gates are smoke tests, not replacements for human
       listening or tensor parity.
 
@@ -312,7 +382,7 @@ PyTorch and known-good HAR-post references pass.
 
 ---
 
-### Phase 6: Re-run Quality Proof and Bakeoff
+### Phase 7: Re-run Quality Proof and Bakeoff
 
 **Goal:** Restore the benchmark only after audio quality is demonstrably sane.
 
@@ -337,6 +407,11 @@ fixed path.
 
 - [ ] At least one PyTorch reference WAV and one fixed Swift/Core ML WAV are
       available for the same text and voice.
+- [ ] `outputs/decoder_har_post_demo.wav` provenance is recovered from git
+      history and exact reproduction has been attempted with an enumerated shape
+      or bucket.
+- [ ] Direct waveform and spectrogram inspection is run before any user
+      listening request.
 - [ ] The current failing `outputs/bakeoff/listen/config_f_*.wav` files fail the
       new quality gate.
 - [ ] The fixed output passes stage parity at the previously divergent boundary.

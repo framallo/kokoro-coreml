@@ -1,14 +1,49 @@
-# kokoro-coreml
+# Kokoro 82M TTS - Surgically Optimized for Apple Silicon
 
-**30 seconds of speech in 1.2 seconds. On an M1 Mac Mini. No cloud, no API key, no network.**
+**15 seconds of speech in 691ms on an M1 Mac Mini. 2.8x faster than Metal. Using Apple Neural Engine.**
 
 [Kokoro-82M](https://huggingface.co/hexgrad/Kokoro-82M) running natively on the Apple Neural Engine via CoreML. Five compiled models, one Swift pipeline, zero Python at inference time. Every Mac with Apple Silicon is a TTS server.
 
 > **Pre-converted `.mlpackage` files:** [huggingface.co/mattmireles/kokoro-coreml](https://huggingface.co/mattmireles/kokoro-coreml)
 
+## Why the Neural Engine?
+
+Apple Silicon isn't one processor. It's three — **CPU, GPU, and the Neural Engine (ANE)** — each built for different work. The ANE devours fixed-shape convolutions and dense matrix math at a fraction of the power draw of the GPU. It's the same silicon that runs Face ID, Live Text, and on-device Siri.
+
+But it has rules. No dynamic shapes. No data-dependent control flow. No `RangeDim` with multiple variable inputs. Most Core ML ports shove the whole model through and hope the runtime scheduler figures it out. It doesn't — you end up on CPU wondering why your "Neural Engine model" runs at 1x realtime.
+
+This repo dissects the Kokoro TTS pipeline and makes deliberate cuts:
+
+```
+                    ┌──────────────────────────────┐
+  "Hello world" ──▶ │  DURATION MODEL               │
+                    │  BERT + LSTMs                  │ ◀── CPU/GPU
+                    │  Sequential, variable-length   │     Best at: branching,
+                    └───────────┬──────────────────┘     variable sequences
+                                │
+                                ▼
+                    ┌──────────────────────────────┐
+                    │  ALIGNMENT  (Swift / CPU)      │
+                    │  Build matrix from durations   │ ◀── CPU
+                    │  ~50 lines of code             │     Best at: small, complex
+                    └───────────┬──────────────────┘     data-dependent logic
+                                │
+                                ▼
+                    ┌──────────────────────────────┐
+                    │  DECODER + VOCODER             │
+                    │  Dense convolutions + iSTFT    │ ◀── Neural Engine (ANE)
+                    │  Fixed shapes, pure math       │     Best at: dense parallel
+                    └───────────┬──────────────────┘     tensor operations
+                                │
+                                ▼
+                           24 kHz Audio
+```
+
+**Redesign the inference pipeline, not the model.** Give the ANE clean static tensors. Let the CPU handle the messy parts. That's where the 2.8x over Metal comes from — not by fighting the GPU, but by routing around it.
+
 ## Why not just use PyTorch MPS?
 
-"Just use the GPU" is the obvious move on Apple Silicon. Two problems:
+Even if you stay on the GPU, PyTorch MPS has two problems specific to this model:
 
 1. **`aten::angle` doesn't exist on MPS.** The vocoder hits unsupported ops, forcing per-op CPU fallbacks. Every fallback is a round-trip data transfer that kills throughput.
 2. **Python is the bottleneck.** Five `model.forward()` calls through the GIL and eager-mode dispatch. The interpreter overhead alone costs more than the M1 Mini's total inference time.
