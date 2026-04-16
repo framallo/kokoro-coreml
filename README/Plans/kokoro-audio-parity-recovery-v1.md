@@ -273,15 +273,15 @@ Config F WAV for the same text, plus a manifest tying both to the repo state.
 
 **Tasks:**
 
-- [ ] Add `scripts/audio_quality_probe.py` to report duration, sample rate, RMS,
+- [x] Add `scripts/audio_quality_probe.py` to report duration, sample rate, RMS,
       DC offset, peak, clipping fraction, active-sample fractions, zero-crossing
       rate, spectral centroid, voiced-band energy, and optional spectrogram PNGs.
-- [ ] Run the probe over PyTorch reference WAVs, `outputs/decoder_har_post_demo.wav`,
+- [x] Run the probe over PyTorch reference WAVs, `outputs/decoder_har_post_demo.wav`,
       and all files under `outputs/bakeoff/listen/`.
-- [ ] Inspect waveform and spectrogram outputs directly and classify each sample
+- [x] Inspect waveform and spectrogram outputs directly and classify each sample
       as `reject_without_listening`, `needs_listening`, or `reference_pass`.
-- [ ] Store reports under `outputs/audio-parity/reports/`.
-- [ ] Derive provisional speech-health thresholds from the reference set; do not
+- [x] Store reports under `outputs/audio-parity/reports/`.
+- [x] Derive provisional speech-health thresholds from the reference set; do not
       hard-code thresholds from the broken samples.
 
 **Verification:** The report clearly separates PyTorch or known HAR-post speech
