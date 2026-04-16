@@ -319,18 +319,29 @@ Swift + Core ML path for the short sample.
 
 **Tasks:**
 
-- [ ] Compare `HybridTTSPipeline.extract_vocoder_inputs()` output with Swift
+- [x] Compare `HybridTTSPipeline.extract_vocoder_inputs()` output with Swift
       tokenization, duration, alignment, and `asr` construction.
-- [ ] Compare Python `F0Ntrain` outputs against Swift/Core ML `f0` and `n`.
-- [ ] Compare Python `DecoderPre` `x_pre` against Swift/Core ML `x_pre` with the
+- [x] Compare Python `F0Ntrain` outputs against Swift/Core ML `f0` and `n`.
+- [x] Compare Python `DecoderPre` `x_pre` against Swift/Core ML `x_pre` with the
       same padded `asr`, `f0`, `n`, and `ref_s`.
-- [ ] Compare Python `build_decoder_har_post_inputs_np()` `har` against Swift
+- [x] Compare Python `build_decoder_har_post_inputs_np()` `har` against Swift
       `buildHar()` with the same padded F0 and hn-nsf weights.
-- [ ] Feed Python reference `x_pre`, `ref_s`, and `har` into Swift
+- [x] Feed Python reference `x_pre`, `ref_s`, and `har` into Swift
       `GeneratorFromHar` Core ML and compare final waveform.
 
 **Verification:** The investigation names exactly one earliest divergent boundary
 or records a ranked list if two boundaries fail independently.
+
+**Phase 4 Result:** `uv run python scripts/run_audio_parity_ladder.py --input-key
+3s` reports `first_failing_boundary=har_source`: tokens, duration, alignment,
+`asr`, `f0`, `n`, and `x_pre` pass shape checks with high correlation before
+the Swift harmonic source diverges. A separate literal Swift generator isolation
+check using `kokoro-bench --generator-input-dump outputs/audio-parity/tensors/python_3s`
+reports `waveform` correlation about `0.929`, so the ranked diagnosis is: first
+fix Swift `har_source`; then re-check the `GeneratorFromHar` package parity with
+known-good Python `x_pre/ref_s/har`. The Phase 4 instrumentation also found that
+raw-pointer reads of Core ML waveform `MLMultiArray` output can corrupt trimmed
+debug/audio samples; tensor dumps now use stride-safe MLMultiArray access.
 
 ---
 

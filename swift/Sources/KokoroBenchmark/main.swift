@@ -8,6 +8,11 @@
 ///                  --hnsf-weights FILE --input-key KEY --seed 42 \
 ///                  [--output metrics.json] [--wav out.wav] [--dump-tensors DIR]
 ///
+/// **Generator isolation mode** (feed previously dumped x_pre/ref_s/har):
+///
+///     kokoro-bench --models-dir DIR --inputs-dir DIR --hnsf-weights FILE \
+///                  --generator-input-dump DIR [--output metrics.json]
+///
 /// **Batch mode** (persistent subprocess — models compiled once):
 ///
 ///     kokoro-bench --models-dir DIR --inputs-dir DIR \
@@ -499,16 +504,39 @@ func runPipeline(
 
     // Stage 7: hn-nsf Swift
     let t12 = CFAbsoluteTimeGetCurrent()
-    let (harFlat, harFrames) = buildHar(
-        f0Padded: f0Padded,
-        linearWeights: weights.linear_weights,
-        linearBias: weights.linear_bias,
-        seed: seed
-    )
+    let harFlat: [Float]
+    let harFrames: Int
+    let harDebug: HarDebugComponents?
+    if tensorDumpPath != nil {
+        let components = buildHarComponents(
+            f0Padded: f0Padded,
+            linearWeights: weights.linear_weights,
+            linearBias: weights.linear_bias,
+            seed: seed
+        )
+        harFlat = components.har
+        harFrames = components.nFrames
+        harDebug = components
+    } else {
+        let built = buildHar(
+            f0Padded: f0Padded,
+            linearWeights: weights.linear_weights,
+            linearBias: weights.linear_bias,
+            seed: seed
+        )
+        harFlat = built.har
+        harFrames = built.nFrames
+        harDebug = nil
+    }
     let t13 = CFAbsoluteTimeGetCurrent()
     let tHnsf = t13 - t12
 
     try withTensorDump { writer in
+        if let harDebug {
+            try writer.writeFloatArray(name: "har_source", values: harDebug.harSource, shape: [1, harDebug.harSource.count])
+            try writer.writeFloatArray(name: "har_magnitude", values: harDebug.magnitude, shape: [1, 11, harDebug.nFrames])
+            try writer.writeFloatArray(name: "har_phase", values: harDebug.phase, shape: [1, 11, harDebug.nFrames])
+        }
         try writer.writeFloatArray(name: "har", values: harFlat, shape: [1, 22, harFrames])
     }
 
@@ -551,9 +579,8 @@ func runPipeline(
     let tTrim = t17 - t16
 
     try withTensorDump { writer in
-        let wPtr = waveformArr.dataPointer.assumingMemoryBound(to: Float.self)
-        var samples = [Float](repeating: 0, count: trimLen)
-        for i in 0..<trimLen { samples[i] = wPtr[i] }
+        let waveformValues = floatValues(from: waveformArr)
+        let samples = Array(waveformValues.prefix(trimLen))
         try writer.writeMLMultiArray(name: "waveform_full", array: waveformArr)
         try writer.writeFloatArray(name: "waveform", values: samples, shape: [trimLen])
     }
@@ -665,6 +692,74 @@ func runSingleShot(modelsDir: String, inputsDir: String, hnsfWeightsPath: String
     }
 }
 
+func runGeneratorInputDump(modelsDir: String, tensorInputDumpPath: String,
+                           outputPath: String?, tensorDumpPath: String?,
+                           computeUnits: MLComputeUnits = .all) throws {
+    let reader = try TensorDumpReader(directory: URL(fileURLWithPath: tensorInputDumpPath))
+    let bucketSec = reader.metadata["bucket_seconds"] as? Int ?? 3
+    let trimLen = reader.metadata["trim_len"] as? Int
+    let cache = ModelCache(modelsDir: URL(fileURLWithPath: modelsDir), computeUnits: computeUnits)
+    let genModel = try cache.generatorModel(bucket: bucketSec)
+
+    let xPre = try reader.readFloatArray(name: "x_pre_padded")
+    let refS = try reader.readFloatArray(name: "ref_s")
+    let har = try reader.readFloatArray(name: "har_padded")
+    let xPreArray = try makeFloatArray(shape: xPre.shape, values: xPre.values)
+    let refSArray = try makeFloatArray(shape: refS.shape, values: refS.values)
+    let harArray = try makeFloatArray(shape: har.shape, values: har.values)
+
+    let t0 = CFAbsoluteTimeGetCurrent()
+    let output = try genModel.prediction(from: try MLDictionaryFeatureProvider(dictionary: [
+        "x_pre": MLFeatureValue(multiArray: xPreArray),
+        "ref_s": MLFeatureValue(multiArray: refSArray),
+        "har": MLFeatureValue(multiArray: harArray),
+    ]))
+    let t1 = CFAbsoluteTimeGetCurrent()
+    let waveformKey = output.featureNames.contains("waveform") ? "waveform" : output.featureNames.first!
+    let waveformArray = output.featureValue(for: waveformKey)!.multiArrayValue!
+    let outputTrimLen = min(waveformArray.count, trimLen ?? waveformArray.count)
+
+    if let tensorDumpPath {
+        var writer = try TensorDumpWriter(directory: URL(fileURLWithPath: tensorDumpPath))
+        try writer.writeMLMultiArray(name: "x_pre_padded", array: xPreArray)
+        try writer.writeMLMultiArray(name: "ref_s", array: refSArray)
+        try writer.writeMLMultiArray(name: "har_padded", array: harArray)
+        try writer.writeMLMultiArray(name: "waveform_full", array: waveformArray)
+        let waveformValues = floatValues(from: waveformArray)
+        let waveform = Array(waveformValues.prefix(outputTrimLen))
+        try writer.writeFloatArray(name: "waveform", values: waveform, shape: [outputTrimLen])
+        try writer.writeManifest(metadata: [
+            "producer": "swift",
+            "executable": "kokoro-bench",
+            "mode": "generator-input-dump",
+            "source_tensor_dump": tensorInputDumpPath,
+            "bucket_seconds": bucketSec,
+            "trim_len": outputTrimLen,
+            "prediction_key": waveformKey,
+        ])
+    }
+
+    let result: [String: Any] = [
+        "config": "f",
+        "mode": "generator-input-dump",
+        "status": "ok",
+        "bucket_used": "\(bucketSec)s",
+        "source_tensor_dump": tensorInputDumpPath,
+        "observed_audio_duration_s": round((Double(outputTrimLen) / 24000.0) * 1e6) / 1e6,
+        "t_coreml_predict_s": round((t1 - t0) * 1e6) / 1e6,
+    ]
+    let jsonString = String(
+        data: try JSONSerialization.data(withJSONObject: result, options: [.sortedKeys]),
+        encoding: .utf8
+    )!
+    if let outputPath {
+        try jsonString.write(toFile: outputPath, atomically: true, encoding: .utf8)
+        fputs("Result written to: \(outputPath)\n", stderr)
+    } else {
+        print(jsonString)
+    }
+}
+
 // MARK: - Batch mode
 
 func runBatch(modelsDir: String, inputsDir: String, hnsfWeightsPath: String,
@@ -750,6 +845,7 @@ func main() throws {
     var outputPath: String?
     var wavPath: String?
     var tensorDumpPath: String?
+    var generatorInputDumpPath: String?
     var warmupCount = 1
     var seed: UInt64 = 42
     var batchMode = false
@@ -776,6 +872,8 @@ func main() throws {
             i += 1; wavPath = args[i]
         case "--dump-tensors":
             i += 1; tensorDumpPath = args[i]
+        case "--generator-input-dump":
+            i += 1; generatorInputDumpPath = args[i]
         case "--batch":
             batchMode = true
         case "--compute-units":
@@ -808,6 +906,14 @@ func main() throws {
     if batchMode {
         try runBatch(modelsDir: modelsDir, inputsDir: inputsDir, hnsfWeightsPath: hnsfWeightsPath,
                      computeUnits: computeUnits)
+    } else if let generatorInputDumpPath {
+        try runGeneratorInputDump(
+            modelsDir: modelsDir,
+            tensorInputDumpPath: generatorInputDumpPath,
+            outputPath: outputPath,
+            tensorDumpPath: tensorDumpPath,
+            computeUnits: computeUnits
+        )
     } else {
         guard let inputKey = inputKey else {
             fputs("Error: --input-key required in single-shot mode (or use --batch)\n", stderr)

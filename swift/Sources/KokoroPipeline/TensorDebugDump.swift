@@ -63,11 +63,7 @@ public struct TensorDumpWriter {
             }
             try writeInt32Array(name: name, values: values, shape: shape)
         default:
-            var values = [Float]()
-            values.reserveCapacity(array.count)
-            for offset in 0..<array.count {
-                values.append(array[multiIndex(offset: offset, shape: shape)].floatValue)
-            }
+            let values = floatValues(from: array)
             try writeFloatArray(name: name, values: values, shape: shape)
         }
     }
@@ -90,15 +86,117 @@ public struct TensorDumpWriter {
     }
 }
 
+public struct TensorDumpReader {
+    public let directory: URL
+    public let metadata: [String: Any]
+    private let records: [String: TensorDumpRecord]
+
+    public init(directory: URL) throws {
+        self.directory = directory
+        let manifestURL = directory.appendingPathComponent("tensor_manifest.json")
+        let data = try Data(contentsOf: manifestURL)
+        guard let manifest = try JSONSerialization.jsonObject(with: data) as? [String: Any],
+              let schema = manifest["schema_version"] as? Int,
+              schema == 1,
+              let tensorRows = manifest["tensors"] as? [[String: Any]]
+        else {
+            throw TensorDumpError.invalidManifest(manifestURL.path)
+        }
+        self.metadata = manifest["metadata"] as? [String: Any] ?? [:]
+        var parsed: [String: TensorDumpRecord] = [:]
+        for row in tensorRows {
+            guard let name = row["name"] as? String,
+                  let dtype = row["dtype"] as? String,
+                  let shape = row["shape"] as? [Int],
+                  let path = row["path"] as? String
+            else {
+                throw TensorDumpError.invalidManifest(manifestURL.path)
+            }
+            parsed[name] = TensorDumpRecord(dtype: dtype, shape: shape, path: path)
+        }
+        self.records = parsed
+    }
+
+    public func readFloatArray(name: String) throws -> (values: [Float], shape: [Int]) {
+        guard let record = records[name] else {
+            throw TensorDumpError.missingTensor(name)
+        }
+        guard record.dtype == "float32" else {
+            throw TensorDumpError.unsupportedDtype(name: name, dtype: record.dtype)
+        }
+        let url = directory.appendingPathComponent(record.path)
+        let data = try Data(contentsOf: url)
+        let expected = record.shape.reduce(1, *)
+        guard data.count == expected * MemoryLayout<UInt32>.size else {
+            throw TensorDumpError.invalidPayloadSize(
+                name: name,
+                bytes: data.count,
+                expected: expected * MemoryLayout<UInt32>.size
+            )
+        }
+        var values = [Float]()
+        values.reserveCapacity(expected)
+        for offset in stride(from: 0, to: data.count, by: MemoryLayout<UInt32>.size) {
+            var bits: UInt32 = 0
+            _ = withUnsafeMutableBytes(of: &bits) { raw in
+                data.copyBytes(to: raw, from: offset..<(offset + MemoryLayout<UInt32>.size))
+            }
+            values.append(Float(bitPattern: UInt32(littleEndian: bits)))
+        }
+        return (values, record.shape)
+    }
+}
+
+public struct TensorDumpRecord {
+    public let dtype: String
+    public let shape: [Int]
+    public let path: String
+}
+
 public enum TensorDumpError: Error, LocalizedError {
     case invalidShape(name: String, count: Int, expected: Int)
+    case invalidManifest(String)
+    case missingTensor(String)
+    case unsupportedDtype(name: String, dtype: String)
+    case invalidPayloadSize(name: String, bytes: Int, expected: Int)
 
     public var errorDescription: String? {
         switch self {
         case .invalidShape(let name, let count, let expected):
             return "Tensor \(name) has \(count) values, expected \(expected) from shape"
+        case .invalidManifest(let path):
+            return "Invalid tensor dump manifest: \(path)"
+        case .missingTensor(let name):
+            return "Tensor dump is missing tensor \(name)"
+        case .unsupportedDtype(let name, let dtype):
+            return "Tensor \(name) has unsupported dtype \(dtype)"
+        case .invalidPayloadSize(let name, let bytes, let expected):
+            return "Tensor \(name) payload has \(bytes) bytes, expected \(expected)"
         }
     }
+}
+
+public func makeFloatArray(shape: [Int], values: [Float]) throws -> MLMultiArray {
+    let expected = shape.reduce(1, *)
+    guard values.count == expected else {
+        throw TensorDumpError.invalidShape(name: "MLMultiArray", count: values.count, expected: expected)
+    }
+    let arr = try MLMultiArray(shape: shape.map { NSNumber(value: $0) }, dataType: .float32)
+    let ptr = arr.dataPointer.assumingMemoryBound(to: Float.self)
+    _ = values.withUnsafeBufferPointer { src in
+        memcpy(ptr, src.baseAddress!, values.count * MemoryLayout<Float>.size)
+    }
+    return arr
+}
+
+public func floatValues(from array: MLMultiArray) -> [Float] {
+    let shape = array.shape.map { $0.intValue }
+    var values = [Float]()
+    values.reserveCapacity(array.count)
+    for offset in 0..<array.count {
+        values.append(array[multiIndex(offset: offset, shape: shape)].floatValue)
+    }
+    return values
 }
 
 private func safeTensorName(_ name: String) -> String {

@@ -57,5 +57,14 @@ final class MLMultiArrayBindingTests: XCTestCase {
         XCTAssertEqual(tensors?.count, 2)
         XCTAssertTrue(FileManager.default.fileExists(atPath: dir.appendingPathComponent("tokens.i32").path))
         XCTAssertTrue(FileManager.default.fileExists(atPath: dir.appendingPathComponent("waveform.f32").path))
+
+        let reader = try TensorDumpReader(directory: dir)
+        let waveform = try reader.readFloatArray(name: "waveform")
+        XCTAssertEqual(waveform.shape, [3])
+        XCTAssertEqual(waveform.values, [0.0, 0.25, -0.5])
+
+        let arr = try makeFloatArray(shape: waveform.shape, values: waveform.values)
+        XCTAssertEqual(arr.count, 3)
+        XCTAssertEqual(arr[[1] as [NSNumber]].floatValue, 0.25)
     }
 }

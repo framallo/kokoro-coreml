@@ -231,6 +231,8 @@ def capture(args: argparse.Namespace) -> Path:
     writer.write("x_pre", x_pre)
     writer.write("x_pre_padded", x_pre_padded)
     writer.write("har_source", har_source_2d.detach().cpu().numpy().astype(np.float32))
+    writer.write("har_magnitude", har_spec.detach().cpu().numpy().astype(np.float32))
+    writer.write("har_phase", har_phase.detach().cpu().numpy().astype(np.float32))
     writer.write("har", har)
     writer.write("har_padded", har_padded)
     writer.write("waveform_full", waveform_full)

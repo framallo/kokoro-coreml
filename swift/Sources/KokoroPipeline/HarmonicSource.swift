@@ -319,6 +319,17 @@ public func stftTransform(_ signal: [Float]) -> (magnitude: [Float], phase: [Flo
     return (magnitude: magnitude, phase: phase)
 }
 
+// MARK: - HAR Debug Components
+
+/// Intermediate components from ``buildHarComponents`` for parity debugging.
+public struct HarDebugComponents {
+    public let harSource: [Float]
+    public let magnitude: [Float]
+    public let phase: [Float]
+    public let har: [Float]
+    public let nFrames: Int
+}
+
 /// Build the full ``har`` tensor from an F0 curve.
 ///
 /// This is the top-level function that replaces the PyTorch hn-nsf path in
@@ -337,6 +348,22 @@ public func buildHar(
     linearBias: Float,
     seed: UInt64? = nil
 ) -> (har: [Float], nFrames: Int) {
+    let components = buildHarComponents(
+        f0Padded: f0Padded,
+        linearWeights: linearWeights,
+        linearBias: linearBias,
+        seed: seed
+    )
+    return (har: components.har, nFrames: components.nFrames)
+}
+
+/// Build ``har`` and keep the harmonic source and STFT pieces for diagnostics.
+public func buildHarComponents(
+    f0Padded: [Float],
+    linearWeights: [Float],
+    linearBias: Float,
+    seed: UInt64? = nil
+) -> HarDebugComponents {
     // 1. F0 upsample (nearest, x300)
     let f0Up = f0Upsample(f0Padded)
 
@@ -370,7 +397,13 @@ public func buildHar(
         }
     }
 
-    return (har: har, nFrames: nFrames)
+    return HarDebugComponents(
+        harSource: harSource,
+        magnitude: mag,
+        phase: ph,
+        har: har,
+        nFrames: nFrames
+    )
 }
 
 // MARK: - Interpolation Helpers

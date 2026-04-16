@@ -73,6 +73,31 @@ final class HarmonicSourceTests: XCTestCase {
         XCTAssertEqual(har.count, HarmonicConstants.harChannels * nFrames)
     }
 
+    func testBuildHarComponentsMatchBuildHar() {
+        let f0 = [Float](repeating: 200.0, count: 4)
+        let weights: [Float] = [-0.08, -0.19, -0.18, -0.18, -0.10, 0.08, 0.09, -0.39, -0.55]
+        let bias: Float = -0.03
+
+        let direct = buildHar(
+            f0Padded: f0,
+            linearWeights: weights,
+            linearBias: bias,
+            seed: 42
+        )
+        let components = buildHarComponents(
+            f0Padded: f0,
+            linearWeights: weights,
+            linearBias: bias,
+            seed: 42
+        )
+
+        XCTAssertEqual(components.harSource.count, f0.count * HarmonicConstants.upsampleScale)
+        XCTAssertEqual(components.nFrames, direct.nFrames)
+        XCTAssertEqual(components.magnitude.count, HarmonicConstants.stftFreqBins * components.nFrames)
+        XCTAssertEqual(components.phase.count, HarmonicConstants.stftFreqBins * components.nFrames)
+        XCTAssertEqual(components.har, direct.har)
+    }
+
     // MARK: - Linear interpolation
 
     func testLinearInterpolateIdentity() {
