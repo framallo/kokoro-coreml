@@ -9,31 +9,45 @@ Usage::
 
 Output: ``outputs/bakeoff/listen/config_f_{3s,7s,15s,30s}.wav`` (and matching ``.json``).
 
-Prereqs: ``swift build -c release --product kokoro-bench`` and
-``uv run python scripts/prepare_swift_bench_inputs.py`` (this script runs the
-latter if inputs are missing).
+This script rebuilds the release ``kokoro-bench`` binary when it is missing or
+older than the Swift sources, and it prepares Swift bench inputs when needed.
 """
 
 from __future__ import annotations
 
 import argparse
-import array
+from dataclasses import asdict
 import hashlib
 import json
-import math
 import subprocess
 import sys
 import uuid
-import wave
 from pathlib import Path
 
 _ROOT = Path(__file__).resolve().parent.parent
+_SCRIPTS_DIR = Path(__file__).resolve().parent
+if str(_SCRIPTS_DIR) not in sys.path:
+    sys.path.insert(0, str(_SCRIPTS_DIR))
+
+from audio_quality_probe import (  # noqa: E402
+    Thresholds,
+    classify_metrics,
+    compute_metrics,
+    derive_thresholds,
+    sample_record,
+    write_quality_report,
+)
+
 _DEFAULT_KEYS = ("3s", "7s", "15s", "30s")
+_DEFAULT_REFERENCE_WAVS = (
+    _ROOT / "outputs" / "audio-parity" / "references" / "pytorch_3s.wav",
+    _ROOT / "outputs" / "audio-parity" / "references" / "pytorch_7s.wav",
+    _ROOT / "outputs" / "audio-parity" / "references" / "pytorch_15s.wav",
+    _ROOT / "outputs" / "audio-parity" / "references" / "pytorch_30s.wav",
+    _ROOT / "outputs" / "audio-parity" / "comparators" / "decoder_har_post_demo.wav",
+)
 _SAMPLE_RATE = 24_000
 _DURATION_TOLERANCE_FRACTION = 0.15
-_MIN_RMS_PCM = 20.0
-_MIN_ACTIVE_FRACTION = 0.001
-_MAX_CLIPPED_FRACTION = 0.01
 
 
 def _load_expected_inputs() -> tuple[dict[str, str], str, float]:
@@ -146,7 +160,66 @@ def _ensure_inputs(keys: list[str], inputs_dir: Path, hnsf: Path) -> bool:
     return False
 
 
-def _validate_outputs(key: str, wav: Path, metrics_path: Path, display_wav: Path | None = None) -> None:
+def _swift_source_mtime() -> float:
+    swift_dir = _ROOT / "swift"
+    candidates = [swift_dir / "Package.swift"]
+    candidates.extend((swift_dir / "Sources").rglob("*.swift"))
+    return max(path.stat().st_mtime for path in candidates if path.exists())
+
+
+def _ensure_bench(bench: Path) -> bool:
+    if bench.exists() and bench.stat().st_mtime >= _swift_source_mtime():
+        return True
+
+    reason = "missing" if not bench.exists() else "stale"
+    print(f"Building release kokoro-bench ({reason})...", file=sys.stderr)
+    try:
+        subprocess.run(
+            ["swift", "build", "-c", "release", "--product", "kokoro-bench"],
+            cwd=str(_ROOT / "swift"),
+            check=True,
+        )
+    except subprocess.CalledProcessError as exc:
+        print(f"Release build failed: {exc}", file=sys.stderr)
+        return False
+    return bench.exists()
+
+
+def _load_quality_context(reference_wavs: list[Path], plots_dir: Path | None) -> tuple[Thresholds, list[dict]]:
+    missing = [path for path in reference_wavs if not path.exists()]
+    if missing:
+        formatted = "\n  ".join(str(path) for path in missing)
+        raise RuntimeError(
+            "Missing reference WAV(s) for the audio-quality gate:\n"
+            f"  {formatted}\n"
+            "Run the audio parity reference phase first or pass --reference-wavs."
+        )
+    reference_metrics = [compute_metrics(path) for path in reference_wavs]
+    thresholds = derive_thresholds(reference_metrics)
+    records = [sample_record(path, "reference", thresholds, plots_dir) for path in reference_wavs]
+    return thresholds, records
+
+
+def _write_quality_fields(metrics_path: Path, thresholds: Thresholds, record: dict) -> None:
+    metrics = json.loads(metrics_path.read_text())
+    quality_pass = record["decision"] != "reject_without_listening"
+    metrics["quality_pass"] = quality_pass
+    metrics["quality_decision"] = record["decision"]
+    metrics["quality_reject_reasons"] = record["reject_reasons"]
+    metrics["audio_quality"] = {
+        "thresholds": asdict(thresholds),
+        "sample": record,
+    }
+    metrics_path.write_text(json.dumps(metrics, indent=2, sort_keys=True) + "\n")
+
+
+def _validate_outputs(
+    key: str,
+    wav: Path,
+    metrics_path: Path,
+    thresholds: Thresholds,
+    display_wav: Path | None = None,
+) -> dict:
     if not wav.exists():
         raise RuntimeError(f"{key}: WAV was not written: {wav}")
     if not metrics_path.exists():
@@ -166,46 +239,41 @@ def _validate_outputs(key: str, wav: Path, metrics_path: Path, display_wav: Path
                 f"canonical {canonical:.3f}s by {drift:.1%}"
             )
 
-    with wave.open(str(wav), "rb") as wf:
-        channels = wf.getnchannels()
-        rate = wf.getframerate()
-        frames = wf.getnframes()
-        width = wf.getsampwidth()
-
-    if channels != 1 or rate != _SAMPLE_RATE or width != 2:
-        raise RuntimeError(f"{key}: unexpected WAV format channels={channels}, rate={rate}, width={width}")
-    if frames <= 0:
+    audio_metrics = compute_metrics(wav)
+    if audio_metrics.channels != 1 or audio_metrics.sample_rate != _SAMPLE_RATE or audio_metrics.sample_width != 2:
+        raise RuntimeError(
+            f"{key}: unexpected WAV format channels={audio_metrics.channels}, "
+            f"rate={audio_metrics.sample_rate}, width={audio_metrics.sample_width}"
+        )
+    if audio_metrics.frames <= 0:
         raise RuntimeError(f"{key}: WAV is empty")
 
-    with wave.open(str(wav), "rb") as wf:
-        pcm = array.array("h")
-        pcm.frombytes(wf.readframes(frames))
-    if pcm and sys.byteorder == "big":
-        pcm.byteswap()
-    abs_samples = [abs(sample) for sample in pcm]
-    peak = max(abs_samples, default=0)
-    rms = math.sqrt(sum(sample * sample for sample in pcm) / len(pcm)) if pcm else 0.0
-    active_fraction = sum(1 for sample in abs_samples if sample > 32) / len(abs_samples) if abs_samples else 0.0
-    clipped_fraction = sum(1 for sample in abs_samples if sample >= 32760) / len(abs_samples) if abs_samples else 0.0
-    if rms < _MIN_RMS_PCM or active_fraction < _MIN_ACTIVE_FRACTION:
-        raise RuntimeError(
-            f"{key}: WAV appears silent/noise-only (rms={rms:.1f}, active={active_fraction:.3%})"
-        )
-    if clipped_fraction > _MAX_CLIPPED_FRACTION:
-        raise RuntimeError(f"{key}: WAV clips too often ({clipped_fraction:.3%})")
-    if peak <= 0:
-        raise RuntimeError(f"{key}: WAV has zero peak amplitude")
-
-    wav_seconds = frames / rate
+    wav_seconds = audio_metrics.duration_s
     if isinstance(observed, (int, float)) and abs(wav_seconds - observed) > 0.02:
         raise RuntimeError(
             f"{key}: WAV header duration {wav_seconds:.3f}s does not match metrics {observed:.3f}s"
         )
 
-    print(f"  validated {key}: {wav_seconds:.3f}s -> {display_wav or wav}", file=sys.stderr)
+    decision, reasons = classify_metrics(audio_metrics, thresholds, is_reference=False)
+    record = {
+        "role": "candidate",
+        "decision": decision,
+        "reject_reasons": reasons,
+        "metrics": asdict(audio_metrics),
+    }
+    record["metrics"]["path"] = str(display_wav or wav)
+    _write_quality_fields(metrics_path, thresholds, record)
+
+    print(
+        f"  validated {key}: {wav_seconds:.3f}s quality={decision} "
+        f"rms={audio_metrics.rms_pcm:.1f} active32={audio_metrics.active_fraction_gt32:.3%} "
+        f"zcr={audio_metrics.zero_crossing_rate:.3%} -> {display_wav or wav}",
+        file=sys.stderr,
+    )
+    return record
 
 
-def main() -> int:
+def main(argv: list[str] | None = None) -> int:
     ap = argparse.ArgumentParser(description="Config F WAV export for bakeoff inputs")
     ap.add_argument(
         "--keys",
@@ -218,16 +286,25 @@ def main() -> int:
         default=_ROOT / "outputs" / "bakeoff" / "listen",
         help="Directory for WAV and JSON files",
     )
-    args = ap.parse_args()
+    ap.add_argument(
+        "--reference-wavs",
+        nargs="+",
+        type=Path,
+        default=list(_DEFAULT_REFERENCE_WAVS),
+        help="Known-good WAVs used to derive the audio-quality gate",
+    )
+    ap.add_argument(
+        "--quality-out-dir",
+        type=Path,
+        default=None,
+        help="Directory for consolidated audio-quality reports (default: OUT_DIR/quality)",
+    )
+    ap.add_argument("--quality-plots", action="store_true", help="Write waveform and spectrogram PPMs")
+    args = ap.parse_args(argv)
     keys = [k.strip() for k in args.keys.split(",") if k.strip()]
 
     bench = _ROOT / "swift" / ".build" / "release" / "kokoro-bench"
-    if not bench.exists():
-        print(
-            "Swift binary not found. Build with:\n"
-            "  cd swift && swift build -c release --product kokoro-bench",
-            file=sys.stderr,
-        )
+    if not _ensure_bench(bench):
         return 1
 
     models = _ROOT / "coreml"
@@ -238,7 +315,15 @@ def main() -> int:
         return 1
 
     args.out_dir.mkdir(parents=True, exist_ok=True)
+    quality_out_dir = args.quality_out_dir or args.out_dir / "quality"
+    plots_dir = quality_out_dir / "plots" if args.quality_plots else None
+    try:
+        thresholds, quality_records = _load_quality_context(args.reference_wavs, plots_dir)
+    except RuntimeError as exc:
+        print(str(exc), file=sys.stderr)
+        return 1
 
+    failure: Exception | None = None
     for key in keys:
         wav = args.out_dir / f"config_f_{key}.wav"
         metrics = args.out_dir / f"config_f_{key}.json"
@@ -265,14 +350,35 @@ def main() -> int:
         print(" ".join(cmd), file=sys.stderr)
         try:
             subprocess.run(cmd, cwd=str(_ROOT), check=True)
-            _validate_outputs(key, temp_wav, temp_metrics, display_wav=wav)
+            record = _validate_outputs(key, temp_wav, temp_metrics, thresholds, display_wav=wav)
+            quality_records.append(record)
+            if record["decision"] == "reject_without_listening":
+                reasons = "; ".join(record["reject_reasons"]) or "unknown quality rejection"
+                rejected_wav = args.out_dir / f"config_f_{key}.rejected.wav"
+                rejected_metrics = args.out_dir / f"config_f_{key}.rejected.json"
+                record["metrics"]["path"] = str(rejected_wav)
+                _write_quality_fields(temp_metrics, thresholds, record)
+                temp_wav.replace(rejected_wav)
+                temp_metrics.replace(rejected_metrics)
+                failure = RuntimeError(f"{key}: audio-quality gate rejected sample: {reasons}")
+                break
             temp_wav.replace(wav)
             temp_metrics.replace(metrics)
+        except (RuntimeError, subprocess.CalledProcessError) as exc:
+            failure = exc
+            break
         finally:
             temp_wav.unlink(missing_ok=True)
             temp_metrics.unlink(missing_ok=True)
 
+    report_path, summary_path = write_quality_report(quality_out_dir, thresholds, quality_records)
+    print(f"Wrote audio-quality report: {summary_path}", file=sys.stderr)
+    if failure is not None:
+        print(f"bakeoff listen generation failed: {failure}", file=sys.stderr)
+        return 1
+
     print(f"Wrote WAV + JSON under: {args.out_dir}")
+    print(f"Wrote audio-quality JSON under: {report_path}")
     return 0
 
 

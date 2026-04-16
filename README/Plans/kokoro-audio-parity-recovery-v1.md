@@ -398,19 +398,31 @@ audit loop.
 
 **Tasks:**
 
-- [ ] Update [scripts/bakeoff_listen.py](../../scripts/bakeoff_listen.py) to use
+- [x] Update [scripts/bakeoff_listen.py](../../scripts/bakeoff_listen.py) to use
       thresholds derived in Phase 2 and to emit the full audio-quality report.
-- [ ] Add tests for silence, impulses, clipped output, and a known-good reference
+- [x] Add tests for silence, impulses, clipped output, and a known-good reference
       fixture where practical.
-- [ ] Add a manifest field that marks listen samples as `quality_pass: true` only
+- [x] Add a manifest field that marks listen samples as `quality_pass: true` only
       when both duration and speech-health gates pass.
-- [ ] Add a manifest field that records the machine-inspection decision:
+- [x] Add a manifest field that records the machine-inspection decision:
       `reject_without_listening`, `needs_listening`, or `reference_pass`.
-- [ ] Document that these gates are smoke tests, not replacements for human
+- [x] Document that these gates are smoke tests, not replacements for human
       listening or tensor parity.
 
 **Verification:** The current failing Config F files fail the new gate, while the
 PyTorch and known-good HAR-post references pass.
+
+**Phase 6 Result:** `scripts/bakeoff_listen.py` now derives its speech-health
+gate from the Phase 2 reference WAVs, rebuilds the release `kokoro-bench` binary
+when Swift sources are newer than the binary, annotates each listen metrics JSON
+with `quality_pass`, `quality_decision`, `quality_reject_reasons`, and the full
+`audio_quality` record, and writes a consolidated `quality/audio_quality_report.json`
+plus markdown summary. Focused tests cover the listen manifest fields and
+silence, impulse, clipped, and reference cases. The frozen failing Config F
+samples under `outputs/audio-parity/failing-current/` classify as
+`reject_without_listening`; a fresh short/medium listen-helper smoke under
+`outputs/audio-parity/phase6-listen-smoke/` classifies both regenerated files as
+`needs_listening`.
 
 ---
 

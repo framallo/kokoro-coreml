@@ -256,7 +256,7 @@ def _write_ppm(path: Path, img: np.ndarray) -> None:
         f.write(np.asarray(img, dtype=np.uint8).tobytes())
 
 
-def _sample_record(path: Path, role: str, thresholds: Thresholds, plots_dir: Path | None) -> dict:
+def sample_record(path: Path, role: str, thresholds: Thresholds, plots_dir: Path | None = None) -> dict:
     metrics = compute_metrics(path)
     decision, reasons = classify_metrics(metrics, thresholds, is_reference=(role == "reference"))
     record = {
@@ -276,33 +276,17 @@ def _sample_record(path: Path, role: str, thresholds: Thresholds, plots_dir: Pat
     return record
 
 
-def main(argv: list[str] | None = None) -> int:
-    parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--reference", nargs="+", type=Path, required=True)
-    parser.add_argument("--candidate", nargs="*", type=Path, default=[])
-    parser.add_argument("--out-dir", type=Path, required=True)
-    parser.add_argument("--plots", action="store_true")
-    args = parser.parse_args(argv)
-
-    args.out_dir.mkdir(parents=True, exist_ok=True)
-    plots_dir = args.out_dir / "plots" if args.plots else None
-    refs = [compute_metrics(path) for path in args.reference]
-    thresholds = derive_thresholds(refs)
-
-    records = []
-    for path in args.reference:
-        records.append(_sample_record(path, "reference", thresholds, plots_dir))
-    for path in args.candidate:
-        records.append(_sample_record(path, "candidate", thresholds, plots_dir))
-
+def write_quality_report(out_dir: Path, thresholds: Thresholds, records: list[dict]) -> tuple[Path, Path]:
+    """Write JSON and markdown audio-quality reports for sample records."""
+    out_dir.mkdir(parents=True, exist_ok=True)
     report = {
         "thresholds": asdict(thresholds),
         "samples": records,
     }
-    report_path = args.out_dir / "audio_quality_report.json"
+    report_path = out_dir / "audio_quality_report.json"
     report_path.write_text(json.dumps(report, indent=2, sort_keys=True) + "\n")
 
-    summary_path = args.out_dir / "audio_quality_summary.md"
+    summary_path = out_dir / "audio_quality_summary.md"
     lines = [
         "# Audio Quality Probe Summary",
         "",
@@ -322,6 +306,28 @@ def main(argv: list[str] | None = None) -> int:
             f"zcr={metrics['zero_crossing_rate']:.3%} reasons={reasons}"
         )
     summary_path.write_text("\n".join(lines) + "\n")
+    return report_path, summary_path
+
+
+def main(argv: list[str] | None = None) -> int:
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--reference", nargs="+", type=Path, required=True)
+    parser.add_argument("--candidate", nargs="*", type=Path, default=[])
+    parser.add_argument("--out-dir", type=Path, required=True)
+    parser.add_argument("--plots", action="store_true")
+    args = parser.parse_args(argv)
+
+    args.out_dir.mkdir(parents=True, exist_ok=True)
+    plots_dir = args.out_dir / "plots" if args.plots else None
+    refs = [compute_metrics(path) for path in args.reference]
+    thresholds = derive_thresholds(refs)
+
+    records = []
+    for path in args.reference:
+        records.append(sample_record(path, "reference", thresholds, plots_dir))
+    for path in args.candidate:
+        records.append(sample_record(path, "candidate", thresholds, plots_dir))
+    report_path, summary_path = write_quality_report(args.out_dir, thresholds, records)
     print(json.dumps({"report": str(report_path), "summary": str(summary_path)}, indent=2))
     return 0
 

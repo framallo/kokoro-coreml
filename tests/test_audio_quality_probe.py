@@ -85,3 +85,20 @@ def test_impulse_rejects_on_activity_or_clipping(tmp_path: Path) -> None:
 
     assert decision == "reject_without_listening"
     assert any("active32" in reason or "zcr" in reason for reason in reasons)
+
+
+def test_clipped_output_rejects_without_listening(tmp_path: Path) -> None:
+    ref = tmp_path / "ref.wav"
+    clipped = tmp_path / "clipped.wav"
+    _write_wav(ref, _speech_like_pcm())
+    _write_wav(clipped, np.full(24_000, 32767, dtype=np.int16))
+
+    thresholds = _mod.derive_thresholds([_mod.compute_metrics(ref)])
+    decision, reasons = _mod.classify_metrics(
+        _mod.compute_metrics(clipped),
+        thresholds,
+        is_reference=False,
+    )
+
+    assert decision == "reject_without_listening"
+    assert any("clipped" in reason for reason in reasons)
