@@ -6,6 +6,215 @@ Institutional memory for Kokoro PyTorch → Core ML (`mlprogram`) export, synthe
 
 ---
 
+## Issue: Exact enumerated Duration shapes as an unrolled-graph escape hatch — Resolved
+
+**First spotted:** 2026-04-16
+**Resolved:** 2026-04-16
+**Status:** Resolved
+
+### Summary
+
+The mask-aware Duration export restored exact-token semantics for Config F, but
+it made large Duration shapes expensive because the recurrent layers are
+manually unrolled. The fix is separate exact fixed-shape native Duration
+packages for known bakeoff token counts. They avoid right-padding drift, avoid
+the flexible-shape runtime penalty, and let Swift fall back to mask-aware padded
+packages for any other token count.
+
+### Symptom
+
+After the padding fix, Config F has correct waveform durations but Duration is
+now a major stage cost:
+
+| Input | Exact tokens | Current padded enum T | Current F Duration median |
+| --- | ---: | ---: | ---: |
+| `3s` | `44` | `64` | `78 ms` |
+| `7s` | `105` | `128` | `157 ms` |
+| `15s` | `219` | `256` | `342 ms` |
+| `30s` | `476` | `512` | `751 ms` |
+
+### Root Cause
+
+Confirmed. The current Duration slowdown comes from the mask-aware static
+unroll needed to make padded BiLSTM buckets correct. Native Core ML LSTM is
+fast and correct when the Duration model receives the exact valid token length,
+but a single flexible `ct.EnumeratedShapes` package triggers Core ML
+`FlexibleShapeInfo` runtime behavior and is much slower than fixed packages.
+
+### Related Guides
+
+- [Core ML LSTM enumerated shapes guide](../Guides/apple-silicon/CoreML-LSTM-Enumerated-Shapes.md)
+  - Motivates exact enumerated sequence lengths as a static-shape alternative
+    to `RangeDim` and padding.
+- [Core ML LSTM export guide](../Guides/apple-silicon/CoreML-LSTM-export-guide.md)
+  - Explains why right-padded BiLSTM buckets are semantically wrong and why
+    manual masked unrolls are expensive.
+- [Core ML compute-unit scheduling guide](../Guides/apple-silicon/CoreML-Compute-Unit-Scheduling-guide.md)
+  - Runtime placement still needs Instruments/powermetrics proof; successful
+    conversion does not prove ANE residency.
+- Context7 `/apple/coremltools`
+  - Confirms `ct.EnumeratedShapes` supports finite exact shapes, up to 128
+    entries, and that multiple enumerated inputs are paired by shape index.
+
+### Fix
+
+Implemented the exact-package path:
+
+- `scripts/probe_duration_exact_enumerated.py`
+  - Exports a native exact-length Duration wrapper.
+  - Tests one `ct.EnumeratedShapes` package and optional fixed-shape packages.
+  - Writes `outputs/duration_exact_enum/report.json`.
+- `export_duration.py`
+  - Exports the normal padded mask-aware Duration buckets.
+  - Auto-discovers prepared Swift bakeoff token lengths from
+    `outputs/swift_bench_inputs/*.json`.
+  - Exports `kokoro_duration_exact_t{N}.mlpackage` for those exact token counts.
+- `scripts/setup_bakeoff.sh`
+  - Prepares bakeoff inputs before Duration export so exact token counts are
+    available to `export_duration.py`.
+  - Verifies that every prepared Swift input has a matching exact Duration
+    package.
+- `swift/Sources/KokoroBenchmark/main.swift`
+  - Discovers `kokoro_duration_exact_t{N}.mlpackage`.
+  - Uses exact packages only when `N == actualTokens`.
+  - Falls back to padded mask-aware `kokoro_duration_t{T}.mlpackage`.
+- `swift/Sources/KokoroPipeline/KokoroPipeline.swift`
+  - Applies the same exact-first/fallback selection to the reusable pipeline.
+- `coreml/kokoro_duration_exact_t{44,105,219,476}.mlpackage`
+  - Local generated packages for the current bakeoff texts. These are generated
+    artifacts, not source files.
+
+### Verification
+
+Partial proof from the contained probe and Config F-only harness run:
+
+| Path | 3s | 7s | 15s | 30s |
+| --- | ---: | ---: | ---: | ---: |
+| Exact native PyTorch frames | `112` | `270` | `556` | `1095` |
+| Exact enumerated Core ML frames | `112` | `270` | `556` | `1095` |
+| Exact fixed Core ML frames | `112` | `270` | `556` | `1095` |
+| Swift exact fixed frames | `112` | `270` | `556` | `1095` |
+
+The exact fixed packages keep a compact graph with `5` MIL `lstm` ops and
+avoid the flexible-shape E5RT warning emitted by the single enumerated model.
+
+Measured Duration medians:
+
+| Path | 3s | 7s | 15s | 30s |
+| --- | ---: | ---: | ---: | ---: |
+| Current mask-aware F (`v7`) | `78 ms` | `157 ms` | `342 ms` | `751 ms` |
+| Exact enumerated Core ML probe | `49 ms` | `88 ms` | `184 ms` | `389 ms` |
+| Exact fixed Core ML probe | `13 ms` | `13 ms` | `24 ms` | `51 ms` |
+| Swift exact fixed packages | `10 ms` | `12 ms` | `28 ms` | `50 ms` |
+| Config F-only harness | `10 ms` | `14 ms` | `25 ms` | `47 ms` |
+
+Artifacts:
+
+- `scripts/probe_duration_exact_enumerated.py`
+- `outputs/duration_exact_enum/report.json`
+- `outputs/duration_exact_enum/kokoro_duration_exact_enum.mlpackage`
+- `outputs/duration_exact_enum/fixed/kokoro_duration_exact_t{44,105,219,476}.mlpackage`
+- `coreml/kokoro_duration_exact_t{44,105,219,476}.mlpackage`
+- `outputs/bakeoff/results_m2_ultra_exact_duration_v1.json`
+
+Attempted full/focused comparison:
+
+- `scripts/bakeoff_harness.py run --configs a,d,e,f ...`
+  - Stopped after several minutes in Python/Core ML AOT setup before progress
+    output.
+- `scripts/bakeoff_harness.py run --configs a,f ...`
+  - Also stopped after sampling showed Python was inside Core ML model load/AOT
+    compilation, unrelated to the Swift Duration path.
+
+Mechanical checks:
+
+```bash
+swift build --package-path swift
+swift build --package-path swift -c release --product kokoro-bench
+uv run python -m py_compile export_duration.py scripts/probe_duration_exact_enumerated.py export_synth/wrappers.py scripts/bakeoff_harness.py scripts/prepare_swift_bench_inputs.py
+uv run pytest tests/test_export_wrappers_shapes.py -q
+uv run pytest -q tests/test_mlpackage_exports.py::test_decoder_har_post_bucket_shape_matches_advertised_duration
+bash -n scripts/setup_bakeoff.sh
+git diff --check
+```
+
+Exporter smoke:
+
+```bash
+KOKORO_DURATION_EXPORT_SIZES=32 \
+KOKORO_DURATION_EXACT_EXPORT_SIZES=44 \
+KOKORO_DURATION_EXPORT_VALIDATE_MAX_T=64 \
+uv run python export_duration.py
+```
+
+Outcome: `kokoro_duration_t32.mlpackage` and
+`kokoro_duration_exact_t44.mlpackage` exported successfully, and both Core ML
+`predict` smoke calls returned the expected output keys.
+
+### Investigation Log
+
+**2026-04-16**
+
+- **Hypothesis:** Exact enumerated input shapes can preserve native BiLSTM
+  semantics by avoiding padding entirely, making the mask-aware unroll
+  unnecessary for Duration.
+- **Tried:** Read the new Core ML LSTM enumerated-shapes guide, the LSTM export
+  guide, the existing Duration exporter, and Context7 `/apple/coremltools`
+  flexible-shape docs.
+- **Outcome:** Prototype is warranted. Important constraint: both `input_ids`
+  and `attention_mask` need paired exact `ct.EnumeratedShapes`; padding to the
+  nearest enumerated length would reintroduce the old BiLSTM bug.
+
+**2026-04-16**
+
+- **Hypothesis:** A no-mask exact Duration wrapper can avoid multiple
+  enumerated time-shaped inputs entirely, because exact inputs have no padding.
+- **Tried:** Exported a single `ct.EnumeratedShapes` model over
+  `T={44,105,219,476}` with only `input_ids`, `ref_s`, and `speed` as inputs.
+- **Outcome:** Correct but not ideal. The model predicts exact Config A frame
+  counts and keeps `5` MIL `lstm` ops, but Swift/Core ML emits
+  `tensor_buffer has known strides while the model has FlexibleShapeInfo`; 30s
+  runtime clusters near `390-400 ms` across `.all`, `.cpuOnly`, and
+  `.cpuAndGPU`.
+
+**2026-04-16**
+
+- **Hypothesis:** Separate exact fixed-shape native Duration packages avoid the
+  flexible-shape runtime path while preserving native LSTMs and no-padding
+  semantics.
+- **Tried:** Exported exact fixed packages for `T=44,105,219,476`, copied them
+  to `coreml/`, and patched Swift model selection to prefer an
+  `exact_t{tokens}` package only on exact token-count matches, falling back to
+  padded mask-aware packages otherwise.
+- **Outcome:** Confirmed for Config F. Swift exact fixed packages predict exact
+  frame counts with no E5RT flexible-shape warning. Config F-only harness run
+  uses `exact_t44`, `exact_t105`, `exact_t219`, and `exact_t476`; Duration
+  medians drop to `10/14/25/47 ms`.
+
+**2026-04-16**
+
+- **Hypothesis:** Full A/D/E/F or focused A/F bakeoff can give an immediate
+  cross-config wall-time table after exact Duration packages.
+- **Tried:** Ran full `a,d,e,f` and then focused `a,f` bakeoffs with
+  `BAKEOFF_SKIP_SMOKE=1`.
+- **Outcome:** Blocked by unrelated Python/Core ML model load/AOT compilation
+  before useful progress output. Stopped both runs rather than conflating that
+  setup issue with Duration. The completed Config F-only harness is the
+  relevant proof for the Duration-stage fix.
+
+**2026-04-16**
+
+- **Hypothesis:** Exact fixed native Duration packages should be generated by
+  the normal setup path, not copied from a one-off probe output.
+- **Tried:** Added exact native export support to `export_duration.py`, moved
+  bakeoff input preparation before Duration export in `scripts/setup_bakeoff.sh`,
+  and added setup verification for one exact package per prepared Swift input.
+- **Outcome:** Resolved. A small export smoke produced both a padded package and
+  an exact native package, both Core ML `predict` calls passed, Swift debug and
+  release builds passed, and the focused Python tests passed.
+
+---
+
 ## Issue: Config F duration drift versus Config A — Resolved
 
 **First spotted:** 2026-04-16

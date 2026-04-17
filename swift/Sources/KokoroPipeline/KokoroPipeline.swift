@@ -94,6 +94,14 @@ public struct SynthesisResult {
     public let audioDurationSeconds: Double
 }
 
+private struct DurationModelChoice {
+    let cacheKey: String
+    let tokenLength: Int
+    let packageURL: URL
+    let requiresAttentionMask: Bool
+    let allowsPadding: Bool
+}
+
 // MARK: - Pipeline
 
 /// Main TTS pipeline orchestrator.
@@ -107,8 +115,8 @@ public struct SynthesisResult {
 /// hundreds of milliseconds per model. For app integration, call init
 /// on a background thread or use pre-compiled ``.mlmodelc`` bundles.
 public class KokoroPipeline {
-    private let durationModels: [Int: MLModel] // keyed by token length
-    private let availableDurationTokenSizes: [Int]
+    private let durationModels: [String: MLModel] // keyed by DurationModelChoice.cacheKey
+    private let durationChoices: [DurationModelChoice]
     private let f0ntrainModels: [Int: MLModel]  // keyed by T_frames
     private let decoderPreModels: [Int: MLModel] // keyed by bucket seconds
     private let generatorModels: [Int: MLModel]  // keyed by bucket seconds
@@ -137,33 +145,23 @@ public class KokoroPipeline {
         linearWeights: [Float],
         linearBias: Float
     ) throws {
-        // Duration models. Prefer enumerated T-specific packages and keep the
-        // legacy 128-token package as a compatibility fallback.
-        var durModels: [Int: MLModel] = [:]
-        for tokenSize in PipelineConstants.durationTokenSizes {
-            let specificURL = modelsDirectory.appendingPathComponent("kokoro_duration_t\(tokenSize).mlpackage")
-            let legacyURL = modelsDirectory.appendingPathComponent("kokoro_duration.mlpackage")
-            let url: URL?
-            if FileManager.default.fileExists(atPath: specificURL.path) {
-                url = specificURL
-            } else if tokenSize == PipelineConstants.durationTokenLength,
-                      FileManager.default.fileExists(atPath: legacyURL.path) {
-                url = legacyURL
-            } else {
-                url = nil
-            }
-
-            if let url {
-                let config = MLModelConfiguration()
-                config.computeUnits = .all
-                durModels[tokenSize] = try MLModel(contentsOf: MLModel.compileModel(at: url), configuration: config)
-            }
+        // Duration models. Prefer exact native packages for exact token-count
+        // matches, and keep padded mask-aware packages as the general fallback.
+        let durationChoices = Self.discoverDurationChoices(modelsDirectory: modelsDirectory)
+        var durModels: [String: MLModel] = [:]
+        for choice in durationChoices {
+            let config = MLModelConfiguration()
+            config.computeUnits = .all
+            durModels[choice.cacheKey] = try MLModel(
+                contentsOf: MLModel.compileModel(at: choice.packageURL),
+                configuration: config
+            )
         }
         guard !durModels.isEmpty else {
             throw PipelineError.modelNotLoaded("duration")
         }
         self.durationModels = durModels
-        self.availableDurationTokenSizes = Array(durModels.keys.sorted())
+        self.durationChoices = durationChoices
 
         // F0Ntrain models (one per bucket's T_frames)
         var f0Models: [Int: MLModel] = [:]
@@ -226,20 +224,19 @@ public class KokoroPipeline {
 
         // ---- Stage 1: Duration CoreML ----
         let t0 = CFAbsoluteTimeGetCurrent()
-        let durationTokenLength = try selectDurationTokenLength(
+        let durationChoice = try selectDurationModel(
             inputIds: inputIds,
-            attentionMask: attentionMask,
-            availableSizes: availableDurationTokenSizes
+            attentionMask: attentionMask
         )
-        guard let durationModel = durationModels[durationTokenLength] else {
-            throw PipelineError.modelNotLoaded("duration_t\(durationTokenLength)")
+        guard let durationModel = durationModels[durationChoice.cacheKey] else {
+            throw PipelineError.modelNotLoaded(durationChoice.cacheKey)
         }
         let durInput = try buildDurationInput(
             inputIds: inputIds,
             attentionMask: attentionMask,
             refS: refS,
             speed: speed,
-            tokenLength: durationTokenLength
+            choice: durationChoice
         )
         let durOutput = try durationModel.prediction(from: durInput)
         let t1 = CFAbsoluteTimeGetCurrent()
@@ -455,6 +452,67 @@ public class KokoroPipeline {
 
     // MARK: - Private Helpers
 
+    private static func discoverDurationChoices(modelsDirectory: URL) -> [DurationModelChoice] {
+        var choices: [DurationModelChoice] = []
+        let fm = FileManager.default
+
+        if let urls = try? fm.contentsOfDirectory(
+            at: modelsDirectory,
+            includingPropertiesForKeys: nil
+        ) {
+            for url in urls {
+                let name = url.lastPathComponent
+                guard name.hasPrefix("kokoro_duration_exact_t"),
+                      name.hasSuffix(".mlpackage") else {
+                    continue
+                }
+                let raw = name
+                    .replacingOccurrences(of: "kokoro_duration_exact_t", with: "")
+                    .replacingOccurrences(of: ".mlpackage", with: "")
+                guard let tokenLength = Int(raw) else { continue }
+                choices.append(DurationModelChoice(
+                    cacheKey: "exact_t\(tokenLength)",
+                    tokenLength: tokenLength,
+                    packageURL: url,
+                    requiresAttentionMask: false,
+                    allowsPadding: false
+                ))
+            }
+        }
+
+        for tokenLength in PipelineConstants.durationTokenSizes {
+            let url = modelsDirectory.appendingPathComponent("kokoro_duration_t\(tokenLength).mlpackage")
+            if fm.fileExists(atPath: url.path) {
+                choices.append(DurationModelChoice(
+                    cacheKey: "padded_t\(tokenLength)",
+                    tokenLength: tokenLength,
+                    packageURL: url,
+                    requiresAttentionMask: true,
+                    allowsPadding: true
+                ))
+            }
+        }
+
+        let legacyURL = modelsDirectory.appendingPathComponent("kokoro_duration.mlpackage")
+        if fm.fileExists(atPath: legacyURL.path),
+           !choices.contains(where: { $0.cacheKey == "padded_t128" }) {
+            choices.append(DurationModelChoice(
+                cacheKey: "padded_t128",
+                tokenLength: PipelineConstants.durationTokenLength,
+                packageURL: legacyURL,
+                requiresAttentionMask: true,
+                allowsPadding: true
+            ))
+        }
+
+        return choices.sorted {
+            if $0.tokenLength != $1.tokenLength {
+                return $0.tokenLength < $1.tokenLength
+            }
+            return !$0.allowsPadding && $1.allowsPadding
+        }
+    }
+
     /// Compute the ASR frame count for DecoderPre's expected input shape.
     ///
     /// Matches ``conv1d_output_length_from_module(full_f0_len, dec.F0_conv)``
@@ -472,53 +530,67 @@ public class KokoroPipeline {
         attentionMask: [Int32],
         refS: [Float],
         speed: Float,
-        tokenLength: Int
+        choice: DurationModelChoice
     ) throws -> MLDictionaryFeatureProvider {
-        let T = tokenLength
+        let T = choice.tokenLength
 
         let idsArray = try MLMultiArray(shape: [1, NSNumber(value: T)], dataType: .int32)
-        let maskArray = try MLMultiArray(shape: [1, NSNumber(value: T)], dataType: .int32)
+        let maskArray = choice.requiresAttentionMask
+            ? try MLMultiArray(shape: [1, NSNumber(value: T)], dataType: .int32)
+            : nil
         let refSArray = try makeZeroArray2D(dim: PipelineConstants.voiceEmbeddingDim)
         let speedArray = try MLMultiArray(shape: [1], dataType: .float32)
 
         let idsPtr = idsArray.dataPointer.assumingMemoryBound(to: Int32.self)
-        let maskPtr = maskArray.dataPointer.assumingMemoryBound(to: Int32.self)
         let refSPtr = refSArray.dataPointer.assumingMemoryBound(to: Float.self)
 
         for i in 0..<min(inputIds.count, T) {
             idsPtr[i] = inputIds[i]
         }
-        for i in 0..<min(attentionMask.count, T) {
-            maskPtr[i] = attentionMask[i]
+        if let maskArray {
+            let maskPtr = maskArray.dataPointer.assumingMemoryBound(to: Int32.self)
+            for i in 0..<min(attentionMask.count, T) {
+                maskPtr[i] = attentionMask[i]
+            }
         }
         for i in 0..<min(refS.count, PipelineConstants.voiceEmbeddingDim) {
             refSPtr[i] = refS[i]
         }
         speedArray[0] = NSNumber(value: speed)
 
-        return try MLDictionaryFeatureProvider(dictionary: [
+        var features: [String: MLFeatureValue] = [
             "input_ids": MLFeatureValue(multiArray: idsArray),
-            "attention_mask": MLFeatureValue(multiArray: maskArray),
             "ref_s": MLFeatureValue(multiArray: refSArray),
             "speed": MLFeatureValue(multiArray: speedArray),
-        ])
+        ]
+        if let maskArray {
+            features["attention_mask"] = MLFeatureValue(multiArray: maskArray)
+        }
+        return try MLDictionaryFeatureProvider(dictionary: features)
     }
 
-    private func selectDurationTokenLength(
+    private func selectDurationModel(
         inputIds: [Int32],
-        attentionMask: [Int32],
-        availableSizes: [Int]
-    ) throws -> Int {
+        attentionMask: [Int32]
+    ) throws -> DurationModelChoice {
         let maskedTokenCount = attentionMask.reduce(0) { $0 + ($1 == 0 ? 0 : 1) }
         let requestedTokenCount = maskedTokenCount > 0 ? maskedTokenCount : inputIds.count
 
-        for size in availableSizes.sorted() where requestedTokenCount <= size {
-            return size
+        if let exact = durationChoices.first(where: {
+            !$0.allowsPadding && $0.tokenLength == requestedTokenCount
+        }) {
+            return exact
+        }
+
+        if let padded = durationChoices.first(where: {
+            $0.allowsPadding && requestedTokenCount <= $0.tokenLength
+        }) {
+            return padded
         }
 
         throw PipelineError.inputTooLong(
             tokens: requestedTokenCount,
-            maxTokens: availableSizes.max() ?? 0
+            maxTokens: durationChoices.map { $0.tokenLength }.max() ?? 0
         )
     }
 }

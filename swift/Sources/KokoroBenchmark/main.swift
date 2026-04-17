@@ -57,6 +57,14 @@ struct BatchCommand: Decodable {
     let warmup: Bool?
 }
 
+struct DurationModelChoice {
+    let cacheKey: String
+    let tokenLength: Int
+    let packageURL: URL
+    let requiresAttentionMask: Bool
+    let allowsPadding: Bool
+}
+
 // MARK: - Model Cache
 
 /// Two-layer cache: compiled model URLs (.mlmodelc) persist across the whole
@@ -67,15 +75,16 @@ struct BatchCommand: Decodable {
 class ModelCache {
     let modelsDir: URL
     let config: MLModelConfiguration
+    private let durationChoices: [DurationModelChoice]
 
     // Layer 1: Compiled URLs (persist forever — compilation is expensive)
-    private var compiledDuration: [Int: URL] = [:]
+    private var compiledDuration: [String: URL] = [:]
     private var compiledF0n: [Int: URL] = [:]
     private var compiledDecPre: [Int: URL] = [:]
     private var compiledGen: [Int: URL] = [:]
 
     // Layer 2: Loaded MLModel instances (evicted on bucket switch)
-    var durationModels: [Int: MLModel] = [:]  // kept across buckets (small)
+    var durationModels: [String: MLModel] = [:]  // kept across buckets (small)
     var f0nModels: [Int: MLModel] = [:]
     var decPreModels: [Int: MLModel] = [:]
     var genModels: [Int: MLModel] = [:]
@@ -84,20 +93,102 @@ class ModelCache {
         self.modelsDir = modelsDir
         self.config = MLModelConfiguration()
         self.config.computeUnits = computeUnits
+        self.durationChoices = Self.discoverDurationChoices(modelsDir: modelsDir)
         fputs("  Compute units: \(computeUnits == .all ? "all" : computeUnits == .cpuAndNeuralEngine ? "cpuAndNeuralEngine" : computeUnits == .cpuAndGPU ? "cpuAndGPU" : "cpuOnly")\n", stderr)
+        fputs("  Duration choices: \(durationChoices.map { $0.cacheKey }.joined(separator: ", "))\n", stderr)
     }
 
     // -- Compiled URL helpers (compile once, cache the .mlmodelc path) --
 
-    private func compiledDurationURL(T: Int) throws -> URL {
-        if let url = compiledDuration[T] { return url }
-        let pkgURL = modelsDir.appendingPathComponent("kokoro_duration_t\(T).mlpackage")
-        let actualURL = FileManager.default.fileExists(atPath: pkgURL.path)
-            ? pkgURL
-            : modelsDir.appendingPathComponent("kokoro_duration.mlpackage")
-        fputs("  Compiling duration T=\(T)...\n", stderr)
-        let compiled = try MLModel.compileModel(at: actualURL)
-        compiledDuration[T] = compiled
+    private static func discoverDurationChoices(modelsDir: URL) -> [DurationModelChoice] {
+        var choices: [DurationModelChoice] = []
+        let fm = FileManager.default
+
+        if let urls = try? fm.contentsOfDirectory(
+            at: modelsDir,
+            includingPropertiesForKeys: nil
+        ) {
+            for url in urls {
+                let name = url.lastPathComponent
+                guard name.hasPrefix("kokoro_duration_exact_t"),
+                      name.hasSuffix(".mlpackage") else {
+                    continue
+                }
+                let raw = name
+                    .replacingOccurrences(of: "kokoro_duration_exact_t", with: "")
+                    .replacingOccurrences(of: ".mlpackage", with: "")
+                guard let tokenLength = Int(raw) else { continue }
+                choices.append(DurationModelChoice(
+                    cacheKey: "exact_t\(tokenLength)",
+                    tokenLength: tokenLength,
+                    packageURL: url,
+                    requiresAttentionMask: false,
+                    allowsPadding: false
+                ))
+            }
+        }
+
+        for tokenLength in [32, 64, 128, 256, 512] {
+            let url = modelsDir.appendingPathComponent("kokoro_duration_t\(tokenLength).mlpackage")
+            if fm.fileExists(atPath: url.path) {
+                choices.append(DurationModelChoice(
+                    cacheKey: "padded_t\(tokenLength)",
+                    tokenLength: tokenLength,
+                    packageURL: url,
+                    requiresAttentionMask: true,
+                    allowsPadding: true
+                ))
+            }
+        }
+
+        let legacyURL = modelsDir.appendingPathComponent("kokoro_duration.mlpackage")
+        if fm.fileExists(atPath: legacyURL.path),
+           !choices.contains(where: { $0.cacheKey == "padded_t128" }) {
+            choices.append(DurationModelChoice(
+                cacheKey: "padded_t128",
+                tokenLength: 128,
+                packageURL: legacyURL,
+                requiresAttentionMask: true,
+                allowsPadding: true
+            ))
+        }
+
+        return choices.sorted {
+            if $0.tokenLength != $1.tokenLength {
+                return $0.tokenLength < $1.tokenLength
+            }
+            return !$0.allowsPadding && $1.allowsPadding
+        }
+    }
+
+    func selectDurationModel(actualTokens: Int) throws -> DurationModelChoice {
+        if let exact = durationChoices.first(where: {
+            !$0.allowsPadding && $0.tokenLength == actualTokens
+        }) {
+            return exact
+        }
+
+        if let padded = durationChoices.first(where: {
+            $0.allowsPadding && actualTokens <= $0.tokenLength
+        }) {
+            return padded
+        }
+
+        throw NSError(
+            domain: "kokoro-bench",
+            code: 1,
+            userInfo: [
+                NSLocalizedDescriptionKey:
+                    "Token count \(actualTokens) exceeds max duration model token length \(durationChoices.map { $0.tokenLength }.max() ?? 0)"
+            ]
+        )
+    }
+
+    private func compiledDurationURL(choice: DurationModelChoice) throws -> URL {
+        if let url = compiledDuration[choice.cacheKey] { return url }
+        fputs("  Compiling duration \(choice.cacheKey)...\n", stderr)
+        let compiled = try MLModel.compileModel(at: choice.packageURL)
+        compiledDuration[choice.cacheKey] = compiled
         return compiled
     }
 
@@ -130,12 +221,12 @@ class ModelCache {
 
     // -- Model accessors (load from cached compiled URL) --
 
-    func durationModel(T: Int) throws -> MLModel {
-        if let cached = durationModels[T] { return cached }
-        let compiled = try compiledDurationURL(T: T)
-        fputs("  Loading duration T=\(T)...\n", stderr)
+    func durationModel(choice: DurationModelChoice) throws -> MLModel {
+        if let cached = durationModels[choice.cacheKey] { return cached }
+        let compiled = try compiledDurationURL(choice: choice)
+        fputs("  Loading duration \(choice.cacheKey)...\n", stderr)
         let model = try MLModel(contentsOf: compiled, configuration: config)
-        durationModels[T] = model
+        durationModels[choice.cacheKey] = model
         return model
     }
 
@@ -252,44 +343,51 @@ func runPipeline(
         }
     }
 
-    // Pick duration T
-    let enumSizes = [32, 64, 128, 256, 512]
+    // Pick Duration model. Exact native packages are valid only for their exact
+    // token count; padded mask-aware packages remain the fallback.
     let actualTokens = benchInput.num_tokens
-    guard let T = enumSizes.first(where: { $0 >= actualTokens }) else {
-        fputs("Token count \(actualTokens) exceeds max enumeration 512\n", stderr)
-        throw NSError(domain: "kokoro-bench", code: 1, userInfo: [NSLocalizedDescriptionKey: "Token count exceeds 512"])
-    }
+    let durationChoice = try cache.selectDurationModel(actualTokens: actualTokens)
+    let T = durationChoice.tokenLength
 
-    let durModel = try cache.durationModel(T: T)
+    let durModel = try cache.durationModel(choice: durationChoice)
 
     // Build duration input
     let idsArray = try MLMultiArray(shape: [1, NSNumber(value: T)], dataType: .int32)
-    let maskArray = try MLMultiArray(shape: [1, NSNumber(value: T)], dataType: .int32)
+    let maskArray = durationChoice.requiresAttentionMask
+        ? try MLMultiArray(shape: [1, NSNumber(value: T)], dataType: .int32)
+        : nil
     let refSArray = try MLMultiArray(shape: [1, 256], dataType: .float32)
     let speedArray = try MLMultiArray(shape: [1], dataType: .float32)
 
     let idsPtr = idsArray.dataPointer.assumingMemoryBound(to: Int32.self)
-    let maskPtr = maskArray.dataPointer.assumingMemoryBound(to: Int32.self)
     let refSPtr = refSArray.dataPointer.assumingMemoryBound(to: Float.self)
 
     for j in 0..<min(benchInput.input_ids.count, T) { idsPtr[j] = benchInput.input_ids[j] }
-    for j in 0..<min(benchInput.attention_mask.count, T) { maskPtr[j] = benchInput.attention_mask[j] }
+    if let maskArray {
+        let maskPtr = maskArray.dataPointer.assumingMemoryBound(to: Int32.self)
+        for j in 0..<min(benchInput.attention_mask.count, T) { maskPtr[j] = benchInput.attention_mask[j] }
+    }
     for j in 0..<min(benchInput.ref_s.count, 256) { refSPtr[j] = benchInput.ref_s[j] }
     speedArray[0] = NSNumber(value: benchInput.speed)
 
     try withTensorDump { writer in
         try writer.writeMLMultiArray(name: "tokens", array: idsArray)
-        try writer.writeMLMultiArray(name: "attention_mask", array: maskArray)
+        if let maskArray {
+            try writer.writeMLMultiArray(name: "attention_mask", array: maskArray)
+        }
         try writer.writeMLMultiArray(name: "ref_s", array: refSArray)
         try writer.writeMLMultiArray(name: "speed", array: speedArray)
     }
 
-    let durInput = try MLDictionaryFeatureProvider(dictionary: [
+    var durFeatures: [String: MLFeatureValue] = [
         "input_ids": MLFeatureValue(multiArray: idsArray),
-        "attention_mask": MLFeatureValue(multiArray: maskArray),
         "ref_s": MLFeatureValue(multiArray: refSArray),
         "speed": MLFeatureValue(multiArray: speedArray),
-    ])
+    ]
+    if let maskArray {
+        durFeatures["attention_mask"] = MLFeatureValue(multiArray: maskArray)
+    }
+    let durInput = try MLDictionaryFeatureProvider(dictionary: durFeatures)
 
     // Quick duration prediction to determine bucket
     let durOut = try durModel.prediction(from: durInput)
@@ -303,7 +401,7 @@ func runPipeline(
     let bucketThreshold = Int(ceil(canonicalDurForBucket))
     let bucketSec = availableBuckets.first(where: { $0 >= bucketThreshold }) ?? availableBuckets.last!
 
-    fputs("  Input: \(inputKey), tokens: \(actualTokens)/\(T), canonical=\(String(format: "%.1f", canonicalDurForBucket))s, bucket: \(bucketSec)s\n", stderr)
+    fputs("  Input: \(inputKey), tokens: \(actualTokens)/\(T), duration=\(durationChoice.cacheKey), canonical=\(String(format: "%.1f", canonicalDurForBucket))s, bucket: \(bucketSec)s\n", stderr)
 
     // Evict models from other buckets before loading this bucket's models.
     // On memory-constrained machines (24GB M2 Air), keeping all bucket models
@@ -623,6 +721,8 @@ func runPipeline(
         "t_decoder_pre_cpu_s": NSNull(),
         "t_har_builder_cpu_s": NSNull(),
         "t_orchestration_s": NSNull(),
+        "duration_model": durationChoice.cacheKey,
+        "duration_model_allows_padding": durationChoice.allowsPadding,
     ]
 
     try withTensorDump { writer in
@@ -636,6 +736,8 @@ func runPipeline(
             "seed": seed,
             "bucket_seconds": bucketSec,
             "duration_token_length": T,
+            "duration_model": durationChoice.cacheKey,
+            "duration_model_allows_padding": durationChoice.allowsPadding,
             "num_tokens": benchInput.num_tokens,
             "natural_frames": frames,
             "canonical_duration_s": benchInput.canonical_duration_s ?? NSNull(),

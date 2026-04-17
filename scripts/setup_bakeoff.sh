@@ -46,35 +46,37 @@ else
     echo "--- Step 2/6: Skipping download (--skip-download) ---"
 fi
 
-# 3. Export new models
+# 3. Prepare canonical benchmark inputs before Duration export so
+# export_duration.py can build exact-token native Duration packages for the
+# frozen bakeoff texts.
 echo
-echo "--- Step 3/6: Export Duration models (T=32,64,128,256,512) ---"
+echo "--- Step 3/6: Prepare bakeoff inputs ---"
+uv run python scripts/bakeoff_harness.py prepare-inputs
+uv run python scripts/prepare_swift_bench_inputs.py
+
+# 4. Export new models
+echo
+echo "--- Step 4/6: Export Duration models (padded fallback + exact token packages) ---"
 uv run python export_duration.py
 
 echo
-echo "--- Step 3/6: Export F0Ntrain models ---"
+echo "--- Step 4/6: Export F0Ntrain models ---"
 uv run python export_f0ntrain.py --t-frames 120 280 400 600 1200
 
 echo
-echo "--- Step 3/6: Export DecoderPre models ---"
+echo "--- Step 4/6: Export DecoderPre models ---"
 uv run python export_decoder_pre.py --buckets 3 7 10 15 30
 
 echo
-echo "--- Step 3/6: Export GeneratorFromHar models ---"
+echo "--- Step 4/6: Export GeneratorFromHar models ---"
 uv run python -m export_synth.main --mode decoder-har --buckets 3s,7s,10s,15s,30s -o coreml
 
-# 4. Build Swift binary
+# 5. Build Swift binary
 echo
-echo "--- Step 4/6: Build Swift benchmark CLI ---"
+echo "--- Step 5/6: Build Swift benchmark CLI ---"
 cd swift
 swift build -c release --product kokoro-bench
 cd ..
-
-# 5. Prepare benchmark inputs
-echo
-echo "--- Step 5/6: Prepare bakeoff inputs ---"
-uv run python scripts/bakeoff_harness.py prepare-inputs
-uv run python scripts/prepare_swift_bench_inputs.py
 
 # 6. Verify
 echo
@@ -85,6 +87,16 @@ if [ ! -f "coreml/kokoro_duration.mlpackage/Manifest.json" ]; then
     echo "  MISSING: Duration model"
     READY=false
 fi
+
+for input_json in outputs/swift_bench_inputs/*.json; do
+    [ -e "$input_json" ] || continue
+    [ "$(basename "$input_json")" = "hnsf_weights.json" ] && continue
+    tokens="$(uv run python -c 'import json,sys; print(json.load(open(sys.argv[1]))["num_tokens"])' "$input_json")"
+    if [ ! -f "coreml/kokoro_duration_exact_t${tokens}.mlpackage/Manifest.json" ]; then
+        echo "  MISSING: exact Duration model T=${tokens}"
+        READY=false
+    fi
+done
 
 for bucket in 3 7 10 15 30; do
     if [ ! -d "coreml/kokoro_decoder_har_post_${bucket}s.mlpackage" ]; then
