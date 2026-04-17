@@ -663,6 +663,7 @@ class SwiftPipelineContext:
         else:
             input_keys = [self._first_input_key]
 
+        failures: list[str] = []
         for ik in input_keys:
             out_file = tempfile.NamedTemporaryFile(suffix=".json", delete=False)
             out_file.close()
@@ -674,13 +675,24 @@ class SwiftPipelineContext:
                     "output": out_file.name,
                     "warmup": True,
                 }, timeout=self._warmup_timeout_s)
+                try:
+                    record = json.loads(Path(out_file.name).read_text())
+                except Exception as exc:
+                    raise RuntimeError(f"warmup did not write a valid result JSON: {exc}") from exc
+                if record.get("status") != "ok":
+                    raise RuntimeError(
+                        f"warmup result status={record.get('status')!r}: {record.get('error')}"
+                    )
             except Exception as exc:
                 print(f"  Swift warmup failed for {ik}: {exc}")
+                failures.append(f"{ik}: {exc}")
             finally:
                 try:
                     os.unlink(out_file.name)
                 except OSError:
                     pass
+        if failures:
+            raise RuntimeError("Swift warmup failed: " + "; ".join(failures))
 
     def close(self) -> None:
         """Shut down the persistent subprocess."""

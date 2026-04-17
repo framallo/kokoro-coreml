@@ -1,10 +1,10 @@
-# Bakeoff Results
+# Bakeoff Results v1
 
 April 15, 2026
 
 ## Scope
 
-This note consolidates the final corrected bakeoff results for the
+This archived note consolidates the pre-v9 corrected bakeoff results for the
 `3s` / `7s` / `15s` / `30s` inputs across:
 
 - Apple M2 Ultra, 64 GB
@@ -13,7 +13,9 @@ This note consolidates the final corrected bakeoff results for the
 
 The `60s` input was skipped and is not included. Earlier v2-v4 benchmark
 sections in [performance-notes](performance-notes.md) are useful history, but
-the v5 sections are the canonical corrected data for this comparison.
+the v5 sections are the canonical corrected data for this archived comparison.
+For the current Config F host-materialization fix, use
+[Bakeoff Results v2](bakeoff-results-v2.md).
 
 ## Configs
 

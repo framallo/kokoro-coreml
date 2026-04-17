@@ -36,6 +36,10 @@ else
     echo "uv not found. Install with: curl -LsSf https://astral.sh/uv/install.sh | sh"
     exit 1
 fi
+if ! command -v swift &>/dev/null; then
+    echo "swift not found. Install Xcode Command Line Tools with: xcode-select --install"
+    exit 1
+fi
 
 run_python() {
     uv run --no-sync python "$@"

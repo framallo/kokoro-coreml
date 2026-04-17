@@ -173,7 +173,7 @@ def main() -> None:
 
     token = _load_token()
     if token:
-        print(f"Using HF token: {token[:8]}...")
+        print("Using HF token from configured credentials.")
     else:
         print("No HF_TOKEN found; using anonymous access (may fail for private repos).")
 

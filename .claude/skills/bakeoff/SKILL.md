@@ -157,19 +157,27 @@ uv run --no-sync python scripts/bakeoff_harness.py run \
 
 ### 5. Verify results
 
+For a single combined run, set `RESULT_FILES` to one file. For a split 16 GB
+run, set it to both split files:
+
 ```bash
+export RESULT_FILES="outputs/bakeoff/results_<machine_id>.json"
 uv run --no-sync python - <<'PY'
 import json, statistics
 from collections import defaultdict
+import os
+from pathlib import Path
 
-data = json.load(open('outputs/bakeoff/results_<machine_id>.json'))
+paths = [Path(p) for p in os.environ['RESULT_FILES'].split()]
 statuses = defaultdict(int)
 groups = defaultdict(list)
 
-for r in data['results']:
-    statuses[(r.get('config'), r.get('status'))] += 1
-    if r.get('status') == 'ok':
-        groups[(r['config'], r['input_key'])].append(r['wall_time_s'] * 1000)
+for path in paths:
+    data = json.loads(path.read_text())
+    for r in data['results']:
+        statuses[(r.get('config'), r.get('status'))] += 1
+        if r.get('status') == 'ok':
+            groups[(r['config'], r['input_key'])].append(r['wall_time_s'] * 1000)
 
 print('statuses:')
 for key, count in sorted(statuses.items()):
@@ -185,6 +193,12 @@ for ik in ['3s', '7s', '15s', '30s']:
         f'E={row["e"]:.0f}ms  F={row["f"]:.0f}ms'
     )
 PY
+```
+
+For a split run, keep the same verifier and change only the first line:
+
+```bash
+export RESULT_FILES="outputs/bakeoff/results_<machine_id>_af.json outputs/bakeoff/results_<machine_id>_de.json"
 ```
 
 All configs should show `status: ok` for all inputs. Config D may show
@@ -205,8 +219,10 @@ or "Bakeoff v3: Swift pipeline" for the template). Include:
 
 ### 7. Commit and push
 
-Use `git-commit` to stage the results file and performance-notes changes.
-Then `git-push` to sync with origin.
+Use `git-commit` to stage the notes changes. Do not force-add
+`outputs/bakeoff/*.json`; `outputs/` is intentionally ignored, so cite result
+paths in notes instead of committing generated benchmark artifacts. Then
+`git-push` to sync with origin.
 
 ## Configs Reference
 

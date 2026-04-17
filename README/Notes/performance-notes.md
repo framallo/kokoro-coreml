@@ -142,8 +142,11 @@ available under `outputs/bakeoff/listen/`:
 ### Provenance
 
 - Machine: Apple M2 Ultra Mac Studio, 64 GB
-- Full command: `BAKEOFF_SKIP_SMOKE=1 PYTORCH_ENABLE_MPS_FALLBACK=1 uv run python scripts/bakeoff_harness.py run --configs a,d,e,f --iterations 5 --order-seed 0 --machine-id m2_ultra_parity_final_20260417`
+- Rerun command after `scripts/setup_bakeoff.sh`: `BAKEOFF_SKIP_SMOKE=1 PYTORCH_ENABLE_MPS_FALLBACK=1 uv run --no-sync python scripts/bakeoff_harness.py run --configs a,d,e,f --iterations 5 --order-seed 0 --machine-id m2_ultra_parity_final_20260417`
 - Result: `outputs/bakeoff/results_m2_ultra_parity_final_20260417.json`
+- Result provenance note: the JSON was collected before the final cleanup
+  commit and records `git_dirty: true`; the Swift source changes that affect
+  Config F were already present in that working tree.
 - F-only confirmation: `outputs/bakeoff/results_m2_ultra_f_stride_float16_final_20260417.json`
 - Listen samples:
   - `outputs/bakeoff/listen/config_f_3s.wav`
@@ -263,10 +266,10 @@ HAR-post packages. The fix skips auto Core ML discovery for A and loads only
 - Machine: Apple M2 Ultra Mac Studio, 64 GB
 - Swift warmup: completed; selected `exact_t44`, `exact_t105`, `exact_t219`,
   and `exact_t476`
-- Full command attempted: `BAKEOFF_SKIP_SMOKE=1 PYTORCH_ENABLE_MPS_FALLBACK=1 uv run python scripts/bakeoff_harness.py run --configs a,d,e,f --iterations 5 --order-seed 0 --machine-id m2_ultra_exact_duration_rerun_20260416`
-- Completed A command: `BAKEOFF_SKIP_SMOKE=1 PYTORCH_ENABLE_MPS_FALLBACK=1 uv run python scripts/bakeoff_harness.py run --configs a --iterations 5 --order-seed 0 --machine-id m2_ultra_exact_duration_a_fixed_20260417`
-- Completed F command: `BAKEOFF_SKIP_SMOKE=1 PYTORCH_ENABLE_MPS_FALLBACK=1 uv run python scripts/bakeoff_harness.py run --configs f --iterations 5 --order-seed 0 --machine-id m2_ultra_exact_duration_fonly_20260416`
-- Completed D/E command: `BAKEOFF_SKIP_SMOKE=1 PYTORCH_ENABLE_MPS_FALLBACK=1 uv run python scripts/bakeoff_harness.py run --configs d,e --iterations 5 --order-seed 0 --machine-id m2_ultra_exact_duration_de_20260416`
+- Full command attempted: `BAKEOFF_SKIP_SMOKE=1 PYTORCH_ENABLE_MPS_FALLBACK=1 uv run --no-sync python scripts/bakeoff_harness.py run --configs a,d,e,f --iterations 5 --order-seed 0 --machine-id m2_ultra_exact_duration_rerun_20260416`
+- Completed A command: `BAKEOFF_SKIP_SMOKE=1 PYTORCH_ENABLE_MPS_FALLBACK=1 uv run --no-sync python scripts/bakeoff_harness.py run --configs a --iterations 5 --order-seed 0 --machine-id m2_ultra_exact_duration_a_fixed_20260417`
+- Completed F command: `BAKEOFF_SKIP_SMOKE=1 PYTORCH_ENABLE_MPS_FALLBACK=1 uv run --no-sync python scripts/bakeoff_harness.py run --configs f --iterations 5 --order-seed 0 --machine-id m2_ultra_exact_duration_fonly_20260416`
+- Completed D/E command: `BAKEOFF_SKIP_SMOKE=1 PYTORCH_ENABLE_MPS_FALLBACK=1 uv run --no-sync python scripts/bakeoff_harness.py run --configs d,e --iterations 5 --order-seed 0 --machine-id m2_ultra_exact_duration_de_20260416`
 - Results:
   - `outputs/bakeoff/results_m2_ultra_exact_duration_a_fixed_20260417.json`
   - `outputs/bakeoff/results_m2_ultra_exact_duration_fonly_20260416.json`
@@ -294,7 +297,7 @@ large static Duration graphs expensive, especially `T=512`.
 Before the bakeoff, Config F listen samples were regenerated with:
 
 ```bash
-uv run python scripts/bakeoff_listen.py --quality-plots
+uv run --no-sync python scripts/bakeoff_listen.py --quality-plots
 ```
 
 All four samples passed the waveform health gate:
@@ -352,7 +355,7 @@ All four samples passed the waveform health gate:
 ### Provenance
 
 - Machine: Apple M2 Ultra Mac Studio, 64 GB
-- Command: `BAKEOFF_SKIP_SMOKE=1 PYTORCH_ENABLE_MPS_FALLBACK=1 uv run python scripts/bakeoff_harness.py run --configs a,d,e,f --iterations 5 --order-seed 0 --machine-id m2_ultra_v7`
+- Command: `BAKEOFF_SKIP_SMOKE=1 PYTORCH_ENABLE_MPS_FALLBACK=1 uv run --no-sync python scripts/bakeoff_harness.py run --configs a,d,e,f --iterations 5 --order-seed 0 --machine-id m2_ultra_v7`
 - Git recorded in results: `c251622b458d`, dirty tree with Duration masking,
   exporter controls, harness timeout/recovery, and notes updates
 - Python: 3.12.13
@@ -388,7 +391,7 @@ and slower at 15s/30s. Relative to PyTorch CPU, it remains `2.5-3.3x` faster.
 Before this bakeoff, the listen samples were regenerated with:
 
 ```bash
-uv run python scripts/bakeoff_listen.py --keys 3s,7s,15s,30s
+uv run --no-sync python scripts/bakeoff_listen.py --keys 3s,7s,15s,30s
 ```
 
 All four listen samples recorded `quality_pass=true` and
@@ -451,7 +454,7 @@ All four listen samples recorded `quality_pass=true` and
 ### Provenance
 
 - Machine: Apple M2 Ultra Mac Studio, 64 GB, macOS 26.4.1
-- Command: `BAKEOFF_SKIP_SMOKE=1 PYTORCH_ENABLE_MPS_FALLBACK=1 uv run python scripts/bakeoff_harness.py run --configs a,d,e,f --iterations 5 --order-seed 0 --machine-id m2_ultra_v6`
+- Command: `BAKEOFF_SKIP_SMOKE=1 PYTORCH_ENABLE_MPS_FALLBACK=1 uv run --no-sync python scripts/bakeoff_harness.py run --configs a,d,e,f --iterations 5 --order-seed 0 --machine-id m2_ultra_v6`
 - Git recorded in results: `b722798e9995`, with a dirty tree containing the
   stride-safety audit fix and notes updates from the active recovery workflow
 - Python: 3.12.13

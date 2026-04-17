@@ -78,6 +78,8 @@ Changes:
 - Added `floatValues(from:limit:)` so trimming only extracts the needed samples.
 - Added typed stride-aware `MLMultiArray` reads for both `.float32` and
   `.float16`, with boxed subscript fallback for unsupported layouts.
+- Added Swift coverage for contiguous `limit` reads, strided `Float16` reads,
+  direct alignment expansion, and alignment shape validation.
 - Kept full alignment/waveform materialization for tensor-dump mode only.
 
 ### Verification
@@ -86,12 +88,15 @@ Full controlled bakeoff:
 
 ```bash
 BAKEOFF_SKIP_SMOKE=1 PYTORCH_ENABLE_MPS_FALLBACK=1 \
-uv run python scripts/bakeoff_harness.py run \
+uv run --no-sync python scripts/bakeoff_harness.py run \
   --configs a,d,e,f --iterations 5 --order-seed 0 \
   --machine-id m2_ultra_parity_final_20260417
 ```
 
-Outcome: `80` ok records across 4 configs, 4 inputs, and 5 reps.
+Outcome: `80` ok records across 4 configs, 4 inputs, and 5 reps. The original
+result JSON was collected before the final cleanup commit, so it records
+`git_dirty: true`; use the `--no-sync` command above for reruns after
+`scripts/setup_bakeoff.sh`.
 
 | Input | A wall | F wall | F vs A |
 | --- | ---: | ---: | ---: |
@@ -111,7 +116,7 @@ Config F stage proof:
 Audio samples:
 
 ```bash
-uv run python scripts/bakeoff_listen.py --keys 3s,7s,15s,30s --quality-plots
+uv run --no-sync python scripts/bakeoff_listen.py --keys 3s,7s,15s,30s --quality-plots
 ```
 
 Outcome: all Config F listen samples passed the waveform health gate and are
@@ -217,7 +222,7 @@ Focused context proof:
 
 ```bash
 PYTHONUNBUFFERED=1 BAKEOFF_SKIP_SMOKE=1 PYTORCH_ENABLE_MPS_FALLBACK=1 \
-uv run python - <<'PY'
+uv run --no-sync python - <<'PY'
 from scripts.bakeoff_harness import ConfigAContext, BAKEOFF_INPUTS
 ctx = ConfigAContext()
 assert ctx.available
@@ -232,7 +237,7 @@ Benchmark proof:
 
 ```bash
 BAKEOFF_SKIP_SMOKE=1 PYTORCH_ENABLE_MPS_FALLBACK=1 \
-uv run python scripts/bakeoff_harness.py run \
+uv run --no-sync python scripts/bakeoff_harness.py run \
   --configs a --iterations 5 --order-seed 0 \
   --machine-id m2_ultra_exact_duration_a_fixed_20260417
 ```
@@ -377,9 +382,9 @@ Mechanical checks:
 ```bash
 swift build --package-path swift
 swift build --package-path swift -c release --product kokoro-bench
-uv run python -m py_compile export_duration.py scripts/probe_duration_exact_enumerated.py export_synth/wrappers.py scripts/bakeoff_harness.py scripts/prepare_swift_bench_inputs.py
-uv run pytest tests/test_export_wrappers_shapes.py -q
-uv run pytest -q tests/test_mlpackage_exports.py::test_decoder_har_post_bucket_shape_matches_advertised_duration
+uv run --no-sync python -m py_compile export_duration.py scripts/probe_duration_exact_enumerated.py export_synth/wrappers.py scripts/bakeoff_harness.py scripts/prepare_swift_bench_inputs.py
+uv run --no-sync pytest tests/test_export_wrappers_shapes.py -q
+uv run --no-sync pytest -q tests/test_mlpackage_exports.py::test_decoder_har_post_bucket_shape_matches_advertised_duration
 bash -n scripts/setup_bakeoff.sh
 git diff --check
 ```
@@ -390,7 +395,7 @@ Exporter smoke:
 KOKORO_DURATION_EXPORT_SIZES=32 \
 KOKORO_DURATION_EXACT_EXPORT_SIZES=44 \
 KOKORO_DURATION_EXPORT_VALIDATE_MAX_T=64 \
-uv run python export_duration.py
+uv run --no-sync python export_duration.py
 ```
 
 Outcome: `kokoro_duration_t32.mlpackage` and
@@ -593,17 +598,17 @@ large shapes with `skip_model_load=True` when prediction validation is disabled.
 Commands used:
 
 ```bash
-uv run python - <<'PY'
+uv run --no-sync python - <<'PY'
 # compared production exact-length duration, original padded duration,
 # CoreML-friendly wrapper exact/padded duration, export_duration wrapper padded,
 # and coreml/kokoro_duration_t{T}.mlpackage output
 PY
 
-uv run python - <<'PY'
+uv run --no-sync python - <<'PY'
 # identified first divergent tensor between exact and padded duration paths
 PY
 
-uv run python - <<'PY'
+uv run --no-sync python - <<'PY'
 # proved crop/pack before predictor.lstm restores exact Config A frame counts
 PY
 ```
@@ -773,7 +778,7 @@ beats A at every canonical length.
 Commands used:
 
 ```bash
-uv run python - <<'PY'
+uv run --no-sync python - <<'PY'
 # parsed outputs/bakeoff/results_m2_ultra_v6.json and printed median stage times
 PY
 
@@ -928,7 +933,7 @@ The duration mismatch is expected: the golden used the old historical trim
 Commands used:
 
 ```bash
-uv run python scripts/audio_quality_probe.py \
+uv run --no-sync python scripts/audio_quality_probe.py \
   --reference outputs/audio-parity/references/pytorch_3s.wav \
               outputs/audio-parity/references/pytorch_7s.wav \
               outputs/audio-parity/references/pytorch_15s.wav \
@@ -1007,7 +1012,9 @@ runtime and benchmark now read waveform values through stride-aware
 `MLMultiArray` indexing before trimming, and regenerated short/medium samples
 pass objective speech-health gates and human listening. The final audit also
 made F0/N Core ML output reads stride-aware and forced the Config F benchmark to
-materialize the trimmed waveform during the timed path.
+materialize the trimmed waveform during the timed path. The later v9
+host-materialization fix supersedes the performance portion of this issue; keep
+this section only as the original audio-corruption root cause.
 
 ### Symptom
 
@@ -1098,8 +1105,8 @@ regenerate the old broken output even after the Swift source fix.
 ### Verification
 
 ```bash
-uv run python scripts/run_audio_parity_ladder.py --input-key 3s
-uv run python scripts/audio_quality_probe.py \
+uv run --no-sync python scripts/run_audio_parity_ladder.py --input-key 3s
+uv run --no-sync python scripts/audio_quality_probe.py \
   --reference outputs/audio-parity/references/pytorch_3s.wav \
               outputs/audio-parity/references/pytorch_7s.wav \
               outputs/audio-parity/references/pytorch_15s.wav \
@@ -1108,8 +1115,8 @@ uv run python scripts/audio_quality_probe.py \
   --candidate outputs/bakeoff/listen/config_f_3s.wav \
               outputs/bakeoff/listen/config_f_7s.wav \
   --out-dir outputs/bakeoff/listen/quality
-uv run python scripts/bakeoff_listen.py --keys 3s,7s
-uv run pytest
+uv run --no-sync python scripts/bakeoff_listen.py --keys 3s,7s
+uv run --no-sync pytest
 swift test --package-path swift
 ```
 
@@ -1129,8 +1136,8 @@ Observed after the fix:
   active32 `86.033%`, ZCR `11.146%`.
 - Human listening confirmed the regenerated short and medium samples sound
   recognizably human.
-- `uv run pytest`: `41 passed`.
-- `swift test --package-path swift`: `16 passed`.
+- `uv run --no-sync pytest`: `42 passed`.
+- `swift test --package-path swift`: `21 passed`.
 
 ### Investigation Log
 
@@ -1190,7 +1197,7 @@ Observed after the fix:
 
 - [ ] Check whether any Core ML output is read through `dataPointer` before
       confirming its logical strides are contiguous.
-- [ ] Run `uv run python scripts/audio_quality_probe.py` before asking for
+- [ ] Run `uv run --no-sync python scripts/audio_quality_probe.py` before asking for
       human listening.
 - [ ] Confirm `scripts/bakeoff_listen.py` rebuilt release `kokoro-bench` after
       Swift changes.

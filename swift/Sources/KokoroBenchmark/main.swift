@@ -57,14 +57,6 @@ struct BatchCommand: Decodable {
     let warmup: Bool?
 }
 
-struct DurationModelChoice {
-    let cacheKey: String
-    let tokenLength: Int
-    let packageURL: URL
-    let requiresAttentionMask: Bool
-    let allowsPadding: Bool
-}
-
 // MARK: - Model Cache
 
 /// Two-layer cache: compiled model URLs (.mlmodelc) persist across the whole
@@ -93,95 +85,15 @@ class ModelCache {
         self.modelsDir = modelsDir
         self.config = MLModelConfiguration()
         self.config.computeUnits = computeUnits
-        self.durationChoices = Self.discoverDurationChoices(modelsDir: modelsDir)
+        self.durationChoices = KokoroPipeline.discoverDurationChoices(modelsDirectory: modelsDir)
         fputs("  Compute units: \(computeUnits == .all ? "all" : computeUnits == .cpuAndNeuralEngine ? "cpuAndNeuralEngine" : computeUnits == .cpuAndGPU ? "cpuAndGPU" : "cpuOnly")\n", stderr)
         fputs("  Duration choices: \(durationChoices.map { $0.cacheKey }.joined(separator: ", "))\n", stderr)
     }
 
     // -- Compiled URL helpers (compile once, cache the .mlmodelc path) --
 
-    private static func discoverDurationChoices(modelsDir: URL) -> [DurationModelChoice] {
-        var choices: [DurationModelChoice] = []
-        let fm = FileManager.default
-
-        if let urls = try? fm.contentsOfDirectory(
-            at: modelsDir,
-            includingPropertiesForKeys: nil
-        ) {
-            for url in urls {
-                let name = url.lastPathComponent
-                guard name.hasPrefix("kokoro_duration_exact_t"),
-                      name.hasSuffix(".mlpackage") else {
-                    continue
-                }
-                let raw = name
-                    .replacingOccurrences(of: "kokoro_duration_exact_t", with: "")
-                    .replacingOccurrences(of: ".mlpackage", with: "")
-                guard let tokenLength = Int(raw) else { continue }
-                choices.append(DurationModelChoice(
-                    cacheKey: "exact_t\(tokenLength)",
-                    tokenLength: tokenLength,
-                    packageURL: url,
-                    requiresAttentionMask: false,
-                    allowsPadding: false
-                ))
-            }
-        }
-
-        for tokenLength in [32, 64, 128, 256, 512] {
-            let url = modelsDir.appendingPathComponent("kokoro_duration_t\(tokenLength).mlpackage")
-            if fm.fileExists(atPath: url.path) {
-                choices.append(DurationModelChoice(
-                    cacheKey: "padded_t\(tokenLength)",
-                    tokenLength: tokenLength,
-                    packageURL: url,
-                    requiresAttentionMask: true,
-                    allowsPadding: true
-                ))
-            }
-        }
-
-        let legacyURL = modelsDir.appendingPathComponent("kokoro_duration.mlpackage")
-        if fm.fileExists(atPath: legacyURL.path),
-           !choices.contains(where: { $0.cacheKey == "padded_t128" }) {
-            choices.append(DurationModelChoice(
-                cacheKey: "padded_t128",
-                tokenLength: 128,
-                packageURL: legacyURL,
-                requiresAttentionMask: true,
-                allowsPadding: true
-            ))
-        }
-
-        return choices.sorted {
-            if $0.tokenLength != $1.tokenLength {
-                return $0.tokenLength < $1.tokenLength
-            }
-            return !$0.allowsPadding && $1.allowsPadding
-        }
-    }
-
     func selectDurationModel(actualTokens: Int) throws -> DurationModelChoice {
-        if let exact = durationChoices.first(where: {
-            !$0.allowsPadding && $0.tokenLength == actualTokens
-        }) {
-            return exact
-        }
-
-        if let padded = durationChoices.first(where: {
-            $0.allowsPadding && actualTokens <= $0.tokenLength
-        }) {
-            return padded
-        }
-
-        throw NSError(
-            domain: "kokoro-bench",
-            code: 1,
-            userInfo: [
-                NSLocalizedDescriptionKey:
-                    "Token count \(actualTokens) exceeds max duration model token length \(durationChoices.map { $0.tokenLength }.max() ?? 0)"
-            ]
-        )
+        try KokoroPipeline.selectDurationChoice(durationChoices, actualTokens: actualTokens)
     }
 
     private func compiledDurationURL(choice: DurationModelChoice) throws -> URL {
@@ -397,7 +309,7 @@ func runPipeline(
     let durationFramesForBucket = try readDurationFrames(from: predDurArr, validCount: validTokenCount)
     let totalFrames = durationFramesForBucket.reduce(0, +)
     let canonicalDurForBucket = benchInput.canonical_duration_s ?? (Double(totalFrames * 2) / 80.0)
-    let availableBuckets = [3, 7, 10, 15, 30]
+    let availableBuckets = PipelineConstants.defaultBuckets
     let bucketThreshold = Int(ceil(canonicalDurForBucket))
     let bucketSec = availableBuckets.first(where: { $0 >= bucketThreshold }) ?? availableBuckets.last!
 
@@ -407,18 +319,8 @@ func runPipeline(
     // On memory-constrained machines (24GB M2 Air), keeping all bucket models
     // resident causes the ANE scheduler to fall back to CPU for large models.
     // tFrames must match the exported F0Ntrain model for this bucket.
-    // Canonical source: PipelineConstants.tFramesForBucket in KokoroPipeline.
     // Using a too-small tFrames silently truncates aligned features via zeroPad3D.
-    let tFrames: Int = {
-        switch bucketSec {
-        case 3: return 120    // kokoro_f0ntrain_t120.mlpackage
-        case 7: return 280    // kokoro_f0ntrain_t280.mlpackage
-        case 10: return 400   // kokoro_f0ntrain_t400.mlpackage
-        case 15: return 600   // kokoro_f0ntrain_t600.mlpackage
-        case 30: return 1200  // kokoro_f0ntrain_t1200.mlpackage
-        default: return 400
-        }
-    }()
+    let tFrames = PipelineConstants.tFramesForBucket[bucketSec] ?? 400
     cache.evictExcept(bucket: bucketSec, tFrames: tFrames)
 
     // Load bucket-specific models (cached if same bucket as last run)

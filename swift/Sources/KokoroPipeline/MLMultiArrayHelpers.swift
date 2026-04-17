@@ -12,12 +12,15 @@ import Accelerate
 
 public enum PipelineValidationError: Error, LocalizedError {
     case unsupportedDurationDataType(MLMultiArrayDataType)
+    case invalidArrayShape(operation: String, expected: String, actual: [Int])
     case invalidDurationAgreement(inputKey: String, canonical: Double, observed: Double, toleranceFraction: Double)
 
     public var errorDescription: String? {
         switch self {
         case .unsupportedDurationDataType(let dataType):
             return "Unsupported pred_dur MLMultiArray data type: \(dataType)"
+        case .invalidArrayShape(let operation, let expected, let actual):
+            return "\(operation) expected \(expected), got shape \(actual)"
         case .invalidDurationAgreement(let inputKey, let canonical, let observed, let toleranceFraction):
             return "Config F duration mismatch for \(inputKey): observed \(String(format: "%.3f", observed))s vs canonical \(String(format: "%.3f", canonical))s exceeds \(Int(toleranceFraction * 100))% tolerance"
         }
@@ -65,6 +68,7 @@ public func readDurationFrames(from array: MLMultiArray, validCount: Int? = nil)
 public func floatValues(from array: MLMultiArray, limit: Int? = nil) -> [Float] {
     let shape = array.shape.map { $0.intValue }
     let count = max(0, min(limit ?? array.count, array.count))
+    if count == 0 { return [] }
 
     let strides = array.strides.map { $0.intValue }
     if array.dataType == .float32 && isContiguousRowMajor(shape: shape, strides: strides) {
@@ -73,10 +77,12 @@ public func floatValues(from array: MLMultiArray, limit: Int? = nil) -> [Float] 
     }
 
     if array.dataType == .float32 {
-        return stridedFloatValues(from: array, shape: shape, strides: strides, limit: count)
+        let ptr = array.dataPointer.assumingMemoryBound(to: Float.self)
+        return stridedValues(from: ptr, shape: shape, strides: strides, limit: count) { $0 }
     }
     if array.dataType == .float16 {
-        return stridedFloat16Values(from: array, shape: shape, strides: strides, limit: count)
+        let ptr = array.dataPointer.assumingMemoryBound(to: Float16.self)
+        return stridedValues(from: ptr, shape: shape, strides: strides, limit: count) { Float($0) }
     }
 
     var values = [Float]()
@@ -87,26 +93,26 @@ public func floatValues(from array: MLMultiArray, limit: Int? = nil) -> [Float] 
     return values
 }
 
-private func stridedFloat16Values(
-    from array: MLMultiArray,
+private func stridedValues<Element>(
+    from ptr: UnsafeMutablePointer<Element>,
     shape: [Int],
     strides: [Int],
-    limit: Int
+    limit: Int,
+    convert: (Element) -> Float
 ) -> [Float] {
-    let ptr = array.dataPointer.assumingMemoryBound(to: Float16.self)
     var values = [Float]()
     values.reserveCapacity(limit)
 
     switch shape.count {
     case 1:
         for i in 0..<min(shape[0], limit) {
-            values.append(Float(ptr[i * strides[0]]))
+            values.append(convert(ptr[i * strides[0]]))
         }
     case 2:
         outer: for i in 0..<shape[0] {
             let iBase = i * strides[0]
             for j in 0..<shape[1] {
-                values.append(Float(ptr[iBase + j * strides[1]]))
+                values.append(convert(ptr[iBase + j * strides[1]]))
                 if values.count == limit { break outer }
             }
         }
@@ -116,7 +122,7 @@ private func stridedFloat16Values(
             for j in 0..<shape[1] {
                 let jBase = iBase + j * strides[1]
                 for k in 0..<shape[2] {
-                    values.append(Float(ptr[jBase + k * strides[2]]))
+                    values.append(convert(ptr[jBase + k * strides[2]]))
                     if values.count == limit { break outer }
                 }
             }
@@ -128,55 +134,7 @@ private func stridedFloat16Values(
             for i in 0..<min(index.count, strides.count) {
                 physicalOffset += index[i] * strides[i]
             }
-            values.append(Float(ptr[physicalOffset]))
-        }
-    }
-
-    return values
-}
-
-private func stridedFloatValues(
-    from array: MLMultiArray,
-    shape: [Int],
-    strides: [Int],
-    limit: Int
-) -> [Float] {
-    let ptr = array.dataPointer.assumingMemoryBound(to: Float.self)
-    var values = [Float]()
-    values.reserveCapacity(limit)
-
-    switch shape.count {
-    case 1:
-        for i in 0..<min(shape[0], limit) {
-            values.append(ptr[i * strides[0]])
-        }
-    case 2:
-        outer: for i in 0..<shape[0] {
-            let iBase = i * strides[0]
-            for j in 0..<shape[1] {
-                values.append(ptr[iBase + j * strides[1]])
-                if values.count == limit { break outer }
-            }
-        }
-    case 3:
-        outer: for i in 0..<shape[0] {
-            let iBase = i * strides[0]
-            for j in 0..<shape[1] {
-                let jBase = iBase + j * strides[1]
-                for k in 0..<shape[2] {
-                    values.append(ptr[jBase + k * strides[2]])
-                    if values.count == limit { break outer }
-                }
-            }
-        }
-    default:
-        for offset in 0..<limit {
-            let index = multiIndex(offset: offset, shape: shape).map { $0.intValue }
-            var physicalOffset = 0
-            for i in 0..<min(index.count, strides.count) {
-                physicalOffset += index[i] * strides[i]
-            }
-            values.append(ptr[physicalOffset])
+            values.append(convert(ptr[physicalOffset]))
         }
     }
 
@@ -274,9 +232,18 @@ public func alignTokenMajorToFrames(
     channels: Int,
     frameCount: Int
 ) throws -> MLMultiArray {
+    let sourceShape = source.shape.map { $0.intValue }
+    guard sourceShape.count >= 3, sourceShape[0] == 1,
+          sourceShape[2] == channels else {
+        throw PipelineValidationError.invalidArrayShape(
+            operation: "alignTokenMajorToFrames",
+            expected: "(1, tokens, \(channels))",
+            actual: sourceShape
+        )
+    }
     let result = try makeZeroArray3D(channels: channels, time: frameCount)
     let dstPtr = result.dataPointer.assumingMemoryBound(to: Float.self)
-    let tokenCount = min(predDur.count, source.shape[1].intValue)
+    let tokenCount = min(predDur.count, sourceShape[1])
     let strides = source.strides.map { $0.intValue }
     let canUsePointer = source.dataType == .float32 && strides.count >= 3
 
@@ -328,9 +295,18 @@ public func alignChannelMajorToFrames(
     channels: Int,
     frameCount: Int
 ) throws -> MLMultiArray {
+    let sourceShape = source.shape.map { $0.intValue }
+    guard sourceShape.count >= 3, sourceShape[0] == 1,
+          sourceShape[1] == channels else {
+        throw PipelineValidationError.invalidArrayShape(
+            operation: "alignChannelMajorToFrames",
+            expected: "(1, \(channels), tokens)",
+            actual: sourceShape
+        )
+    }
     let result = try makeZeroArray3D(channels: channels, time: frameCount)
     let dstPtr = result.dataPointer.assumingMemoryBound(to: Float.self)
-    let tokenCount = min(predDur.count, source.shape[2].intValue)
+    let tokenCount = min(predDur.count, sourceShape[2])
     let strides = source.strides.map { $0.intValue }
     let canUsePointer = source.dataType == .float32 && strides.count >= 3
 

@@ -52,6 +52,9 @@ public enum PipelineConstants {
         3: 120, 7: 280, 10: 400, 15: 600, 30: 1200, 45: 1800,
     ]
 
+    /// Default bucket seconds used by the bakeoff and runtime package set.
+    public static let defaultBuckets: [Int] = [3, 7, 10, 15, 30]
+
     /// Duration model enumerated token sizes. Caller pads to nearest.
     public static let durationTokenSizes: [Int] = [32, 64, 128, 256, 512]
 }
@@ -92,14 +95,38 @@ public struct SynthesisResult {
     public let bucketSeconds: Int
     /// Audio duration in seconds (from F0 frame count).
     public let audioDurationSeconds: Double
+    /// Timed wall-clock span for the synthesis executor.
+    public let wallTimeSeconds: Double
+    /// Sum of positive duration frames used for frame-domain expansion.
+    public let predictedDurationFrames: Int
+    /// Number of valid duration tokens read from the model output.
+    public let predictedDurationTokens: Int
+    /// Cache key of the selected Duration model package.
+    public let durationModelCacheKey: String
+    /// Whether the selected Duration package permits padding.
+    public let durationModelAllowsPadding: Bool
+    /// Static token length of the selected Duration package.
+    public let durationTokenLength: Int
+    /// F0Ntrain static frame count for the selected bucket.
+    public let tFrames: Int
+    /// Full bucket F0 length after 300 Hz upsampling geometry.
+    public let fullF0Length: Int
+    /// DecoderPre ASR frame count for the selected bucket.
+    public let decoderFrameCount: Int
+    /// Static `x_pre` time dimension expected by the generator model.
+    public let xPreExpectedTime: Int
+    /// Static harmonic source time dimension expected by the generator model.
+    public let harExpectedTime: Int
+    /// Number of audio samples retained after trimming.
+    public let trimSampleCount: Int
 }
 
-private struct DurationModelChoice {
-    let cacheKey: String
-    let tokenLength: Int
-    let packageURL: URL
-    let requiresAttentionMask: Bool
-    let allowsPadding: Bool
+public struct DurationModelChoice {
+    public let cacheKey: String
+    public let tokenLength: Int
+    public let packageURL: URL
+    public let requiresAttentionMask: Bool
+    public let allowsPadding: Bool
 }
 
 // MARK: - Pipeline
@@ -114,7 +141,7 @@ private struct DurationModelChoice {
 /// ``MLModel.compileModel`` synchronously. On first run this can take
 /// hundreds of milliseconds per model. For app integration, call init
 /// on a background thread or use pre-compiled ``.mlmodelc`` bundles.
-public class KokoroPipeline {
+public class KokoroPipeline: KokoroModelProvider {
     private let durationModels: [String: MLModel] // keyed by DurationModelChoice.cacheKey
     private let durationChoices: [DurationModelChoice]
     private let f0ntrainModels: [Int: MLModel]  // keyed by T_frames
@@ -141,7 +168,7 @@ public class KokoroPipeline {
     /// ``.mlmodelc`` bundles to avoid blocking the main thread.
     public init(
         modelsDirectory: URL,
-        buckets: [Int] = [3, 7, 10, 15, 30],
+        buckets: [Int] = PipelineConstants.defaultBuckets,
         linearWeights: [Float],
         linearBias: Float
     ) throws {
@@ -220,231 +247,24 @@ public class KokoroPipeline {
         refS: [Float],
         speed: Float = 1.0
     ) throws -> SynthesisResult {
-        var timings = StageTimings()
-
-        // ---- Stage 1: Duration CoreML ----
-        let t0 = CFAbsoluteTimeGetCurrent()
-        let durationChoice = try selectDurationModel(
-            inputIds: inputIds,
-            attentionMask: attentionMask
-        )
-        guard let durationModel = durationModels[durationChoice.cacheKey] else {
-            throw PipelineError.modelNotLoaded(durationChoice.cacheKey)
-        }
-        let durInput = try buildDurationInput(
-            inputIds: inputIds,
-            attentionMask: attentionMask,
-            refS: refS,
-            speed: speed,
-            choice: durationChoice
-        )
-        let durOutput = try durationModel.prediction(from: durInput)
-        let t1 = CFAbsoluteTimeGetCurrent()
-        timings.durationCoreML = t1 - t0
-
-        // Extract duration model outputs.
-        // Note: Duration model also outputs "ref_s_out" (a passthrough of the input ref_s,
-        // renamed to avoid CoreML aliasing — see export_duration.py:111). We use the caller's
-        // refS directly instead, since ref_s_out is just ref_s + zeros_like(ref_s).
-        let predDurArray = durOutput.featureValue(for: "pred_dur")!.multiArrayValue!
-        let dArray = durOutput.featureValue(for: "d")!.multiArrayValue!
-        let tEnArray = durOutput.featureValue(for: "t_en")!.multiArrayValue!
-
-        // Parse only non-padding token durations. The static Core ML model
-        // returns a full T-sized integer tensor; padded positions must not
-        // contribute one frame each.
-        let tokenCount = predDurArray.shape.last!.intValue
-        let validTokenCount = min(tokenCount, attentionMask.reduce(0) { $0 + ($1 == 0 ? 0 : 1) })
-        let predDur = try readDurationFrames(from: predDurArray, validCount: validTokenCount)
-        let totalFrames = predDur.reduce(0, +)
-        let totalSeconds = Double(totalFrames * 2) / PipelineConstants.f0FrameRate
-
-        // ---- Stage 2: Alignment metadata ----
-        // The frame-domain expansion happens directly in Stage 3. Avoid
-        // materializing the sparse one-hot matrix on the hot path.
-        let t2 = CFAbsoluteTimeGetCurrent()
-        let t3 = CFAbsoluteTimeGetCurrent()
-        timings.alignment = t3 - t2
-
-        // ---- Stage 3: Matrix ops (direct token-vector expansion) ----
-        let t4 = CFAbsoluteTimeGetCurrent()
-        // The old path built a one-hot alignment matrix and ran dense GEMMs.
-        // Since every frame is just one repeated token vector, direct expansion
-        // is equivalent and much cheaper for long utterances.
-        let en = try alignTokenMajorToFrames(
-            source: dArray,
-            predDur: predDur,
-            channels: PipelineConstants.hiddenDim,
-            frameCount: totalFrames
-        )
-        let asr = try alignChannelMajorToFrames(
-            source: tEnArray,
-            predDur: predDur,
-            channels: PipelineConstants.textEncoderDim,
-            frameCount: totalFrames
-        )
-        let t5 = CFAbsoluteTimeGetCurrent()
-        timings.matrixOps = t5 - t4
-
-        // ---- Stage 4: F0Ntrain CoreML ----
-        let t6 = CFAbsoluteTimeGetCurrent()
-        // Select bucket
-        guard let bucketSec = selectBucket(totalSeconds: totalSeconds, availableBuckets: availableBuckets) else {
-            throw PipelineError.noBucketAvailable
-        }
-        guard let tFrames = PipelineConstants.tFramesForBucket[bucketSec],
-              let f0nModel = f0ntrainModels[tFrames] else {
-            throw PipelineError.modelNotLoaded("f0ntrain_t\(PipelineConstants.tFramesForBucket[bucketSec] ?? 0)")
-        }
-
-        // Pad en to F0Ntrain's expected T dimension
-        let enPadded = try zeroPad3D(source: en, channels: PipelineConstants.hiddenDim, targetTime: tFrames)
-
-        // Style embedding: s = ref_s[128:]
-        let sArray = try makeZeroArray2D(dim: PipelineConstants.styleDim)
-        let sPtr = sArray.dataPointer.assumingMemoryBound(to: Float.self)
-        for i in 0..<PipelineConstants.styleDim {
-            sPtr[i] = refS[PipelineConstants.baselineDim + i]
-        }
-
-        let f0nInput = try MLDictionaryFeatureProvider(dictionary: [
-            "en": MLFeatureValue(multiArray: enPadded),
-            "s": MLFeatureValue(multiArray: sArray),
-        ])
-        let f0nOutput = try f0nModel.prediction(from: f0nInput)
-        let f0PredArray = f0nOutput.featureValue(for: "F0_pred")!.multiArrayValue!
-        let nPredArray = f0nOutput.featureValue(for: "N_pred")!.multiArrayValue!
-        let t7 = CFAbsoluteTimeGetCurrent()
-        timings.f0ntrainCoreML = t7 - t6
-
-        // Extract F0/N as flat arrays. Core ML outputs can be strided just like
-        // waveform outputs, so flatten through indexed access rather than raw
-        // pointer traversal.
-        let f0Curve = floatValues(from: f0PredArray)
-        let nCurve = floatValues(from: nPredArray)
-
-        // ---- Stage 5: Padding to bucket geometry ----
-        let t8 = CFAbsoluteTimeGetCurrent()
-        let bucketSamples = bucketSec * PipelineConstants.sampleRate
-        let fullF0Len = Int(round(Double(bucketSamples) / Double(HarmonicConstants.upsampleScale)))
-        // Pad F0 and N to full_f0_len
-        let f0Padded = zeroPad1D(source: f0Curve, targetLength: fullF0Len)
-        let t9 = CFAbsoluteTimeGetCurrent()
-        timings.padding = t9 - t8
-
-        // ---- Stage 6: DecoderPre CoreML ----
-        let t10 = CFAbsoluteTimeGetCurrent()
-        guard let decPreModel = decoderPreModels[bucketSec] else {
-            throw PipelineError.modelNotLoaded("decoder_pre_\(bucketSec)s")
-        }
-
-        // Build DecoderPre inputs: asr (padded), f0 (as 3D), n (as 3D), ref_s
-        let asrPadded = try zeroPad3D(source: asr, channels: PipelineConstants.textEncoderDim, targetTime: decPreFrameCount(bucketSec: bucketSec))
-
-        // F0 and N as (1, 1, full_f0_len) for DecoderPre Conv1d input
-        let f0Array3D = try makeZeroArray3D(channels: 1, time: fullF0Len)
-        copyInto(array: f0Array3D, from: f0Padded)
-        let nPadded = zeroPad1D(source: nCurve, targetLength: fullF0Len)
-        let nArray3D = try makeZeroArray3D(channels: 1, time: fullF0Len)
-        copyInto(array: nArray3D, from: nPadded)
-
-        let refSArray = try makeZeroArray2D(dim: PipelineConstants.voiceEmbeddingDim)
-        let refSPtr = refSArray.dataPointer.assumingMemoryBound(to: Float.self)
-        for i in 0..<PipelineConstants.voiceEmbeddingDim {
-            refSPtr[i] = refS[i]
-        }
-
-        let decPreInput = try MLDictionaryFeatureProvider(dictionary: [
-            "asr": MLFeatureValue(multiArray: asrPadded),
-            "f0": MLFeatureValue(multiArray: f0Array3D),
-            "n_input": MLFeatureValue(multiArray: nArray3D),
-            "ref_s": MLFeatureValue(multiArray: refSArray),
-        ])
-        let decPreOutput = try decPreModel.prediction(from: decPreInput)
-        let xPre = decPreOutput.featureValue(for: "x_pre")!.multiArrayValue!
-        let t11 = CFAbsoluteTimeGetCurrent()
-        timings.decoderPre = t11 - t10
-
-        // ---- Stage 7: hn-nsf (Swift/Accelerate) ----
-        let t12 = CFAbsoluteTimeGetCurrent()
-        let (harFlat, harFrames) = buildHar(
-            f0Padded: f0Padded,
+        var tensorDump: TensorDumpWriter? = nil
+        return try executeKokoroSynthesis(
+            request: KokoroSynthesisRequest(
+                inputIds: inputIds,
+                attentionMask: attentionMask,
+                refS: refS,
+                speed: speed
+            ),
+            modelProvider: self,
             linearWeights: linearWeights,
             linearBias: linearBias,
-            seed: 42 // Deterministic for benchmarks
-        )
-        let t13 = CFAbsoluteTimeGetCurrent()
-        timings.hnsfSwift = t13 - t12
-
-        // ---- Stage 8: GeneratorFromHar CoreML ----
-        let t14 = CFAbsoluteTimeGetCurrent()
-        guard let genModel = generatorModels[bucketSec] else {
-            throw PipelineError.modelNotLoaded("decoder_har_post_\(bucketSec)s")
-        }
-
-        // Build har MLMultiArray
-        let harArray = try makeZeroArray3D(channels: HarmonicConstants.harChannels, time: harFrames)
-        copyInto(array: harArray, from: harFlat)
-
-        // ref_s as MLMultiArray (reuse for GeneratorFromHar)
-        let genRefSArray = try makeZeroArray2D(dim: PipelineConstants.voiceEmbeddingDim)
-        let genRefSPtr = genRefSArray.dataPointer.assumingMemoryBound(to: Float.self)
-        for i in 0..<PipelineConstants.voiceEmbeddingDim {
-            genRefSPtr[i] = refS[i]
-        }
-
-        // Read expected shapes from model
-        let genShapes = inputShapes(from: genModel)
-        let xPreExpectedTime = genShapes["x_pre"]?.last ?? xPre.shape.last!.intValue
-        let harExpectedTime = genShapes["har"]?.last ?? harFrames
-
-        // Pad x_pre and har to model-expected dimensions if needed
-        let xPrePadded = try zeroPad3D(
-            source: xPre,
-            channels: xPre.shape[1].intValue,
-            targetTime: xPreExpectedTime
-        )
-        let harPadded = try zeroPad3D(
-            source: harArray,
-            channels: HarmonicConstants.harChannels,
-            targetTime: harExpectedTime
-        )
-
-        let genInput = try MLDictionaryFeatureProvider(dictionary: [
-            "x_pre": MLFeatureValue(multiArray: xPrePadded),
-            "ref_s": MLFeatureValue(multiArray: genRefSArray),
-            "har": MLFeatureValue(multiArray: harPadded),
-        ])
-        let genOutput = try genModel.prediction(from: genInput)
-        let t15 = CFAbsoluteTimeGetCurrent()
-        timings.generatorCoreML = t15 - t14
-
-        // ---- Stage 9: Trim ----
-        let t16 = CFAbsoluteTimeGetCurrent()
-        let waveformKey = genOutput.featureNames.contains("waveform") ? "waveform" : genOutput.featureNames.first!
-        let waveformArray = genOutput.featureValue(for: waveformKey)!.multiArrayValue!
-
-        // Trim to natural utterance length: T_f0 / 80.0 * 24000
-        // T_f0 is the ORIGINAL (unpadded) F0 length = totalFrames * 2 (from F0Ntrain 2x upsample)
-        let originalF0Len = totalFrames * 2  // F0Ntrain doubles the frame count
-        let targetLen = Int(round(Double(originalF0Len) / PipelineConstants.f0FrameRate * Double(PipelineConstants.sampleRate)))
-        let trimLen = min(waveformArray.count, targetLen)
-
-        let audio = floatValues(from: waveformArray, limit: trimLen)
-        let t17 = CFAbsoluteTimeGetCurrent()
-        timings.trim = t17 - t16
-
-        return SynthesisResult(
-            audio: audio,
-            timings: timings,
-            bucketSeconds: bucketSec,
-            audioDurationSeconds: Double(originalF0Len) / PipelineConstants.f0FrameRate
+            tensorDump: &tensorDump
         )
     }
 
     // MARK: - Private Helpers
 
-    private static func discoverDurationChoices(modelsDirectory: URL) -> [DurationModelChoice] {
+    public static func discoverDurationChoices(modelsDirectory: URL) -> [DurationModelChoice] {
         var choices: [DurationModelChoice] = []
         let fm = FileManager.default
 
@@ -505,86 +325,64 @@ public class KokoroPipeline {
         }
     }
 
-    /// Compute the ASR frame count for DecoderPre's expected input shape.
-    ///
-    /// Matches ``conv1d_output_length_from_module(full_f0_len, dec.F0_conv)``
-    /// where F0_conv has kernel=3, stride=2, padding=1.
-    /// Formula: ``(full_f0_len + 2*padding - kernel) / stride + 1 = (L + 1) / 2``
-    private func decPreFrameCount(bucketSec: Int) -> Int {
-        let bucketSamples = bucketSec * PipelineConstants.sampleRate
-        let fullF0Len = Int(round(Double(bucketSamples) / Double(HarmonicConstants.upsampleScale)))
-        // Conv1d(k=3, s=2, p=1): output = (input + 2*1 - 3) / 2 + 1 = (input - 1) / 2 + 1
-        return (fullF0Len - 1) / 2 + 1
-    }
-
-    private func buildDurationInput(
-        inputIds: [Int32],
-        attentionMask: [Int32],
-        refS: [Float],
-        speed: Float,
-        choice: DurationModelChoice
-    ) throws -> MLDictionaryFeatureProvider {
-        let T = choice.tokenLength
-
-        let idsArray = try MLMultiArray(shape: [1, NSNumber(value: T)], dataType: .int32)
-        let maskArray = choice.requiresAttentionMask
-            ? try MLMultiArray(shape: [1, NSNumber(value: T)], dataType: .int32)
-            : nil
-        let refSArray = try makeZeroArray2D(dim: PipelineConstants.voiceEmbeddingDim)
-        let speedArray = try MLMultiArray(shape: [1], dataType: .float32)
-
-        let idsPtr = idsArray.dataPointer.assumingMemoryBound(to: Int32.self)
-        let refSPtr = refSArray.dataPointer.assumingMemoryBound(to: Float.self)
-
-        for i in 0..<min(inputIds.count, T) {
-            idsPtr[i] = inputIds[i]
-        }
-        if let maskArray {
-            let maskPtr = maskArray.dataPointer.assumingMemoryBound(to: Int32.self)
-            for i in 0..<min(attentionMask.count, T) {
-                maskPtr[i] = attentionMask[i]
-            }
-        }
-        for i in 0..<min(refS.count, PipelineConstants.voiceEmbeddingDim) {
-            refSPtr[i] = refS[i]
-        }
-        speedArray[0] = NSNumber(value: speed)
-
-        var features: [String: MLFeatureValue] = [
-            "input_ids": MLFeatureValue(multiArray: idsArray),
-            "ref_s": MLFeatureValue(multiArray: refSArray),
-            "speed": MLFeatureValue(multiArray: speedArray),
-        ]
-        if let maskArray {
-            features["attention_mask"] = MLFeatureValue(multiArray: maskArray)
-        }
-        return try MLDictionaryFeatureProvider(dictionary: features)
-    }
-
-    private func selectDurationModel(
-        inputIds: [Int32],
-        attentionMask: [Int32]
+    public static func selectDurationChoice(
+        _ choices: [DurationModelChoice],
+        actualTokens: Int
     ) throws -> DurationModelChoice {
-        let maskedTokenCount = attentionMask.reduce(0) { $0 + ($1 == 0 ? 0 : 1) }
-        let requestedTokenCount = maskedTokenCount > 0 ? maskedTokenCount : inputIds.count
-
-        if let exact = durationChoices.first(where: {
-            !$0.allowsPadding && $0.tokenLength == requestedTokenCount
+        if let exact = choices.first(where: {
+            !$0.allowsPadding && $0.tokenLength == actualTokens
         }) {
             return exact
         }
 
-        if let padded = durationChoices.first(where: {
-            $0.allowsPadding && requestedTokenCount <= $0.tokenLength
+        if let padded = choices.first(where: {
+            $0.allowsPadding && actualTokens <= $0.tokenLength
         }) {
             return padded
         }
 
         throw PipelineError.inputTooLong(
-            tokens: requestedTokenCount,
-            maxTokens: durationChoices.map { $0.tokenLength }.max() ?? 0
+            tokens: actualTokens,
+            maxTokens: choices.map { $0.tokenLength }.max() ?? 0
         )
     }
+
+    public func durationModelChoices() -> [DurationModelChoice] {
+        durationChoices
+    }
+
+    public func availableBucketSeconds() -> [Int] {
+        availableBuckets
+    }
+
+    public func durationModel(choice: DurationModelChoice) throws -> MLModel {
+        guard let model = durationModels[choice.cacheKey] else {
+            throw PipelineError.modelNotLoaded(choice.cacheKey)
+        }
+        return model
+    }
+
+    public func f0ntrainModel(tFrames: Int) throws -> MLModel {
+        guard let model = f0ntrainModels[tFrames] else {
+            throw PipelineError.modelNotLoaded("f0ntrain_t\(tFrames)")
+        }
+        return model
+    }
+
+    public func decoderPreModel(bucketSec: Int) throws -> MLModel {
+        guard let model = decoderPreModels[bucketSec] else {
+            throw PipelineError.modelNotLoaded("decoder_pre_\(bucketSec)s")
+        }
+        return model
+    }
+
+    public func generatorModel(bucketSec: Int) throws -> MLModel {
+        guard let model = generatorModels[bucketSec] else {
+            throw PipelineError.modelNotLoaded("decoder_har_post_\(bucketSec)s")
+        }
+        return model
+    }
+
 }
 
 // MARK: - Errors

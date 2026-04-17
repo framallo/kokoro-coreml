@@ -5,10 +5,12 @@ April 17, 2026
 ## Scope
 
 This note records the current corrected bakeoff series after the Config F
-host-materialization fix. It is intentionally conservative: only the M2 Ultra
-numbers are populated here because they come from the completed controlled run
-on this checkout. The M2 Air and M1 Mini sections are placeholders until those
-machines rerun the same setup and harness.
+host-materialization fix and supersedes the archived v1 comparison for current
+performance claims. It is intentionally conservative: only the M2 Ultra numbers
+are populated here because they come from the completed controlled run on the
+working tree used during this session. The result JSON records `git_dirty: true`
+because it was collected before the final cleanup commit; the M2 Air and M1 Mini
+sections are placeholders until those machines rerun the same setup and harness.
 
 The useful rule from the latest debugging pass is simple: measure the deployed
 pipeline boundary, not an attractive subgraph. Config F wins on M2 Ultra only
@@ -138,7 +140,7 @@ M2 Ultra command used for the recorded run:
 
 ```bash
 BAKEOFF_SKIP_SMOKE=1 PYTORCH_ENABLE_MPS_FALLBACK=1 \
-uv run python scripts/bakeoff_harness.py run \
+uv run --no-sync python scripts/bakeoff_harness.py run \
   --configs a,d,e,f \
   --iterations 5 \
   --order-seed 0 \

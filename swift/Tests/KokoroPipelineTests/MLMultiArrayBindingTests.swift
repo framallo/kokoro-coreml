@@ -47,6 +47,92 @@ final class MLMultiArrayBindingTests: XCTestCase {
         XCTAssertEqual(floatValues(from: arr), [1.0, 2.0, 3.0])
     }
 
+    func testFloatValuesHonorsLimitForContiguousArray() throws {
+        let arr = try MLMultiArray(shape: [1, 4], dataType: .float32)
+        let ptr = arr.dataPointer.assumingMemoryBound(to: Float.self)
+        [7.0, 8.0, 9.0, 10.0].enumerated().forEach { idx, value in
+            ptr[idx] = Float(value)
+        }
+
+        XCTAssertEqual(floatValues(from: arr, limit: 0), [])
+        XCTAssertEqual(floatValues(from: arr, limit: 2), [7.0, 8.0])
+        XCTAssertEqual(floatValues(from: arr, limit: 10), [7.0, 8.0, 9.0, 10.0])
+    }
+
+    func testFloatValuesReadsLogicalOrderForStridedFloat16Array() throws {
+        let storage = UnsafeMutablePointer<Float16>.allocate(capacity: 6)
+        for idx in 0..<6 {
+            storage[idx] = Float16(-100.0 - Float(idx))
+        }
+        storage[0] = Float16(1.25)
+        storage[2] = Float16(-0.5)
+        storage[4] = Float16(3.5)
+
+        let arr = try MLMultiArray(
+            dataPointer: UnsafeMutableRawPointer(storage),
+            shape: [1, 3],
+            dataType: .float16,
+            strides: [6, 2],
+            deallocator: { pointer in
+                pointer.deallocate()
+            }
+        )
+
+        XCTAssertEqual(floatValues(from: arr), [1.25, -0.5, 3.5])
+        XCTAssertEqual(floatValues(from: arr, limit: 2), [1.25, -0.5])
+    }
+
+    func testAlignTokenMajorToFramesRepeatsTokensWithoutAlignmentMatrix() throws {
+        let source = try makeFloatArray(
+            shape: [1, 3, 2],
+            values: [
+                10.0, 100.0,
+                20.0, 200.0,
+                30.0, 300.0,
+            ]
+        )
+
+        let aligned = try alignTokenMajorToFrames(
+            source: source,
+            predDur: [1, 2, 1],
+            channels: 2,
+            frameCount: 4
+        )
+
+        XCTAssertEqual(floatValues(from: aligned), [10.0, 20.0, 20.0, 30.0, 100.0, 200.0, 200.0, 300.0])
+    }
+
+    func testAlignChannelMajorToFramesRepeatsTokensWithoutAlignmentMatrix() throws {
+        let source = try makeFloatArray(
+            shape: [1, 2, 3],
+            values: [
+                1.0, 2.0, 3.0,
+                10.0, 20.0, 30.0,
+            ]
+        )
+
+        let aligned = try alignChannelMajorToFrames(
+            source: source,
+            predDur: [1, 2, 1],
+            channels: 2,
+            frameCount: 4
+        )
+
+        XCTAssertEqual(floatValues(from: aligned), [1.0, 2.0, 2.0, 3.0, 10.0, 20.0, 20.0, 30.0])
+    }
+
+    func testAlignHelpersRejectWrongChannelShape() throws {
+        let tokenMajor = try makeFloatArray(shape: [1, 2, 3], values: [1, 2, 3, 4, 5, 6])
+        XCTAssertThrowsError(
+            try alignTokenMajorToFrames(source: tokenMajor, predDur: [1, 1], channels: 2, frameCount: 2)
+        )
+
+        let channelMajor = try makeFloatArray(shape: [1, 3, 2], values: [1, 2, 3, 4, 5, 6])
+        XCTAssertThrowsError(
+            try alignChannelMajorToFrames(source: channelMajor, predDur: [1, 1], channels: 2, frameCount: 2)
+        )
+    }
+
     func testValidateDurationAgreementRejectsHalfLengthAudio() throws {
         XCTAssertThrowsError(
             try validateDurationAgreement(inputKey: "15s", canonical: 13.9, observed: 6.4)
