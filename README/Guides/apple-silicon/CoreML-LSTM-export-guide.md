@@ -7,6 +7,7 @@ April 16, 2026
 ## Related Documentation
 
 - **[Core ML compute unit scheduling](CoreML-Compute-Unit-Scheduling-guide.md)**: `MLComputeUnits`, silent ANE fallback, powermetrics, Instruments, and LLDB.
+- **[LSTM enumerated shapes and ANE (deep dive)](CoreML-LSTM-Enumerated-Shapes.md)**: TorchScript vs MIL, `RangeDim` vs `EnumeratedShapes`, Netron, profiling, Swift `MLMultiArray` wiring.
 - **[PyTorch MPS and Core ML field guide](pytorch-mps.md)**: Training and conversion context on Apple Silicon.
 - **[Core ML conversion field manual](../../coreml-conversion-guide.md)** (`README/`): `ct.convert` checklist, ANE pitfalls, profiling cues.
 - **Institutional notes:** [debug-notes.md](../../Notes/debug-notes.md) — bidirectional LSTM, right-padding, and mask-aware export experiments for this repo’s duration path.
