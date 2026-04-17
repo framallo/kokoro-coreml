@@ -387,15 +387,20 @@ class ConfigAContext:
                 self.unavailable_reason = f"HAR-post {sec}s artifact not found: {path}"
                 return
 
-        # Full pipeline init — loads PyTorch + auto-discovers CoreML.
-        self.pipe = HybridTTSPipeline()
+        # Config A only needs the PyTorch prefix plus the HAR-post buckets
+        # below.  Do not let HybridTTSPipeline auto-discover every Core ML
+        # package in coreml/: stale diagnostic packages can spend minutes in
+        # Core ML AOT compilation before the benchmark even reaches its
+        # availability summary.
+        self.pipe = HybridTTSPipeline(force_engine="pytorch")
 
         # Override with explicit loads of all 5 buckets so Config A uses the
         # same bucket set as Config F (fair comparison).
         self.pipe.coreml_decoder_har_post_buckets = {
-            sec: ct.models.MLModel(path)
+            sec: ct.models.MLModel(path, compute_units=ct.ComputeUnit.ALL)
             for sec, path in HAR_POST_BUCKETS.items()
         }
+        self.pipe.use_coreml = True
 
         # Record artifact metadata.
         for sec, path in HAR_POST_BUCKETS.items():

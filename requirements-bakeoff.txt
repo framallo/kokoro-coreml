@@ -5,3 +5,8 @@
 # Delta pins: lock transitive deps that requirements-export.txt leaves unpinned.
 huggingface_hub==0.28.1
 loguru==0.7.3
+
+# Setup verification runs pytest, and uv sync can remove pip from the venv on
+# fresh machines unless the bakeoff bootstrap reinstalls it explicitly.
+pytest
+pip

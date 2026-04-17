@@ -38,6 +38,241 @@ Inputs used:
 - `tiny`: `"Hello world!"`
 - `long`: bakeoff-style longer sentence routed to the 10s HAR-post bucket
 
+## Bakeoff v9: Config F host-materialization fix on M2 Ultra
+
+**First collected:** 2026-04-17
+**Status:** Complete
+
+### Summary
+
+Reran the full counterbalanced A/D/E/F bakeoff after fixing Config F's Swift
+host-side materialization costs. F now beats the fixed Config A HAR-post path at
+every canonical input length. The long-form loss in v8 was not the exact
+Duration graph; it was two avoidable Swift/MLMultiArray costs after Core ML
+prediction:
+
+- building a sparse one-hot alignment matrix and multiplying through zeros
+- extracting a strided `Float16` waveform through boxed `MLMultiArray`
+  subscripting during trim
+
+Config F now expands token states to frames directly and reads typed
+`MLMultiArray` storage with stride-aware `Float32`/`Float16` paths. Tensor dumps
+still materialize the full alignment/waveform only when requested.
+
+### End-to-end wall time (warm median, milliseconds)
+
+| Input | Audio | A (Python HAR) | D (MPS) | E (CPU) | F (Swift) |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| 3s | 2.80s | 333 ms | 225 ms | 409 ms | **57 ms** |
+| 7s | 6.75s | 329 ms | 412 ms | 811 ms | **124 ms** |
+| 15s | 13.90s | 486 ms | 673 ms | 1467 ms | **239 ms** |
+| 30s | 27.38s | 870 ms | 1602 ms | 2714 ms | **476 ms** |
+
+### RTF
+
+| Input | A RTF | D RTF | E RTF | F RTF |
+| --- | ---: | ---: | ---: | ---: |
+| 3s | 0.119 | 0.080 | 0.146 | **0.020** |
+| 7s | 0.049 | 0.061 | 0.120 | **0.018** |
+| 15s | 0.035 | 0.048 | 0.106 | **0.017** |
+| 30s | 0.032 | 0.059 | 0.099 | **0.017** |
+
+### Speedup: Config F vs baselines
+
+| Input | F vs A (Python HAR) | F vs D (MPS) | F vs E (CPU) |
+| --- | ---: | ---: | ---: |
+| 3s | **5.9x** | **4.0x** | **7.2x** |
+| 7s | **2.7x** | **3.3x** | **6.5x** |
+| 15s | **2.0x** | **2.8x** | **6.1x** |
+| 30s | **1.8x** | **3.4x** | **5.7x** |
+
+### Config F stage medians
+
+| Input | Duration | F0Ntrain | DecoderPre | Matrix | hn-sf | Trim | Core ML total |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| 3s | 10.0 ms | 4.4 ms | 2.8 ms | 0.1 ms | 9.3 ms | 0.2 ms | 28.5 ms |
+| 7s | 14.3 ms | 18.9 ms | 8.3 ms | 0.3 ms | 23.1 ms | 0.4 ms | 56.6 ms |
+| 15s | 28.8 ms | 38.5 ms | 9.7 ms | 0.7 ms | 46.9 ms | 0.7 ms | 111.6 ms |
+| 30s | 52.1 ms | 76.8 ms | 16.6 ms | 1.4 ms | 99.6 ms | 1.6 ms | 224.7 ms |
+
+### Before/after bottleneck proof
+
+| Config F stage | v8 30s median | v9 30s median | Change |
+| --- | ---: | ---: | ---: |
+| Matrix/materialization | 125.5 ms | 1.4 ms | 90x faster |
+| Trim/waveform extraction | 449.1 ms | 1.6 ms | 281x faster |
+| End-to-end wall | 1025 ms | 476 ms | 2.2x faster |
+
+### Config F exact Duration proof
+
+| Input | Duration model | Predicted frames |
+| --- | --- | ---: |
+| 3s | `exact_t44` | `112` |
+| 7s | `exact_t105` | `270` |
+| 15s | `exact_t219` | `556` |
+| 30s | `exact_t476` | `1095` |
+
+### Audio gate
+
+The regenerated F listen samples passed the waveform health gate and remain
+available under `outputs/bakeoff/listen/`:
+
+| Sample | Duration | RMS | Active32 | ZCR | Decision |
+| --- | ---: | ---: | ---: | ---: | --- |
+| `config_f_3s.wav` | 2.800s | 4600.6 | 78.821% | 9.116% | `needs_listening` |
+| `config_f_7s.wav` | 6.750s | 4661.0 | 84.963% | 10.037% | `needs_listening` |
+| `config_f_15s.wav` | 13.900s | 5200.3 | 86.447% | 10.781% | `needs_listening` |
+| `config_f_30s.wav` | 27.375s | 4301.8 | 86.326% | 10.974% | `needs_listening` |
+
+### Interpretation
+
+1. **F now beats A at every tested length.** In the full controlled run, F is
+   `1.8-5.9x` faster than the fixed HAR-post Config A path.
+2. **The v8 long-form loss was host work, not model work.** Exact Duration
+   remains `10-52 ms`; the old 30s loss came mostly from matrix and trim
+   materialization.
+3. **Typed, stride-aware access matters.** The Swift waveform output is a
+   strided `Float16` `MLMultiArray`, so a contiguous `Float32` fast path alone
+   does not help trim.
+4. **Load-time Core ML warnings are separate from timed medians.** The combined
+   run still emitted occasional `manifest.plist` load warnings while Core ML
+   revalidated compiled assets, but the subprocess exited cleanly and produced
+   80/80 ok records.
+
+### Provenance
+
+- Machine: Apple M2 Ultra Mac Studio, 64 GB
+- Full command: `BAKEOFF_SKIP_SMOKE=1 PYTORCH_ENABLE_MPS_FALLBACK=1 uv run python scripts/bakeoff_harness.py run --configs a,d,e,f --iterations 5 --order-seed 0 --machine-id m2_ultra_parity_final_20260417`
+- Result: `outputs/bakeoff/results_m2_ultra_parity_final_20260417.json`
+- F-only confirmation: `outputs/bakeoff/results_m2_ultra_f_stride_float16_final_20260417.json`
+- Listen samples:
+  - `outputs/bakeoff/listen/config_f_3s.wav`
+  - `outputs/bakeoff/listen/config_f_7s.wav`
+  - `outputs/bakeoff/listen/config_f_15s.wav`
+  - `outputs/bakeoff/listen/config_f_30s.wav`
+- Quality report: `outputs/bakeoff/listen/quality/audio_quality_summary.md`
+- Order seed: 0, iterations: 5
+
+## Bakeoff v8: Exact Duration rerun on M2 Ultra
+
+**First collected:** 2026-04-16
+**Completed:** 2026-04-17
+**Status:** Complete; superseded by v9 for Config F performance
+
+### Summary
+
+Reran the bakeoff after integrating exact fixed-shape native Duration packages
+into the normal export/setup flow. The first combined `a,d,e,f` run exposed a
+Config A setup bug: A initialized `HybridTTSPipeline()` and auto-loaded every
+Core ML package discoverable under `coreml/`, then loaded the HAR-post buckets
+again explicitly. That made A spend minutes in unrelated Core ML AOT
+respecialization before benchmark availability output.
+
+The harness now initializes Config A with `HybridTTSPipeline(force_engine="pytorch")`
+and explicitly loads only the intended HAR-post bucket set with
+`compute_units=ALL`. Config A, D, E, and F all completed 20/20 ok records.
+Config F uses exact native Duration packages for all canonical inputs and keeps
+the corrected frame counts: `112`, `270`, `556`, and `1095`. The v8 long-form
+loss was later traced to Swift host materialization and fixed in v9.
+
+### End-to-end wall time (warm median, milliseconds)
+
+| Input | Audio | A (Python HAR) | D (MPS) | E (CPU) | F (Swift) |
+| --- | --- | ---: | ---: | ---: | ---: |
+| 3s | 2.80s | 180 ms | 208 ms | 461 ms | **111 ms** |
+| 7s | 6.75s | 266 ms | 381 ms | 781 ms | **250 ms** |
+| 15s | 13.90s | **450 ms** | 736 ms | 1470 ms | 518 ms |
+| 30s | 27.38s | **786 ms** | 1628 ms | 2604 ms | 1025 ms |
+
+### RTF
+
+| Input | A RTF | D RTF | E RTF | F RTF |
+| --- | ---: | ---: | ---: | ---: |
+| 3s | 0.064 | 0.074 | 0.165 | **0.040** |
+| 7s | 0.039 | 0.056 | 0.116 | **0.037** |
+| 15s | **0.032** | 0.053 | 0.106 | 0.037 |
+| 30s | **0.029** | 0.059 | 0.095 | 0.037 |
+
+### Config A stage medians
+
+| Input | Prefix | HAR CPU | Core ML | Trim |
+| --- | ---: | ---: | ---: | ---: |
+| 3s | 82.5 ms | 42.6 ms | 48.9 ms | 0.0 ms |
+| 7s | 119.4 ms | 65.4 ms | 83.5 ms | 0.0 ms |
+| 15s | 184.4 ms | 119.4 ms | 135.0 ms | 0.0 ms |
+| 30s | 325.0 ms | 214.7 ms | 235.2 ms | 0.0 ms |
+
+### Config F stage medians
+
+| Input | Duration | F0Ntrain | DecoderPre | Matrix | hn-sf | Trim | Core ML total |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| 3s | 9.8 ms | 4.5 ms | 3.1 ms | 11.8 ms | 9.3 ms | 45.1 ms | 27.7 ms |
+| 7s | 13.2 ms | 18.6 ms | 8.5 ms | 27.3 ms | 21.0 ms | 103.6 ms | 55.9 ms |
+| 15s | 27.3 ms | 39.2 ms | 9.7 ms | 58.2 ms | 47.0 ms | 224.9 ms | 109.6 ms |
+| 30s | 47.1 ms | 73.5 ms | 15.4 ms | 125.5 ms | 100.1 ms | 449.1 ms | 213.3 ms |
+
+### Speedup: Config F vs baselines
+
+| Input | F vs A (Python HAR) | F vs D (MPS) | F vs E (CPU) |
+| --- | ---: | ---: | ---: |
+| 3s | **1.6x** | **1.9x** | **4.1x** |
+| 7s | **1.1x** | **1.5x** | **3.1x** |
+| 15s | 0.9x | **1.4x** | **2.8x** |
+| 30s | 0.8x | **1.6x** | **2.5x** |
+
+### Config F exact Duration proof
+
+| Input | Duration model | Predicted frames |
+| --- | --- | ---: |
+| 3s | `exact_t44` | `112` |
+| 7s | `exact_t105` | `270` |
+| 15s | `exact_t219` | `556` |
+| 30s | `exact_t476` | `1095` |
+
+### Config A setup fix
+
+The combined `a,d,e,f` run and the standalone `a` run both stayed in Python
+Core ML model load for several minutes before any Config A availability output.
+Process sampling showed:
+
+```text
+MLE5ProgramLibraryOnDeviceAOTCompilationImpl createProgramLibraryHandleWithRespecialization
+_ANEClient compileModel
+```
+
+Root cause: Config A was auto-loading unrelated Core ML packages through
+`HybridTTSPipeline()` before replacing the bucket dictionary with explicit
+HAR-post packages. The fix skips auto Core ML discovery for A and loads only
+`kokoro_decoder_har_post_{3,7,10,15,30}s.mlpackage`.
+
+### Interpretation
+
+1. **Config A is fixed as a benchmark harness path.** It now reaches
+   availability and completes all canonical inputs instead of blocking in
+   unrelated package AOT compilation.
+2. **Config F wins at short lengths and remains the fastest non-A baseline.**
+   F beats A at 3s and 7s, but A is still faster at 15s and 30s.
+3. **F's remaining long-form cost is not Duration.** Exact Duration medians are
+   `9.8/13.2/27.3/47.1 ms`; the larger F costs are matrix/HN-SF/trim
+   materialization.
+4. **D/E are no longer competitive on this run.** F beats PyTorch MPS by
+   `1.4-1.9x` and CPU by `2.5-4.1x`.
+
+### Provenance
+
+- Machine: Apple M2 Ultra Mac Studio, 64 GB
+- Swift warmup: completed; selected `exact_t44`, `exact_t105`, `exact_t219`,
+  and `exact_t476`
+- Full command attempted: `BAKEOFF_SKIP_SMOKE=1 PYTORCH_ENABLE_MPS_FALLBACK=1 uv run python scripts/bakeoff_harness.py run --configs a,d,e,f --iterations 5 --order-seed 0 --machine-id m2_ultra_exact_duration_rerun_20260416`
+- Completed A command: `BAKEOFF_SKIP_SMOKE=1 PYTORCH_ENABLE_MPS_FALLBACK=1 uv run python scripts/bakeoff_harness.py run --configs a --iterations 5 --order-seed 0 --machine-id m2_ultra_exact_duration_a_fixed_20260417`
+- Completed F command: `BAKEOFF_SKIP_SMOKE=1 PYTORCH_ENABLE_MPS_FALLBACK=1 uv run python scripts/bakeoff_harness.py run --configs f --iterations 5 --order-seed 0 --machine-id m2_ultra_exact_duration_fonly_20260416`
+- Completed D/E command: `BAKEOFF_SKIP_SMOKE=1 PYTORCH_ENABLE_MPS_FALLBACK=1 uv run python scripts/bakeoff_harness.py run --configs d,e --iterations 5 --order-seed 0 --machine-id m2_ultra_exact_duration_de_20260416`
+- Results:
+  - `outputs/bakeoff/results_m2_ultra_exact_duration_a_fixed_20260417.json`
+  - `outputs/bakeoff/results_m2_ultra_exact_duration_fonly_20260416.json`
+  - `outputs/bakeoff/results_m2_ultra_exact_duration_de_20260416.json`
+- Order seed: 0, iterations: 5
+
 ## Bakeoff v7: Duration-correct Config F on M2 Ultra
 
 **First collected:** 2026-04-16

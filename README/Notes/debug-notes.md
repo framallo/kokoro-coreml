@@ -6,6 +6,252 @@ Institutional memory for Kokoro PyTorch → Core ML (`mlprogram`) export, synthe
 
 ---
 
+## Issue: Config F loses to A at 15s/30s — Resolved
+
+**First spotted:** 2026-04-17
+**Resolved:** 2026-04-17
+**Status:** Resolved
+
+### Summary
+
+After the exact Duration fix, Config F still lost to Config A on 15s and 30s in
+the v8 bakeoff. The slowdown was not Duration or bad audio; it was two Swift
+host-materialization paths: sparse alignment matrix construction and boxed
+`MLMultiArray` reads from a strided `Float16` waveform during trim. Config F now
+beats fixed Config A at every canonical length.
+
+### Symptom
+
+The v8 F-only stages showed long-form wall time dominated by post-Core ML host
+work:
+
+| Stage | 30s v8 median |
+| --- | ---: |
+| Matrix/materialization | 125.5 ms |
+| Trim/waveform extraction | 449.1 ms |
+| End-to-end wall | 1025 ms |
+
+The model stages themselves did not explain the loss. Exact Duration for 30s
+was already about `47 ms`, and the generated F samples passed the waveform
+health gate against PyTorch and `outputs/decoder_har_post_demo.wav`.
+
+### Root Cause
+
+Confirmed. Config F's Swift path did two expensive CPU-side operations:
+
+1. Built a sparse one-hot alignment matrix and performed dense matrix
+   multiplication through zeros to expand token states to frames.
+2. Extracted the output waveform through `MLMultiArray` boxed subscripting.
+   The waveform array was strided `Float16`, so the initial contiguous
+   `Float32` pointer fast path did not apply.
+
+Config A did not show this specific loss because its HAR-post path returns a
+shorter, already fused decoder output through the Python pipeline and does not
+run the split Swift alignment/trim materialization path.
+
+### Related Guides
+
+- [Core ML LSTM enumerated shapes guide](../Guides/apple-silicon/CoreML-LSTM-Enumerated-Shapes.md)
+  - Covers the exact-shape Duration strategy that was already working.
+- [Core ML LSTM export guide](../Guides/apple-silicon/CoreML-LSTM-export-guide.md)
+  - Explains why padded BiLSTM semantics were corrected separately from this
+    performance issue.
+- [Core ML compute-unit scheduling guide](../Guides/apple-silicon/CoreML-Compute-Unit-Scheduling-guide.md)
+  - Useful for separating Core ML load/compile behavior from timed inference.
+- [Performance notes](performance-notes.md)
+  - Contains the v9 A/D/E/F bakeoff tables and stage medians.
+
+### Fix
+
+**Files:**
+
+- `swift/Sources/KokoroPipeline/MLMultiArrayHelpers.swift`
+- `swift/Sources/KokoroBenchmark/main.swift`
+- `swift/Sources/KokoroPipeline/KokoroPipeline.swift`
+
+Changes:
+
+- Replaced one-hot alignment plus dense matmul with direct duration-repeat
+  expansion:
+  - `alignTokenMajorToFrames(...)`
+  - `alignChannelMajorToFrames(...)`
+- Added `floatValues(from:limit:)` so trimming only extracts the needed samples.
+- Added typed stride-aware `MLMultiArray` reads for both `.float32` and
+  `.float16`, with boxed subscript fallback for unsupported layouts.
+- Kept full alignment/waveform materialization for tensor-dump mode only.
+
+### Verification
+
+Full controlled bakeoff:
+
+```bash
+BAKEOFF_SKIP_SMOKE=1 PYTORCH_ENABLE_MPS_FALLBACK=1 \
+uv run python scripts/bakeoff_harness.py run \
+  --configs a,d,e,f --iterations 5 --order-seed 0 \
+  --machine-id m2_ultra_parity_final_20260417
+```
+
+Outcome: `80` ok records across 4 configs, 4 inputs, and 5 reps.
+
+| Input | A wall | F wall | F vs A |
+| --- | ---: | ---: | ---: |
+| 3s | 333 ms | 57 ms | 5.9x |
+| 7s | 329 ms | 124 ms | 2.7x |
+| 15s | 486 ms | 239 ms | 2.0x |
+| 30s | 870 ms | 476 ms | 1.8x |
+
+Config F stage proof:
+
+| Stage | 30s v8 median | 30s v9 median |
+| --- | ---: | ---: |
+| Matrix/materialization | 125.5 ms | 1.4 ms |
+| Trim/waveform extraction | 449.1 ms | 1.6 ms |
+| End-to-end wall | 1025 ms | 476 ms |
+
+Audio samples:
+
+```bash
+uv run python scripts/bakeoff_listen.py --keys 3s,7s,15s,30s --quality-plots
+```
+
+Outcome: all Config F listen samples passed the waveform health gate and are
+available under `outputs/bakeoff/listen/`.
+
+### Investigation Log
+
+**2026-04-17**
+
+- **Hypothesis:** Exact Duration still made F slower than A.
+- **Tried:** Compared F stage medians against A and the golden waveform
+  examples.
+- **Outcome:** Refuted. Duration was small; matrix and trim dominated.
+
+**2026-04-17**
+
+- **Hypothesis:** The Swift materialization path was using slow generic
+  `MLMultiArray` access.
+- **Tried:** Replaced alignment matmul with direct repeat expansion and added
+  stride-aware pointer extraction.
+- **Outcome:** Confirmed. Matrix fell from `125.5 ms` to `1.4 ms`; trim fell
+  from `449.1 ms` to `1.6 ms` at 30s.
+
+### If This Recurs
+
+- Check whether `MLMultiArray` output is contiguous and which `dataType` it
+  uses before assuming a pointer fast path is active.
+- Compare stage medians before changing Core ML graph shape. If Core ML total
+  is stable but wall time regresses, inspect host materialization first.
+- Keep tensor-dump paths separate from normal synthesis paths so debug
+  observability does not become the production hot path.
+
+---
+
+## Issue: Config A bakeoff stalls before availability — Resolved
+
+**First spotted:** 2026-04-16
+**Resolved:** 2026-04-17
+**Status:** Resolved
+
+### Summary
+
+Config A appeared to hang in Python/Core ML AOT compilation before the bakeoff
+printed the availability table. The HAR-post packages themselves were not
+broken; Config A was auto-loading unrelated Core ML packages before replacing
+the pipeline's bucket map with the intended explicit HAR-post bucket set.
+
+### Symptom
+
+Combined and standalone Config A runs stayed silent for several minutes after
+the coremltools/Torch warning. Process sampling showed the Python process inside
+Core ML model load:
+
+```text
+MLE5ProgramLibraryOnDeviceAOTCompilationImpl createProgramLibraryHandleWithRespecialization
+_ANEClient compileModel
+```
+
+### Root Cause
+
+Confirmed. `ConfigAContext` initialized `HybridTTSPipeline()` with default
+Core ML auto-discovery, which loads every matching package under `coreml/`.
+Only after that did the harness replace
+`coreml_decoder_har_post_buckets` with the explicit bakeoff packages. This
+allowed stale or diagnostic packages to spend minutes in Core ML AOT before
+Config A reached benchmark availability.
+
+The actual HAR-post packages load and run when the pipeline is initialized as a
+PyTorch-prefix-only object and the intended HAR-post buckets are loaded
+directly.
+
+### Related Guides
+
+- [Core ML compute-unit scheduling guide](../Guides/apple-silicon/CoreML-Compute-Unit-Scheduling-guide.md)
+  - Documents Core ML load-time compilation, `.all` scheduling, silent
+    fallback, and AOT compiler behavior.
+- [Performance notes](performance-notes.md)
+  - Contains the final v8 A/D/E/F wall-time table after the Config A harness
+    fix.
+
+### Fix
+
+**File:** `scripts/bakeoff_harness.py`
+
+Config A now initializes the reusable Python prefix with:
+
+```python
+HybridTTSPipeline(force_engine="pytorch")
+```
+
+Then it explicitly loads only:
+
+```text
+kokoro_decoder_har_post_{3,7,10,15,30}s.mlpackage
+```
+
+with `compute_units=ct.ComputeUnit.ALL`, and sets `pipe.use_coreml = True` for
+the explicitly loaded HAR-post path.
+
+### Verification
+
+Focused context proof:
+
+```bash
+PYTHONUNBUFFERED=1 BAKEOFF_SKIP_SMOKE=1 PYTORCH_ENABLE_MPS_FALLBACK=1 \
+uv run python - <<'PY'
+from scripts.bakeoff_harness import ConfigAContext, BAKEOFF_INPUTS
+ctx = ConfigAContext()
+assert ctx.available
+ctx.warmup(BAKEOFF_INPUTS["3s"])
+PY
+```
+
+Outcome: Config A built successfully, loaded buckets `[3, 7, 10, 15, 30]`, and
+the 3s warmup synthesized successfully.
+
+Benchmark proof:
+
+```bash
+BAKEOFF_SKIP_SMOKE=1 PYTORCH_ENABLE_MPS_FALLBACK=1 \
+uv run python scripts/bakeoff_harness.py run \
+  --configs a --iterations 5 --order-seed 0 \
+  --machine-id m2_ultra_exact_duration_a_fixed_20260417
+```
+
+Outcome: `20` ok records across Config A's 4 canonical inputs and 5 reps.
+
+### Investigation Log
+
+**2026-04-17**
+
+- **Hypothesis:** Config A was blocked by the explicit HAR-post bucket models.
+- **Tried:** Loaded `HybridTTSPipeline(force_engine="pytorch")`, then loaded
+  HAR-post buckets one by one.
+- **Outcome:** Refuted. The intended HAR-post packages loaded directly, though
+  large buckets have expensive first-touch Core ML load time. The failure was
+  the prior auto-discovery pass over unrelated packages.
+
+---
+
 ## Issue: Exact enumerated Duration shapes as an unrolled-graph escape hatch — Resolved
 
 **First spotted:** 2026-04-16
@@ -447,10 +693,11 @@ now match canonical durations:
 
 ---
 
-## Issue: Config F loses to Config A at 15s/30s after truthful waveform timing — Active
+## Issue: Config F loses to Config A at 15s/30s after truthful waveform timing — Resolved
 
 **First spotted:** 2026-04-16
-**Status:** Active
+**Resolved:** 2026-04-17
+**Status:** Resolved; superseded by the v9 host-materialization fix
 
 ### Summary
 
@@ -458,7 +705,9 @@ Config F no longer beats Config A at 15s and 30s because the final audit made
 the Swift benchmark honestly materialize the waveform inside `wall_time_s`.
 The model and prep stages are still faster in Config F; the crossover is caused
 by the stride-safe Swift `MLMultiArray` reader using per-element subscript access
-for hundreds of thousands of waveform samples.
+for hundreds of thousands of waveform samples. This was the first half of the
+v9 fix: the final resolution also removed sparse alignment materialization from
+the hot path.
 
 ### Symptom
 
@@ -510,38 +759,14 @@ This is not a warmup, model reload, or bucket mismatch:
     with calculated stride offsets is the documented faster path for frequent
     access.
 
-### Current Status
+### Resolution
 
-No optimization fix has been applied yet in this investigation. After the
-Duration padding fix, the full `v7` bakeoff shows Config F is slower than
-Config A at every enumerated length:
-
-| Input | A median | F median | Main F costs |
-| --- | ---: | ---: | --- |
-| `3s` | `162 ms` | `169 ms` | duration `78 ms`, trim `43 ms` |
-| `7s` | `247 ms` | `368 ms` | duration `157 ms`, trim `99 ms` |
-| `15s` | `482 ms` | `766 ms` | duration `342 ms`, trim `220 ms` |
-| `30s` | `713 ms` | `1595 ms` | duration `751 ms`, trim `433 ms` |
-
-So this issue now has two separable costs:
-
-- The previously identified waveform materialization cost remains: long-output
-  `MLMultiArray` flattening is still hundreds of milliseconds.
-- The correctness fix added a large mask-aware static Duration graph; it is
-  exact enough for audio parity, but the large enum shapes have expensive
-  Core ML compile/load behavior and non-trivial steady-state Duration time.
-
-The likely waveform optimization is still to replace `floatValues(from:)` with
-a stride-aware pointer implementation:
-
-- Fast path for contiguous float32 arrays: bulk copy only the requested prefix
-  when possible.
-- General path: compute pointer offsets from `array.strides` without allocating
-  `[NSNumber]` per sample.
-- Keep the current subscript behavior as a fallback for unsupported dtypes or
-  unclear layout.
-- Measure `t_trim_s` again on 15s/30s and re-run `scripts/bakeoff_listen.py`
-  before accepting the optimization.
+Resolved by the v9 host-materialization fix recorded at the top of this file.
+`floatValues(from:)` now has stride-aware typed pointer paths for `.float32` and
+`.float16`, plus a `limit` parameter so normal synthesis only extracts the
+trimmed prefix. The same fix pass also replaced sparse alignment plus dense
+matmul with direct token-vector expansion. In the final controlled bakeoff, F
+beats A at every canonical length.
 
 ### Verification
 

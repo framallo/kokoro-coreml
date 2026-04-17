@@ -7,7 +7,7 @@
 #
 # After this completes, run the bakeoff with:
 #     BAKEOFF_SKIP_SMOKE=1 PYTORCH_ENABLE_MPS_FALLBACK=1 \
-#     uv run python scripts/bakeoff_harness.py run \
+#     uv run --no-sync python scripts/bakeoff_harness.py run \
 #       --configs a,d,e,f --iterations 5 --order-seed 0
 #
 # Or use the $bakeoff skill.
@@ -31,16 +31,25 @@ echo
 echo "--- Step 1/6: Python dependencies ---"
 if command -v uv &>/dev/null; then
     uv sync
+    uv pip install -r requirements-bakeoff.txt
 else
     echo "uv not found. Install with: curl -LsSf https://astral.sh/uv/install.sh | sh"
     exit 1
 fi
 
+run_python() {
+    uv run --no-sync python "$@"
+}
+
+run_pytest() {
+    uv run --no-sync pytest "$@"
+}
+
 # 2. Download base models from HF
 if [ "$SKIP_DOWNLOAD" = false ]; then
     echo
     echo "--- Step 2/6: Download CoreML models from Hugging Face ---"
-    uv run python scripts/download_models.py --coreml
+    run_python scripts/download_models.py --coreml
 else
     echo
     echo "--- Step 2/6: Skipping download (--skip-download) ---"
@@ -51,25 +60,25 @@ fi
 # frozen bakeoff texts.
 echo
 echo "--- Step 3/6: Prepare bakeoff inputs ---"
-uv run python scripts/bakeoff_harness.py prepare-inputs
-uv run python scripts/prepare_swift_bench_inputs.py
+run_python scripts/bakeoff_harness.py prepare-inputs
+run_python scripts/prepare_swift_bench_inputs.py
 
 # 4. Export new models
 echo
 echo "--- Step 4/6: Export Duration models (padded fallback + exact token packages) ---"
-uv run python export_duration.py
+run_python export_duration.py
 
 echo
 echo "--- Step 4/6: Export F0Ntrain models ---"
-uv run python export_f0ntrain.py --t-frames 120 280 400 600 1200
+run_python export_f0ntrain.py --t-frames 120 280 400 600 1200
 
 echo
 echo "--- Step 4/6: Export DecoderPre models ---"
-uv run python export_decoder_pre.py --buckets 3 7 10 15 30
+run_python export_decoder_pre.py --buckets 3 7 10 15 30
 
 echo
 echo "--- Step 4/6: Export GeneratorFromHar models ---"
-uv run python -m export_synth.main --mode decoder-har --buckets 3s,7s,10s,15s,30s -o coreml
+run_python -m export_synth.main --mode decoder-har --buckets 3s,7s,10s,15s,30s -o coreml
 
 # 5. Build Swift binary
 echo
@@ -91,7 +100,7 @@ fi
 for input_json in outputs/swift_bench_inputs/*.json; do
     [ -e "$input_json" ] || continue
     [ "$(basename "$input_json")" = "hnsf_weights.json" ] && continue
-    tokens="$(uv run python -c 'import json,sys; print(json.load(open(sys.argv[1]))["num_tokens"])' "$input_json")"
+    tokens="$(run_python -c 'import json,sys; print(json.load(open(sys.argv[1]))["num_tokens"])' "$input_json")"
     if [ ! -f "coreml/kokoro_duration_exact_t${tokens}.mlpackage/Manifest.json" ]; then
         echo "  MISSING: exact Duration model T=${tokens}"
         READY=false
@@ -133,7 +142,7 @@ fi
 
 if [ "$READY" = true ]; then
     echo "  Verifying Core ML package shape contracts..."
-    if ! uv run pytest -q tests/test_mlpackage_exports.py::test_decoder_har_post_bucket_shape_matches_advertised_duration; then
+    if ! run_pytest -q tests/test_mlpackage_exports.py::test_decoder_har_post_bucket_shape_matches_advertised_duration; then
         READY=false
     fi
 fi
@@ -144,8 +153,12 @@ if [ "$READY" = true ]; then
     echo "=== Setup complete. Run the bakeoff with: ==="
     echo
     echo "  BAKEOFF_SKIP_SMOKE=1 PYTORCH_ENABLE_MPS_FALLBACK=1 \\"
-    echo "  uv run python scripts/bakeoff_harness.py run \\"
+    echo "  uv run --no-sync python scripts/bakeoff_harness.py run \\"
     echo "    --configs a,d,e,f --iterations 5 --order-seed 0"
+    echo
+    echo "  On 16 GB machines, split the run if the combined A/D/E/F"
+    echo "  process swaps heavily:"
+    echo "    --configs a,f   then   --configs d,e"
     echo
 else
     echo

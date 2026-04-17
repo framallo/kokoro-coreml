@@ -500,26 +500,42 @@ func runPipeline(
         try writer.writeMLMultiArray(name: "duration_t_en", array: tEnArray)
     }
 
-    // Stage 2: Alignment
+    // Stage 2: Alignment metadata. The actual frame-domain expansion happens
+    // directly in Stage 3; materialize the sparse one-hot matrix only for
+    // tensor dumps.
     let t2 = CFAbsoluteTimeGetCurrent()
-    let alignment = buildAlignmentMatrix(predDur: predDur, traceLength: tc, frameCount: frames)
+    let alignment: [Float]? = tensorDumpPath == nil
+        ? nil
+        : buildAlignmentMatrix(predDur: predDur, traceLength: tc, frameCount: frames)
     let t3 = CFAbsoluteTimeGetCurrent()
     let tAlignment = t3 - t2
 
     try withTensorDump { writer in
-        try writer.writeFloatArray(name: "alignment", values: alignment, shape: [1, tc, frames])
+        if let alignment {
+            try writer.writeFloatArray(name: "alignment", values: alignment, shape: [1, tc, frames])
+        }
     }
 
-    // Stage 3: Matrix ops
+    // Stage 3: Matrix ops. Alignment is a one-hot repeat operation, so expand
+    // token vectors directly instead of building a sparse matrix and running
+    // dense GEMMs over zeros.
     let t4 = CFAbsoluteTimeGetCurrent()
-    let dTransposed = try transpose3D(source: dArray, dim1: 640, dim2: tc)
-    let en = try matmul3D(a: dTransposed, b: alignment, M: 640, K: tc, N: frames)
-    let asr = try matmul3D(a: tEnArray, b: alignment, M: 512, K: tc, N: frames)
+    let en = try alignTokenMajorToFrames(
+        source: dArray,
+        predDur: predDur,
+        channels: 640,
+        frameCount: frames
+    )
+    let asr = try alignChannelMajorToFrames(
+        source: tEnArray,
+        predDur: predDur,
+        channels: 512,
+        frameCount: frames
+    )
     let t5 = CFAbsoluteTimeGetCurrent()
     let tMatrixOps = t5 - t4
 
     try withTensorDump { writer in
-        try writer.writeMLMultiArray(name: "d_transposed", array: dTransposed)
         try writer.writeMLMultiArray(name: "en", array: en)
         try writer.writeMLMultiArray(name: "asr", array: asr)
     }
@@ -670,13 +686,13 @@ func runPipeline(
     let waveformArr = genOutput.featureValue(for: waveformKey)!.multiArrayValue!
     let origF0Len = frames * 2
     let targetLen = Int(round(Double(origF0Len) / 80.0 * 24000.0))
-    let waveformValues = floatValues(from: waveformArr)
-    let trimLen = min(waveformValues.count, targetLen)
-    let samples = Array(waveformValues.prefix(trimLen))
+    let trimLen = min(waveformArr.count, targetLen)
+    let samples = floatValues(from: waveformArr, limit: trimLen)
     let t17 = CFAbsoluteTimeGetCurrent()
     let tTrim = t17 - t16
 
     try withTensorDump { writer in
+        let waveformValues = floatValues(from: waveformArr)
         try writer.writeFloatArray(
             name: "waveform_full",
             values: waveformValues,

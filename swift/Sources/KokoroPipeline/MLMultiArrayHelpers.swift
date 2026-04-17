@@ -62,14 +62,137 @@ public func readDurationFrames(from array: MLMultiArray, validCount: Int? = nil)
 /// Core ML outputs may have non-trivial strides, so callers that need a flat
 /// waveform or tensor snapshot must not assume `dataPointer` is linearly
 /// addressable in logical index order.
-public func floatValues(from array: MLMultiArray) -> [Float] {
+public func floatValues(from array: MLMultiArray, limit: Int? = nil) -> [Float] {
     let shape = array.shape.map { $0.intValue }
+    let count = max(0, min(limit ?? array.count, array.count))
+
+    let strides = array.strides.map { $0.intValue }
+    if array.dataType == .float32 && isContiguousRowMajor(shape: shape, strides: strides) {
+        let ptr = array.dataPointer.assumingMemoryBound(to: Float.self)
+        return Array(UnsafeBufferPointer(start: ptr, count: count))
+    }
+
+    if array.dataType == .float32 {
+        return stridedFloatValues(from: array, shape: shape, strides: strides, limit: count)
+    }
+    if array.dataType == .float16 {
+        return stridedFloat16Values(from: array, shape: shape, strides: strides, limit: count)
+    }
+
     var values = [Float]()
-    values.reserveCapacity(array.count)
-    for offset in 0..<array.count {
+    values.reserveCapacity(count)
+    for offset in 0..<count {
         values.append(array[multiIndex(offset: offset, shape: shape)].floatValue)
     }
     return values
+}
+
+private func stridedFloat16Values(
+    from array: MLMultiArray,
+    shape: [Int],
+    strides: [Int],
+    limit: Int
+) -> [Float] {
+    let ptr = array.dataPointer.assumingMemoryBound(to: Float16.self)
+    var values = [Float]()
+    values.reserveCapacity(limit)
+
+    switch shape.count {
+    case 1:
+        for i in 0..<min(shape[0], limit) {
+            values.append(Float(ptr[i * strides[0]]))
+        }
+    case 2:
+        outer: for i in 0..<shape[0] {
+            let iBase = i * strides[0]
+            for j in 0..<shape[1] {
+                values.append(Float(ptr[iBase + j * strides[1]]))
+                if values.count == limit { break outer }
+            }
+        }
+    case 3:
+        outer: for i in 0..<shape[0] {
+            let iBase = i * strides[0]
+            for j in 0..<shape[1] {
+                let jBase = iBase + j * strides[1]
+                for k in 0..<shape[2] {
+                    values.append(Float(ptr[jBase + k * strides[2]]))
+                    if values.count == limit { break outer }
+                }
+            }
+        }
+    default:
+        for offset in 0..<limit {
+            let index = multiIndex(offset: offset, shape: shape).map { $0.intValue }
+            var physicalOffset = 0
+            for i in 0..<min(index.count, strides.count) {
+                physicalOffset += index[i] * strides[i]
+            }
+            values.append(Float(ptr[physicalOffset]))
+        }
+    }
+
+    return values
+}
+
+private func stridedFloatValues(
+    from array: MLMultiArray,
+    shape: [Int],
+    strides: [Int],
+    limit: Int
+) -> [Float] {
+    let ptr = array.dataPointer.assumingMemoryBound(to: Float.self)
+    var values = [Float]()
+    values.reserveCapacity(limit)
+
+    switch shape.count {
+    case 1:
+        for i in 0..<min(shape[0], limit) {
+            values.append(ptr[i * strides[0]])
+        }
+    case 2:
+        outer: for i in 0..<shape[0] {
+            let iBase = i * strides[0]
+            for j in 0..<shape[1] {
+                values.append(ptr[iBase + j * strides[1]])
+                if values.count == limit { break outer }
+            }
+        }
+    case 3:
+        outer: for i in 0..<shape[0] {
+            let iBase = i * strides[0]
+            for j in 0..<shape[1] {
+                let jBase = iBase + j * strides[1]
+                for k in 0..<shape[2] {
+                    values.append(ptr[jBase + k * strides[2]])
+                    if values.count == limit { break outer }
+                }
+            }
+        }
+    default:
+        for offset in 0..<limit {
+            let index = multiIndex(offset: offset, shape: shape).map { $0.intValue }
+            var physicalOffset = 0
+            for i in 0..<min(index.count, strides.count) {
+                physicalOffset += index[i] * strides[i]
+            }
+            values.append(ptr[physicalOffset])
+        }
+    }
+
+    return values
+}
+
+private func isContiguousRowMajor(shape: [Int], strides: [Int]) -> Bool {
+    guard shape.count == strides.count else { return false }
+    var expectedStride = 1
+    for i in stride(from: shape.count - 1, through: 0, by: -1) {
+        if strides[i] != expectedStride && shape[i] > 1 {
+            return false
+        }
+        expectedStride *= max(1, shape[i])
+    }
+    return true
 }
 
 /// Fail fast when Config F produces an audio length that cannot be the same
@@ -137,6 +260,114 @@ public func copyInto(array: MLMultiArray, from source: [Float]) {
 }
 
 // MARK: - Matrix Multiply
+
+/// Align token-domain hidden states to frame-domain features by repeating each
+/// token vector according to ``predDur``.
+///
+/// Source layout is `(1, tokens, channels)` and result layout is
+/// `(1, channels, frameCount)`. This is the direct equivalent of
+/// `source.transpose(-1, -2) @ one_hot_alignment`, but avoids materializing a
+/// huge sparse alignment matrix and avoids dense GEMM over zeros.
+public func alignTokenMajorToFrames(
+    source: MLMultiArray,
+    predDur: [Int],
+    channels: Int,
+    frameCount: Int
+) throws -> MLMultiArray {
+    let result = try makeZeroArray3D(channels: channels, time: frameCount)
+    let dstPtr = result.dataPointer.assumingMemoryBound(to: Float.self)
+    let tokenCount = min(predDur.count, source.shape[1].intValue)
+    let strides = source.strides.map { $0.intValue }
+    let canUsePointer = source.dataType == .float32 && strides.count >= 3
+
+    var frameStart = 0
+    if canUsePointer {
+        let srcPtr = source.dataPointer.assumingMemoryBound(to: Float.self)
+        for token in 0..<tokenCount {
+            let repeatCount = max(0, min(predDur[token], frameCount - frameStart))
+            if repeatCount == 0 { continue }
+            let srcTokenBase = token * strides[1]
+            for channel in 0..<channels {
+                let value = srcPtr[srcTokenBase + channel * strides[2]]
+                let dstBase = channel * frameCount + frameStart
+                for frameOffset in 0..<repeatCount {
+                    dstPtr[dstBase + frameOffset] = value
+                }
+            }
+            frameStart += repeatCount
+            if frameStart >= frameCount { break }
+        }
+    } else {
+        for token in 0..<tokenCount {
+            let repeatCount = max(0, min(predDur[token], frameCount - frameStart))
+            if repeatCount == 0 { continue }
+            for channel in 0..<channels {
+                let value = source[[0, token, channel] as [NSNumber]].floatValue
+                let dstBase = channel * frameCount + frameStart
+                for frameOffset in 0..<repeatCount {
+                    dstPtr[dstBase + frameOffset] = value
+                }
+            }
+            frameStart += repeatCount
+            if frameStart >= frameCount { break }
+        }
+    }
+
+    return result
+}
+
+/// Align token-domain features to frame-domain features by repeating each
+/// token value according to ``predDur``.
+///
+/// Source layout is `(1, channels, tokens)` and result layout is
+/// `(1, channels, frameCount)`. This is the direct equivalent of
+/// `source @ one_hot_alignment`, without the sparse matrix and dense GEMM.
+public func alignChannelMajorToFrames(
+    source: MLMultiArray,
+    predDur: [Int],
+    channels: Int,
+    frameCount: Int
+) throws -> MLMultiArray {
+    let result = try makeZeroArray3D(channels: channels, time: frameCount)
+    let dstPtr = result.dataPointer.assumingMemoryBound(to: Float.self)
+    let tokenCount = min(predDur.count, source.shape[2].intValue)
+    let strides = source.strides.map { $0.intValue }
+    let canUsePointer = source.dataType == .float32 && strides.count >= 3
+
+    var frameStart = 0
+    if canUsePointer {
+        let srcPtr = source.dataPointer.assumingMemoryBound(to: Float.self)
+        for token in 0..<tokenCount {
+            let repeatCount = max(0, min(predDur[token], frameCount - frameStart))
+            if repeatCount == 0 { continue }
+            for channel in 0..<channels {
+                let value = srcPtr[channel * strides[1] + token * strides[2]]
+                let dstBase = channel * frameCount + frameStart
+                for frameOffset in 0..<repeatCount {
+                    dstPtr[dstBase + frameOffset] = value
+                }
+            }
+            frameStart += repeatCount
+            if frameStart >= frameCount { break }
+        }
+    } else {
+        for token in 0..<tokenCount {
+            let repeatCount = max(0, min(predDur[token], frameCount - frameStart))
+            if repeatCount == 0 { continue }
+            for channel in 0..<channels {
+                let value = source[[0, channel, token] as [NSNumber]].floatValue
+                let dstBase = channel * frameCount + frameStart
+                for frameOffset in 0..<repeatCount {
+                    dstPtr[dstBase + frameOffset] = value
+                }
+            }
+            frameStart += repeatCount
+            if frameStart >= frameCount { break }
+        }
+    }
+
+    return result
+}
 
 /// Batch matrix multiply: C = A @ B for 3D tensors.
 ///

@@ -259,36 +259,29 @@ public class KokoroPipeline {
         let totalFrames = predDur.reduce(0, +)
         let totalSeconds = Double(totalFrames * 2) / PipelineConstants.f0FrameRate
 
-        // ---- Stage 2: Alignment ----
+        // ---- Stage 2: Alignment metadata ----
+        // The frame-domain expansion happens directly in Stage 3. Avoid
+        // materializing the sparse one-hot matrix on the hot path.
         let t2 = CFAbsoluteTimeGetCurrent()
-        let alignment = buildAlignmentMatrix(
-            predDur: predDur,
-            traceLength: tokenCount,
-            frameCount: totalFrames
-        )
         let t3 = CFAbsoluteTimeGetCurrent()
         timings.alignment = t3 - t2
 
-        // ---- Stage 3: Matrix ops (en = d @ alignment, asr = t_en @ alignment) ----
+        // ---- Stage 3: Matrix ops (direct token-vector expansion) ----
         let t4 = CFAbsoluteTimeGetCurrent()
-        // Duration model outputs d as (1, tokens, 640); matmul3D expects (1, M=640, K=tokens).
-        let dTransposed = try transpose3D(
-            source: dArray, dim1: PipelineConstants.hiddenDim, dim2: tokenCount
+        // The old path built a one-hot alignment matrix and ran dense GEMMs.
+        // Since every frame is just one repeated token vector, direct expansion
+        // is equivalent and much cheaper for long utterances.
+        let en = try alignTokenMajorToFrames(
+            source: dArray,
+            predDur: predDur,
+            channels: PipelineConstants.hiddenDim,
+            frameCount: totalFrames
         )
-        let en = try matmul3D(
-            a: dTransposed,
-            b: alignment,
-            M: PipelineConstants.hiddenDim,
-            K: tokenCount,
-            N: totalFrames
-        )
-        // asr is used by DecoderPre CoreML: the aligned text features.
-        let asr = try matmul3D(
-            a: tEnArray,
-            b: alignment,
-            M: PipelineConstants.textEncoderDim,
-            K: tokenCount,
-            N: totalFrames
+        let asr = try alignChannelMajorToFrames(
+            source: tEnArray,
+            predDur: predDur,
+            channels: PipelineConstants.textEncoderDim,
+            frameCount: totalFrames
         )
         let t5 = CFAbsoluteTimeGetCurrent()
         timings.matrixOps = t5 - t4
@@ -430,15 +423,14 @@ public class KokoroPipeline {
         let t16 = CFAbsoluteTimeGetCurrent()
         let waveformKey = genOutput.featureNames.contains("waveform") ? "waveform" : genOutput.featureNames.first!
         let waveformArray = genOutput.featureValue(for: waveformKey)!.multiArrayValue!
-        let waveformValues = floatValues(from: waveformArray)
 
         // Trim to natural utterance length: T_f0 / 80.0 * 24000
         // T_f0 is the ORIGINAL (unpadded) F0 length = totalFrames * 2 (from F0Ntrain 2x upsample)
         let originalF0Len = totalFrames * 2  // F0Ntrain doubles the frame count
         let targetLen = Int(round(Double(originalF0Len) / PipelineConstants.f0FrameRate * Double(PipelineConstants.sampleRate)))
-        let trimLen = min(waveformValues.count, targetLen)
+        let trimLen = min(waveformArray.count, targetLen)
 
-        let audio = Array(waveformValues.prefix(trimLen))
+        let audio = floatValues(from: waveformArray, limit: trimLen)
         let t17 = CFAbsoluteTimeGetCurrent()
         timings.trim = t17 - t16
 

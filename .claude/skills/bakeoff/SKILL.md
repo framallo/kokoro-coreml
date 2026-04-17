@@ -37,11 +37,14 @@ Everything is handled by the setup script. If this is a fresh machine
 bash scripts/setup_bakeoff.sh
 ```
 
-This takes ~10 minutes and handles: Python deps, model downloads,
+This takes ~10 minutes and handles: Python deps from
+`requirements-bakeoff.txt`, model downloads,
 all model exports (Duration [32-512], F0Ntrain, DecoderPre,
 GeneratorFromHar for buckets [3,7,10,15,30]s), Swift binary build,
-and benchmark input preparation. Use `--skip-download` if models
-are already local.
+and benchmark input preparation. Use `--skip-download` if models are already
+local. After setup, use `uv run --no-sync` for the publication command so `uv`
+does not auto-sync the project lockfile over the explicitly installed bakeoff
+environment.
 
 If setup has already been run, verify quickly:
 
@@ -100,7 +103,7 @@ inputs, and batch protocol issues before the full benchmark spends time loading
 all Python baselines:
 
 ```bash
-uv run python - <<'PY'
+uv run --no-sync python - <<'PY'
 from scripts.bakeoff_harness import SwiftPipelineContext
 
 ctx = SwiftPipelineContext()
@@ -124,7 +127,7 @@ all runs to keep the command uniform.
 ```bash
 BAKEOFF_SKIP_SMOKE=1 \
 PYTORCH_ENABLE_MPS_FALLBACK=1 \
-uv run python scripts/bakeoff_harness.py run \
+uv run --no-sync python scripts/bakeoff_harness.py run \
   --configs a,d,e,f \
   --iterations 5 \
   --order-seed 0 \
@@ -133,10 +136,29 @@ uv run python scripts/bakeoff_harness.py run \
 
 Expected runtime: 10–20 minutes depending on machine speed.
 
+On 16 GB machines, if the combined A/D/E/F process swaps heavily, split the
+publication run into two commands with the same setup and order seed:
+
+```bash
+BAKEOFF_SKIP_SMOKE=1 PYTORCH_ENABLE_MPS_FALLBACK=1 \
+uv run --no-sync python scripts/bakeoff_harness.py run \
+  --configs a,f \
+  --iterations 5 \
+  --order-seed 0 \
+  --machine-id <machine_id>_af
+
+BAKEOFF_SKIP_SMOKE=1 PYTORCH_ENABLE_MPS_FALLBACK=1 \
+uv run --no-sync python scripts/bakeoff_harness.py run \
+  --configs d,e \
+  --iterations 5 \
+  --order-seed 0 \
+  --machine-id <machine_id>_de
+```
+
 ### 5. Verify results
 
 ```bash
-uv run python - <<'PY'
+uv run --no-sync python - <<'PY'
 import json, statistics
 from collections import defaultdict
 
