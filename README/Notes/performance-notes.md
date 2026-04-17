@@ -1234,6 +1234,128 @@ With fair bucket parity, Config F is **1.3-1.8x faster than Config A** at every 
 
 ---
 
+## Bakeoff v6: Full-pipeline re-export benchmark (3s-30s) on M2 MacBook Air
+
+**First collected:** 2026-04-17
+**Status:** Complete
+
+### Summary
+
+Re-ran the corrected v5 bakeoff on M2 Air after regenerating **every Core ML
+package** from scratch (Duration T=32/64/128/256/512 padded + exact T=44/105/219/476,
+F0Ntrain T=120/280/400/600/1200, DecoderPre {3,7,10,15,30}s, GeneratorFromHar
+{3,7,10,15,30}s) on commit `fa2a24d`. Fixed a regression in
+`export_synth/wrappers.py` where `CoreMLFriendlyTextEncoder.__init__` double-wrapped
+the shared `kmodel.text_encoder.lstm` when `SynthesizerModel` was constructed after
+`DurationModel`, failing GeneratorFromHar export with
+`AttributeError: 'MaskedBidirectionalLSTM' object has no attribute 'num_layers'`.
+
+**Config F wins at every duration.** End-to-end wall time is **185 ms for 3s audio
+(15x realtime) and 3021 ms for 30s audio (9x realtime).** Config F beats Config A
+by **1.3–2.5x** and CPU PyTorch by **2.5–4.6x**. MPS OOM'd on 15s and 30s even in
+a solo pass (MPS pool cap ~27 GB vs 32 GB resident on this machine).
+
+### End-to-end wall time (warm median, milliseconds)
+
+| Input | Audio | Bucket | A (Python HAR) | D (MPS) | E (CPU) | F (Swift) |
+| --- | --- | --- | --- | --- | --- | --- |
+| 3s | 2.80s | 3s | 461 ms | 739 ms | 723 ms | **185 ms** |
+| 7s | 6.75s | 7s | 771 ms | 907 ms | 1839 ms | **396 ms** |
+| 15s | 13.90s | 15s | 1896 ms | OOM | 3737 ms | **1326 ms** |
+| 30s | 27.38s | 30s | 3918 ms | OOM | 7567 ms | **3021 ms** |
+
+### RTF and realtime factor
+
+| Input | Audio | A RTF | D RTF | E RTF | F RTF | F realtime |
+| --- | --- | --- | --- | --- | --- | --- |
+| 3s | 2.80s | 0.165 | 0.264 | 0.258 | **0.066** | **15x RT** |
+| 7s | 6.75s | 0.114 | 0.134 | 0.272 | **0.059** | **17x RT** |
+| 15s | 13.90s | 0.136 | OOM | 0.269 | **0.095** | **10x RT** |
+| 30s | 27.38s | 0.143 | OOM | 0.276 | **0.110** | **9x RT** |
+
+### Speedup: Config F vs baselines
+
+| Input | F vs A (Python HAR) | F vs D (MPS) | F vs E (CPU) |
+| --- | --- | --- | --- |
+| 3s | **2.5x** | **4.0x** | **3.9x** |
+| 7s | **1.9x** | **2.3x** | **4.6x** |
+| 15s | **1.4x** | OOM | **2.8x** |
+| 30s | **1.3x** | OOM | **2.5x** |
+
+### Config F stage breakdown (warm median, ms)
+
+| Stage | 3s | 7s | 15s | 30s |
+| --- | --- | --- | --- | --- |
+| Duration CoreML | 10.6 ms | 12.8 ms | 39.6 ms | 48.5 ms |
+| Matrix ops | 0.1 ms | 0.3 ms | 0.5 ms | 1.0 ms |
+| F0Ntrain CoreML | 3.3 ms | 7.5 ms | 35.1 ms | 68.7 ms |
+| Padding | 0.0 ms | 0.0 ms | 0.0 ms | 0.1 ms |
+| DecoderPre CoreML | 2.6 ms | 4.9 ms | 13.0 ms | 28.4 ms |
+| hn-nsf Swift | 9.0 ms | 21.3 ms | 46.9 ms | 95.7 ms |
+| GeneratorFromHar CoreML | 159.1 ms | 348.9 ms | 1188.4 ms | 2780.1 ms |
+
+### Delta vs v5 (M2 Air)
+
+| Input | v5 F | v6 F | Δ F | v5 A | v6 A | Δ A |
+| --- | --- | --- | --- | --- | --- | --- |
+| 3s | 200 ms | 185 ms | **-8%** | 355 ms | 461 ms | +30% |
+| 7s | 326 ms | 396 ms | +22% | 544 ms | 771 ms | +42% |
+| 15s | 783 ms | 1326 ms | +69% | 1178 ms | 1896 ms | +61% |
+| 30s | 1829 ms | 3021 ms | +65% | 2443 ms | 3918 ms | +60% |
+
+GeneratorFromHar at 15s/30s went from 552/1471 ms (v5) to 1188/2780 ms (v6) —
+roughly 2x slower. Both pipelines regressed at 7s+, but Config F regressed more
+at longer buckets because GeneratorFromHar is the dominant stage.
+
+Candidate causes (not yet isolated): (1) `torch==2.5.0` in this machine's
+`requirements-bakeoff.txt` vs `torch==2.6.0` in the v5 provenance — different
+tracing behavior may change MIL op selection; (2) thermal state after the
+back-to-back export run that preceded the bakeoff (30s-bucket exports are
+CPU-intensive); (3) variance in CoreML ANE plan compilation caching across
+fresh `.mlpackage` directories. Re-running with a cold machine and matching
+torch version is the next step to isolate this.
+
+### Interpretation
+
+1. **Config F still wins at every duration.** 185 ms for 3s (15x RT) and 3021 ms
+   for 30s (9x RT) remain the best numbers across all four configs on this
+   machine. Pitch parity and bucket geometry are intact after the full
+   re-export.
+
+2. **GeneratorFromHar dominates Config F wall time more than ever.** It accounts
+   for 86% of wall time at 3s and 92% at 30s — up from 79–80% in v5. Any further
+   optimization must target this package; everything else is already sub-100 ms.
+
+3. **MPS (Config D) is unusable on 24 GB M2 Air for 15s+ inputs.** Even in a solo
+   pass with `PYTORCH_ENABLE_MPS_FALLBACK=1` and no other configs loaded, the
+   MPS pool cap (27 GB) conflicts with the 32 GB already allocated for this
+   process. The production app should never route to MPS on this hardware.
+
+4. **15s/30s regression vs v5 is real and worth investigating.** The +60-70%
+   delta on GeneratorFromHar is large enough that it cannot be attributed to
+   run-to-run variance (5 iterations, medians). Likely attribution: torch 2.5
+   vs 2.6 export, thermal state, or both.
+
+5. **Config D partial data is retained rather than dropped.** 3s/7s still
+   provide an apples-to-apples MPS baseline; 15s/30s MPS numbers are marked OOM.
+
+### Provenance
+
+- Machine: Apple M2 MacBook Air, 24 GB, macOS 15.7.5
+- Git: main branch, commit `fa2a24d`
+- Swift: Apple Swift version 6.2.4
+- Torch: 2.5.0 / coremltools: 8.3.0
+- Order seed: 0, iterations: 5
+- Machine id: `m2_air_v6` (A, E, F combined); `m2_air_v6_mps` (D solo pass)
+- Results: `outputs/bakeoff/results_m2_air_v6.json` (A, E, F),
+  `outputs/bakeoff/results_m2_air_v6_mps.json` (D partial: 3s/7s ok, 15s/30s OOM)
+- Export fix: `export_synth/wrappers.py` — `CoreMLFriendlyTextEncoder.__init__`
+  and `CoreMLFriendlyDurationEncoder.__init__` made idempotent on already-masked
+  LSTM blocks so `SynthesizerModel(kmodel)` after `DurationModel(kmodel)` no
+  longer re-wraps `MaskedBidirectionalLSTM`.
+
+---
+
 ## Bakeoff v2: Controlled benchmark on M1 Mini
 
 **First collected:** 2026-04-15

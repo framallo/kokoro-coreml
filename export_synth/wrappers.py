@@ -116,7 +116,13 @@ class CoreMLFriendlyTextEncoder(nn.Module):
         super().__init__()
         self.embedding = original_encoder.embedding
         self.cnn = original_encoder.cnn
-        self.lstm = MaskedBidirectionalLSTM(original_encoder.lstm)
+        # Idempotent: `DurationModel` and `SynthesizerModel` may both wrap a
+        # shared `KModel.text_encoder` within one export run. If the LSTM is
+        # already masked, reuse it instead of wrapping a wrapper.
+        if isinstance(original_encoder.lstm, MaskedBidirectionalLSTM):
+            self.lstm = original_encoder.lstm
+        else:
+            self.lstm = MaskedBidirectionalLSTM(original_encoder.lstm)
 
     def forward(self, x, input_lengths, m):
         valid_mask = (~m).to(dtype=torch.long)
@@ -137,8 +143,12 @@ class CoreMLFriendlyDurationEncoder(nn.Module):
     """Replaces the original DurationEncoder to avoid pack_padded_sequence."""
     def __init__(self, original_encoder):
         super().__init__()
+        # Idempotent: skip re-wrapping already-masked LSTM blocks when this
+        # encoder is constructed twice from a shared `KModel` during export.
         self.lstms = nn.ModuleList(
-            MaskedBidirectionalLSTM(block) if isinstance(block, nn.LSTM) else block
+            block if isinstance(block, MaskedBidirectionalLSTM)
+            else MaskedBidirectionalLSTM(block) if isinstance(block, nn.LSTM)
+            else block
             for block in original_encoder.lstms
         )
         self.dropout = original_encoder.dropout
