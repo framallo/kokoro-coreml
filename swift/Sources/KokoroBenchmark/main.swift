@@ -64,7 +64,7 @@ struct BatchCommand: Decodable {
 /// evicted when switching buckets to keep memory footprint low — critical on
 /// 24GB machines where keeping all bucket models resident causes the ANE
 /// scheduler to fall back to CPU.
-class ModelCache {
+class ModelCache: KokoroModelProvider {
     let modelsDir: URL
     let config: MLModelConfiguration
     private let durationChoices: [DurationModelChoice]
@@ -94,6 +94,30 @@ class ModelCache {
 
     func selectDurationModel(actualTokens: Int) throws -> DurationModelChoice {
         try KokoroPipeline.selectDurationChoice(durationChoices, actualTokens: actualTokens)
+    }
+
+    func durationModelChoices() -> [DurationModelChoice] {
+        durationChoices
+    }
+
+    func availableBucketSeconds() -> [Int] {
+        PipelineConstants.defaultBuckets
+    }
+
+    func prepareForBucket(bucketSec: Int, tFrames: Int) throws {
+        evictExcept(bucket: bucketSec, tFrames: tFrames)
+    }
+
+    func f0ntrainModel(tFrames: Int) throws -> MLModel {
+        try f0nModel(tFrames: tFrames)
+    }
+
+    func decoderPreModel(bucketSec: Int) throws -> MLModel {
+        try decoderPreModel(bucket: bucketSec)
+    }
+
+    func generatorModel(bucketSec: Int) throws -> MLModel {
+        try generatorModel(bucket: bucketSec)
     }
 
     private func compiledDurationURL(choice: DurationModelChoice) throws -> URL {
@@ -248,402 +272,72 @@ func runPipeline(
         tensorDump = try TensorDumpWriter(directory: URL(fileURLWithPath: tensorDumpPath))
     }
 
-    func withTensorDump(_ body: (inout TensorDumpWriter) throws -> Void) throws {
-        if var writer = tensorDump {
-            try body(&writer)
-            tensorDump = writer
-        }
-    }
-
-    // Pick Duration model. Exact native packages are valid only for their exact
-    // token count; padded mask-aware packages remain the fallback.
-    let actualTokens = benchInput.num_tokens
-    let durationChoice = try cache.selectDurationModel(actualTokens: actualTokens)
-    let T = durationChoice.tokenLength
-
-    let durModel = try cache.durationModel(choice: durationChoice)
-
-    // Build duration input
-    let idsArray = try MLMultiArray(shape: [1, NSNumber(value: T)], dataType: .int32)
-    let maskArray = durationChoice.requiresAttentionMask
-        ? try MLMultiArray(shape: [1, NSNumber(value: T)], dataType: .int32)
-        : nil
-    let refSArray = try MLMultiArray(shape: [1, 256], dataType: .float32)
-    let speedArray = try MLMultiArray(shape: [1], dataType: .float32)
-
-    let idsPtr = idsArray.dataPointer.assumingMemoryBound(to: Int32.self)
-    let refSPtr = refSArray.dataPointer.assumingMemoryBound(to: Float.self)
-
-    for j in 0..<min(benchInput.input_ids.count, T) { idsPtr[j] = benchInput.input_ids[j] }
-    if let maskArray {
-        let maskPtr = maskArray.dataPointer.assumingMemoryBound(to: Int32.self)
-        for j in 0..<min(benchInput.attention_mask.count, T) { maskPtr[j] = benchInput.attention_mask[j] }
-    }
-    for j in 0..<min(benchInput.ref_s.count, 256) { refSPtr[j] = benchInput.ref_s[j] }
-    speedArray[0] = NSNumber(value: benchInput.speed)
-
-    try withTensorDump { writer in
-        try writer.writeMLMultiArray(name: "tokens", array: idsArray)
-        if let maskArray {
-            try writer.writeMLMultiArray(name: "attention_mask", array: maskArray)
-        }
-        try writer.writeMLMultiArray(name: "ref_s", array: refSArray)
-        try writer.writeMLMultiArray(name: "speed", array: speedArray)
-    }
-
-    var durFeatures: [String: MLFeatureValue] = [
-        "input_ids": MLFeatureValue(multiArray: idsArray),
-        "ref_s": MLFeatureValue(multiArray: refSArray),
-        "speed": MLFeatureValue(multiArray: speedArray),
-    ]
-    if let maskArray {
-        durFeatures["attention_mask"] = MLFeatureValue(multiArray: maskArray)
-    }
-    let durInput = try MLDictionaryFeatureProvider(dictionary: durFeatures)
-
-    // Quick duration prediction to determine bucket
-    let durOut = try durModel.prediction(from: durInput)
-    let predDurArr = durOut.featureValue(for: "pred_dur")!.multiArrayValue!
-    let tokenCount = predDurArr.shape.last!.intValue
-    let validTokenCount = min(tokenCount, benchInput.num_tokens)
-    let durationFramesForBucket = try readDurationFrames(from: predDurArr, validCount: validTokenCount)
-    let totalFrames = durationFramesForBucket.reduce(0, +)
-    let canonicalDurForBucket = benchInput.canonical_duration_s ?? (Double(totalFrames * 2) / 80.0)
-    let availableBuckets = PipelineConstants.defaultBuckets
-    let bucketThreshold = Int(ceil(canonicalDurForBucket))
-    let bucketSec = availableBuckets.first(where: { $0 >= bucketThreshold }) ?? availableBuckets.last!
-
-    fputs("  Input: \(inputKey), tokens: \(actualTokens)/\(T), duration=\(durationChoice.cacheKey), canonical=\(String(format: "%.1f", canonicalDurForBucket))s, bucket: \(bucketSec)s\n", stderr)
-
-    // Evict models from other buckets before loading this bucket's models.
-    // On memory-constrained machines (24GB M2 Air), keeping all bucket models
-    // resident causes the ANE scheduler to fall back to CPU for large models.
-    // tFrames must match the exported F0Ntrain model for this bucket.
-    // Using a too-small tFrames silently truncates aligned features via zeroPad3D.
-    let tFrames = PipelineConstants.tFramesForBucket[bucketSec] ?? 400
-    cache.evictExcept(bucket: bucketSec, tFrames: tFrames)
-
-    // Load bucket-specific models (cached if same bucket as last run)
-    let f0nModel = try cache.f0nModel(tFrames: tFrames)
-    let decPreModel = try cache.decoderPreModel(bucket: bucketSec)
-    let genModel = try cache.generatorModel(bucket: bucketSec)
-
-    let bucketSamples = bucketSec * 24000
-    let fullF0Len = Int(round(Double(bucketSamples) / 300.0))
-
-    // Always warm models before the timed block. Even if the harness already
-    // sent a warmup command for this bucket, evictExcept may have dropped the
-    // MLModel instances, and freshly loaded instances need one prediction to
-    // trigger ANE plan compilation. This is cheap (~1ms) if already warm.
-    do {
-        fputs("  Ensuring models are warm...\n", stderr)
-        let _ = try durModel.prediction(from: durInput)
-        // Warm F0Ntrain
-        let warmEnArr = try makeZeroArray3D(channels: 640, time: tFrames)
-        let warmSArr = try makeZeroArray2D(dim: 128)
-        let warmF0nIn = try MLDictionaryFeatureProvider(dictionary: [
-            "en": MLFeatureValue(multiArray: warmEnArr),
-            "s": MLFeatureValue(multiArray: warmSArr),
-        ])
-        let _ = try f0nModel.prediction(from: warmF0nIn)
-        // Warm DecoderPre
-        let warmFC = (fullF0Len - 1) / 2 + 1
-        let warmAsr = try makeZeroArray3D(channels: 512, time: warmFC)
-        let warmF0 = try makeZeroArray3D(channels: 1, time: fullF0Len)
-        let warmN = try makeZeroArray3D(channels: 1, time: fullF0Len)
-        let warmRefS = try makeZeroArray2D(dim: 256)
-        let warmDecIn = try MLDictionaryFeatureProvider(dictionary: [
-            "asr": MLFeatureValue(multiArray: warmAsr),
-            "f0": MLFeatureValue(multiArray: warmF0),
-            "n_input": MLFeatureValue(multiArray: warmN),
-            "ref_s": MLFeatureValue(multiArray: warmRefS),
-        ])
-        let _ = try decPreModel.prediction(from: warmDecIn)
-        // Warm GeneratorFromHar
-        let genShapesWarm = inputShapes(from: genModel)
-        var warmGenInputs: [String: MLFeatureValue] = [:]
-        for (name, shape) in genShapesWarm {
-            if shape.count == 3 {
-                warmGenInputs[name] = MLFeatureValue(multiArray: try makeZeroArray3D(channels: shape[1], time: shape[2]))
-            } else if shape.count == 2 {
-                warmGenInputs[name] = MLFeatureValue(multiArray: try makeZeroArray2D(dim: shape[1]))
-            }
-        }
-        let _ = try genModel.prediction(from: try MLDictionaryFeatureProvider(dictionary: warmGenInputs))
-    }
-
-    // --- Timed run ---
-    fputs("  Running timed iteration...\n", stderr)
-
-    // Stage 1: Duration CoreML
-    let t0 = CFAbsoluteTimeGetCurrent()
-    let durOutput = try durModel.prediction(from: durInput)
-    let t1 = CFAbsoluteTimeGetCurrent()
-    let tDuration = t1 - t0
-
-    // Extract outputs
-    let predDurArray = durOutput.featureValue(for: "pred_dur")!.multiArrayValue!
-    let dArray = durOutput.featureValue(for: "d")!.multiArrayValue!
-    let tEnArray = durOutput.featureValue(for: "t_en")!.multiArrayValue!
-
-    let tc = predDurArray.shape.last!.intValue
-    let validTokens = min(tc, benchInput.num_tokens)
-    let predDur = try readDurationFrames(from: predDurArray, validCount: validTokens)
-    let frames = predDur.reduce(0, +)
-
-    try withTensorDump { writer in
-        try writer.writeMLMultiArray(name: "pred_dur", array: predDurArray)
-        try writer.writeInt32Array(
-            name: "pred_dur_valid",
-            values: predDur.map { Int32($0) },
-            shape: [1, predDur.count]
-        )
-        try writer.writeMLMultiArray(name: "duration_d", array: dArray)
-        try writer.writeMLMultiArray(name: "duration_t_en", array: tEnArray)
-    }
-
-    // Stage 2: Alignment metadata. The actual frame-domain expansion happens
-    // directly in Stage 3; materialize the sparse one-hot matrix only for
-    // tensor dumps.
-    let t2 = CFAbsoluteTimeGetCurrent()
-    let alignment: [Float]? = tensorDumpPath == nil
-        ? nil
-        : buildAlignmentMatrix(predDur: predDur, traceLength: tc, frameCount: frames)
-    let t3 = CFAbsoluteTimeGetCurrent()
-    let tAlignment = t3 - t2
-
-    try withTensorDump { writer in
-        if let alignment {
-            try writer.writeFloatArray(name: "alignment", values: alignment, shape: [1, tc, frames])
-        }
-    }
-
-    // Stage 3: Matrix ops. Alignment is a one-hot repeat operation, so expand
-    // token vectors directly instead of building a sparse matrix and running
-    // dense GEMMs over zeros.
-    let t4 = CFAbsoluteTimeGetCurrent()
-    let en = try alignTokenMajorToFrames(
-        source: dArray,
-        predDur: predDur,
-        channels: 640,
-        frameCount: frames
+    let result = try executeKokoroSynthesis(
+        request: KokoroSynthesisRequest(
+            inputIds: benchInput.input_ids,
+            attentionMask: benchInput.attention_mask,
+            refS: benchInput.ref_s,
+            speed: benchInput.speed,
+            seed: seed,
+            warmModelsBeforeTiming: true,
+            bucketDurationOverrideSeconds: benchInput.canonical_duration_s
+        ),
+        modelProvider: cache,
+        linearWeights: weights.linear_weights,
+        linearBias: weights.linear_bias,
+        tensorDump: &tensorDump
     )
-    let asr = try alignChannelMajorToFrames(
-        source: tEnArray,
-        predDur: predDur,
-        channels: 512,
-        frameCount: frames
+
+    let canonicalDur = benchInput.canonical_duration_s ?? result.audioDurationSeconds
+    let observedDur = Double(result.trimSampleCount) / Double(PipelineConstants.sampleRate)
+
+    fputs(
+        "  Input: \(inputKey), tokens: \(benchInput.num_tokens)/\(result.durationTokenLength), duration=\(result.durationModelCacheKey), canonical=\(String(format: "%.1f", canonicalDur))s, bucket: \(result.bucketSeconds)s\n",
+        stderr
     )
-    let t5 = CFAbsoluteTimeGetCurrent()
-    let tMatrixOps = t5 - t4
-
-    try withTensorDump { writer in
-        try writer.writeMLMultiArray(name: "en", array: en)
-        try writer.writeMLMultiArray(name: "asr", array: asr)
-    }
-
-    // Stage 4: F0Ntrain
-    let t6 = CFAbsoluteTimeGetCurrent()
-    let enPadded = try zeroPad3D(source: en, channels: 640, targetTime: tFrames)
-    let sArray = try makeZeroArray2D(dim: 128)
-    let sP = sArray.dataPointer.assumingMemoryBound(to: Float.self)
-    for j in 0..<128 { sP[j] = benchInput.ref_s[128 + j] }
-
-    try withTensorDump { writer in
-        try writer.writeMLMultiArray(name: "en_padded", array: enPadded)
-        try writer.writeMLMultiArray(name: "s", array: sArray)
-    }
-
-    let f0nInput = try MLDictionaryFeatureProvider(dictionary: [
-        "en": MLFeatureValue(multiArray: enPadded),
-        "s": MLFeatureValue(multiArray: sArray),
-    ])
-    let f0nOutput = try f0nModel.prediction(from: f0nInput)
-    let f0PredArr = f0nOutput.featureValue(for: "F0_pred")!.multiArrayValue!
-    let nPredArr = f0nOutput.featureValue(for: "N_pred")!.multiArrayValue!
-    let t7 = CFAbsoluteTimeGetCurrent()
-    let tF0Ntrain = t7 - t6
-
-    // Extract F0/N. Core ML outputs can be strided, so use the same logical
-    // flattening helper as waveform export.
-    let f0Curve = floatValues(from: f0PredArr)
-    let nCurve = floatValues(from: nPredArr)
-    let f0Len = f0Curve.count
-
-    try withTensorDump { writer in
-        try writer.writeFloatArray(name: "f0", values: f0Curve, shape: [1, f0Len])
-        try writer.writeFloatArray(name: "n", values: nCurve, shape: [1, f0Len])
-    }
-
-    // Stage 5: Padding
-    let t8 = CFAbsoluteTimeGetCurrent()
-    let f0Padded = zeroPad1D(source: f0Curve, targetLength: fullF0Len)
-    let nPadded = zeroPad1D(source: nCurve, targetLength: fullF0Len)
-    // asr was computed in Stage 3 (reused here, not recomputed)
-    let frameCount = (fullF0Len - 1) / 2 + 1
-    let asrPadded = try zeroPad3D(source: asr, channels: 512, targetTime: frameCount)
-    let t9 = CFAbsoluteTimeGetCurrent()
-    let tPadding = t9 - t8
-
-    try withTensorDump { writer in
-        try writer.writeFloatArray(name: "f0_padded", values: f0Padded, shape: [1, fullF0Len])
-        try writer.writeFloatArray(name: "n_padded", values: nPadded, shape: [1, fullF0Len])
-        try writer.writeMLMultiArray(name: "asr_padded", array: asrPadded)
-    }
-
-    // Stage 6: DecoderPre CoreML
-    let t10 = CFAbsoluteTimeGetCurrent()
-    let f0Array3D = try makeZeroArray3D(channels: 1, time: fullF0Len)
-    copyInto(array: f0Array3D, from: f0Padded)
-    let nArray3D = try makeZeroArray3D(channels: 1, time: fullF0Len)
-    copyInto(array: nArray3D, from: nPadded)
-    let decRefS = try makeZeroArray2D(dim: 256)
-    let decRefSP = decRefS.dataPointer.assumingMemoryBound(to: Float.self)
-    for j in 0..<256 { decRefSP[j] = benchInput.ref_s[j] }
-
-    let decPreInput = try MLDictionaryFeatureProvider(dictionary: [
-        "asr": MLFeatureValue(multiArray: asrPadded),
-        "f0": MLFeatureValue(multiArray: f0Array3D),
-        "n_input": MLFeatureValue(multiArray: nArray3D),
-        "ref_s": MLFeatureValue(multiArray: decRefS),
-    ])
-    let decPreOutput = try decPreModel.prediction(from: decPreInput)
-    let xPre = decPreOutput.featureValue(for: "x_pre")!.multiArrayValue!
-    let t11 = CFAbsoluteTimeGetCurrent()
-    let tDecoderPre = t11 - t10
-
-    try withTensorDump { writer in
-        try writer.writeMLMultiArray(name: "x_pre", array: xPre)
-    }
-
-    // Stage 7: hn-nsf Swift
-    let t12 = CFAbsoluteTimeGetCurrent()
-    let harFlat: [Float]
-    let harFrames: Int
-    let harDebug: HarDebugComponents?
-    if tensorDumpPath != nil {
-        let components = buildHarComponents(
-            f0Padded: f0Padded,
-            linearWeights: weights.linear_weights,
-            linearBias: weights.linear_bias,
-            seed: seed
-        )
-        harFlat = components.har
-        harFrames = components.nFrames
-        harDebug = components
-    } else {
-        let built = buildHar(
-            f0Padded: f0Padded,
-            linearWeights: weights.linear_weights,
-            linearBias: weights.linear_bias,
-            seed: seed
-        )
-        harFlat = built.har
-        harFrames = built.nFrames
-        harDebug = nil
-    }
-    let t13 = CFAbsoluteTimeGetCurrent()
-    let tHnsf = t13 - t12
-
-    try withTensorDump { writer in
-        if let harDebug {
-            try writer.writeFloatArray(name: "har_source", values: harDebug.harSource, shape: [1, harDebug.harSource.count])
-            try writer.writeFloatArray(name: "har_magnitude", values: harDebug.magnitude, shape: [1, 11, harDebug.nFrames])
-            try writer.writeFloatArray(name: "har_phase", values: harDebug.phase, shape: [1, 11, harDebug.nFrames])
-        }
-        try writer.writeFloatArray(name: "har", values: harFlat, shape: [1, 22, harFrames])
-    }
-
-    // Stage 8: GeneratorFromHar CoreML
-    let t14 = CFAbsoluteTimeGetCurrent()
-    let harArray = try makeZeroArray3D(channels: 22, time: harFrames)
-    copyInto(array: harArray, from: harFlat)
-    let genRefS = try makeZeroArray2D(dim: 256)
-    let genRefSP = genRefS.dataPointer.assumingMemoryBound(to: Float.self)
-    for j in 0..<256 { genRefSP[j] = benchInput.ref_s[j] }
-
-    let genShapes = inputShapes(from: genModel)
-    let xPreExpTime = genShapes["x_pre"]?.last ?? xPre.shape.last!.intValue
-    let harExpTime = genShapes["har"]?.last ?? harFrames
-    let xPrePadded = try zeroPad3D(source: xPre, channels: xPre.shape[1].intValue, targetTime: xPreExpTime)
-    let harPadded = try zeroPad3D(source: harArray, channels: 22, targetTime: harExpTime)
-
-    try withTensorDump { writer in
-        try writer.writeMLMultiArray(name: "x_pre_padded", array: xPrePadded)
-        try writer.writeMLMultiArray(name: "har_padded", array: harPadded)
-    }
-
-    let genInput = try MLDictionaryFeatureProvider(dictionary: [
-        "x_pre": MLFeatureValue(multiArray: xPrePadded),
-        "ref_s": MLFeatureValue(multiArray: genRefS),
-        "har": MLFeatureValue(multiArray: harPadded),
-    ])
-    let genOutput = try genModel.prediction(from: genInput)
-    let t15 = CFAbsoluteTimeGetCurrent()
-    let tGenerator = t15 - t14
-
-    // Stage 9: Trim
-    let t16 = CFAbsoluteTimeGetCurrent()
-    let waveformKey = genOutput.featureNames.contains("waveform") ? "waveform" : genOutput.featureNames.first!
-    let waveformArr = genOutput.featureValue(for: waveformKey)!.multiArrayValue!
-    let origF0Len = frames * 2
-    let targetLen = Int(round(Double(origF0Len) / 80.0 * 24000.0))
-    let trimLen = min(waveformArr.count, targetLen)
-    let samples = floatValues(from: waveformArr, limit: trimLen)
-    let t17 = CFAbsoluteTimeGetCurrent()
-    let tTrim = t17 - t16
-
-    try withTensorDump { writer in
-        let waveformValues = floatValues(from: waveformArr)
-        try writer.writeFloatArray(
-            name: "waveform_full",
-            values: waveformValues,
-            shape: waveformArr.shape.map { $0.intValue }
-        )
-        try writer.writeFloatArray(name: "waveform", values: samples, shape: [trimLen])
-    }
 
     if let wavPath = wavOutputPath {
-        try writeWavMono16(path: wavPath, samples: samples, sampleRate: 24000)
+        try writeWavMono16(
+            path: wavPath,
+            samples: result.audio,
+            sampleRate: UInt32(PipelineConstants.sampleRate)
+        )
         fputs("  WAV written: \(wavPath)\n", stderr)
     }
 
-    let wallTime = t17 - t0
-    let canonicalDur = benchInput.canonical_duration_s ?? (Double(origF0Len) / 80.0)
-    let observedDur = Double(trimLen) / 24000.0
-
-    let result: [String: Any] = [
+    let timings = result.timings
+    let resultRecord: [String: Any] = [
         "config": "f",
         "input_key": inputKey,
         "status": "ok",
         "error": NSNull(),
-        "wall_time_s": round(wallTime * 1e6) / 1e6,
+        "wall_time_s": round(result.wallTimeSeconds * 1e6) / 1e6,
         "canonical_audio_duration_s": round(canonicalDur * 1e6) / 1e6,
         "observed_audio_duration_s": round(observedDur * 1e6) / 1e6,
-        "predicted_duration_frames": frames,
-        "predicted_duration_tokens": predDur.count,
-        "rtf_canonical": canonicalDur > 0 ? round((wallTime / canonicalDur) * 1e6) / 1e6 : NSNull(),
-        "rtf_observed": observedDur > 0 ? round((wallTime / observedDur) * 1e6) / 1e6 : NSNull(),
-        "speed_vs_realtime_canonical": wallTime > 0 ? round((canonicalDur / wallTime) * 100) / 100 : NSNull(),
-        "bucket_used": "\(bucketSec)s",
-        "t_duration_coreml_s": round(tDuration * 1e6) / 1e6,
-        "t_alignment_s": round(tAlignment * 1e6) / 1e6,
-        "t_matrix_ops_s": round(tMatrixOps * 1e6) / 1e6,
-        "t_f0ntrain_coreml_s": round(tF0Ntrain * 1e6) / 1e6,
-        "t_padding_s": round(tPadding * 1e6) / 1e6,
-        "t_decoder_pre_coreml_s": round(tDecoderPre * 1e6) / 1e6,
-        "t_hnsf_swift_s": round(tHnsf * 1e6) / 1e6,
-        "t_coreml_predict_s": round(tGenerator * 1e6) / 1e6,
-        "t_trim_s": round(tTrim * 1e6) / 1e6,
+        "predicted_duration_frames": result.predictedDurationFrames,
+        "predicted_duration_tokens": result.predictedDurationTokens,
+        "rtf_canonical": canonicalDur > 0 ? round((result.wallTimeSeconds / canonicalDur) * 1e6) / 1e6 : NSNull(),
+        "rtf_observed": observedDur > 0 ? round((result.wallTimeSeconds / observedDur) * 1e6) / 1e6 : NSNull(),
+        "speed_vs_realtime_canonical": result.wallTimeSeconds > 0 ? round((canonicalDur / result.wallTimeSeconds) * 100) / 100 : NSNull(),
+        "bucket_used": "\(result.bucketSeconds)s",
+        "t_duration_coreml_s": round(timings.durationCoreML * 1e6) / 1e6,
+        "t_alignment_s": round(timings.alignment * 1e6) / 1e6,
+        "t_matrix_ops_s": round(timings.matrixOps * 1e6) / 1e6,
+        "t_f0ntrain_coreml_s": round(timings.f0ntrainCoreML * 1e6) / 1e6,
+        "t_padding_s": round(timings.padding * 1e6) / 1e6,
+        "t_decoder_pre_coreml_s": round(timings.decoderPre * 1e6) / 1e6,
+        "t_hnsf_swift_s": round(timings.hnsfSwift * 1e6) / 1e6,
+        "t_coreml_predict_s": round(timings.generatorCoreML * 1e6) / 1e6,
+        "t_trim_s": round(timings.trim * 1e6) / 1e6,
         "t_prefix_extract_s": NSNull(),
         "t_decoder_pre_cpu_s": NSNull(),
         "t_har_builder_cpu_s": NSNull(),
         "t_orchestration_s": NSNull(),
-        "duration_model": durationChoice.cacheKey,
-        "duration_model_allows_padding": durationChoice.allowsPadding,
+        "duration_model": result.durationModelCacheKey,
+        "duration_model_allows_padding": result.durationModelAllowsPadding,
     ]
 
-    try withTensorDump { writer in
+    if var writer = tensorDump {
         try writer.writeManifest(metadata: [
             "producer": "swift",
             "executable": "kokoro-bench",
@@ -652,27 +346,32 @@ func runPipeline(
             "voice": benchInput.voice,
             "speed": benchInput.speed,
             "seed": seed,
-            "bucket_seconds": bucketSec,
-            "duration_token_length": T,
-            "duration_model": durationChoice.cacheKey,
-            "duration_model_allows_padding": durationChoice.allowsPadding,
+            "bucket_seconds": result.bucketSeconds,
+            "duration_token_length": result.durationTokenLength,
+            "duration_model": result.durationModelCacheKey,
+            "duration_model_allows_padding": result.durationModelAllowsPadding,
             "num_tokens": benchInput.num_tokens,
-            "natural_frames": frames,
+            "natural_frames": result.predictedDurationFrames,
             "canonical_duration_s": benchInput.canonical_duration_s ?? NSNull(),
             "observed_audio_duration_s": observedDur,
-            "t_frames": tFrames,
-            "full_f0_len": fullF0Len,
-            "decoder_frame_count": frameCount,
-            "x_pre_expected_time": xPreExpTime,
-            "har_expected_time": harExpTime,
-            "trim_len": trimLen,
-            "hnsf_reference_command": "uv run python scripts/validate_hnsf_swift.py generate",
+            "t_frames": result.tFrames,
+            "full_f0_len": result.fullF0Length,
+            "decoder_frame_count": result.decoderFrameCount,
+            "x_pre_expected_time": result.xPreExpectedTime,
+            "har_expected_time": result.harExpectedTime,
+            "trim_len": result.trimSampleCount,
+            "hnsf_reference_command": "uv run --no-sync python scripts/validate_hnsf_swift.py generate",
         ])
+        tensorDump = writer
     }
 
-    try validateDurationAgreement(inputKey: inputKey, canonical: benchInput.canonical_duration_s, observed: observedDur)
+    try validateDurationAgreement(
+        inputKey: inputKey,
+        canonical: benchInput.canonical_duration_s,
+        observed: observedDur
+    )
 
-    return try JSONSerialization.data(withJSONObject: result, options: [.sortedKeys])
+    return try JSONSerialization.data(withJSONObject: resultRecord, options: [.sortedKeys])
 }
 
 // MARK: - Single-shot mode

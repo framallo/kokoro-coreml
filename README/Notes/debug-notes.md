@@ -80,6 +80,8 @@ Changes:
   `.float16`, with boxed subscript fallback for unsupported layouts.
 - Added Swift coverage for contiguous `limit` reads, strided `Float16` reads,
   direct alignment expansion, and alignment shape validation.
+- Moved the timed Swift synthesis orchestration into a shared executor used by
+  both `KokoroPipeline.synthesize(...)` and `kokoro-bench`.
 - Kept full alignment/waveform materialization for tensor-dump mode only.
 
 ### Verification
@@ -96,7 +98,10 @@ uv run --no-sync python scripts/bakeoff_harness.py run \
 Outcome: `80` ok records across 4 configs, 4 inputs, and 5 reps. The original
 result JSON was collected before the final cleanup commit, so it records
 `git_dirty: true`; use the `--no-sync` command above for reruns after
-`scripts/setup_bakeoff.sh`.
+`scripts/setup_bakeoff.sh`. The later audit refactor that moved timed Swift
+synthesis into the shared pipeline executor was checked with
+`outputs/bakeoff/results_shared_executor_smoke_20260417.json`:
+`3s`, `7s`, `15s`, and `30s` all returned `status=ok`.
 
 | Input | A wall | F wall | F vs A |
 | --- | ---: | ---: | ---: |

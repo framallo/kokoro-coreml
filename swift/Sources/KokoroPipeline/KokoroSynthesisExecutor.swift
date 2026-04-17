@@ -27,6 +27,7 @@ public struct KokoroSynthesisRequest {
     public let speed: Float
     public let seed: UInt64
     public let warmModelsBeforeTiming: Bool
+    public let bucketDurationOverrideSeconds: Double?
 
     public init(
         inputIds: [Int32],
@@ -34,7 +35,8 @@ public struct KokoroSynthesisRequest {
         refS: [Float],
         speed: Float = 1.0,
         seed: UInt64 = 42,
-        warmModelsBeforeTiming: Bool = false
+        warmModelsBeforeTiming: Bool = false,
+        bucketDurationOverrideSeconds: Double? = nil
     ) {
         self.inputIds = inputIds
         self.attentionMask = attentionMask
@@ -42,6 +44,7 @@ public struct KokoroSynthesisRequest {
         self.speed = speed
         self.seed = seed
         self.warmModelsBeforeTiming = warmModelsBeforeTiming
+        self.bucketDurationOverrideSeconds = bucketDurationOverrideSeconds
     }
 }
 
@@ -54,10 +57,6 @@ private struct DurationInputBundle {
 }
 
 private struct DurationProbe {
-    let choice: DurationModelChoice
-    let input: DurationInputBundle
-    let predDur: [Int]
-    let totalFrames: Int
     let bucketSec: Int
     let tFrames: Int
     let fullF0Len: Int
@@ -97,14 +96,14 @@ public func executeKokoroSynthesis(
 
     if request.warmModelsBeforeTiming {
         let probe = try probeDurationAndBucket(
-            choice: durationChoice,
             input: durationInput,
             durationModel: durationModel,
             modelProvider: modelProvider,
             validTokenLimit: validTokenCount(
                 predDurTokenCount: durationChoice.tokenLength,
                 attentionMask: request.attentionMask
-            )
+            ),
+            bucketDurationOverrideSeconds: request.bucketDurationOverrideSeconds
         )
         try warmModels(
             probe: probe,
@@ -133,6 +132,7 @@ public func executeKokoroSynthesis(
     let predDur = try readDurationFrames(from: predDurArray, validCount: validTokens)
     let frames = predDur.reduce(0, +)
     let totalSeconds = Double(frames * 2) / PipelineConstants.f0FrameRate
+    let bucketSelectionSeconds = request.bucketDurationOverrideSeconds ?? totalSeconds
 
     try writeDurationOutputs(
         predDurArray: predDurArray,
@@ -182,7 +182,7 @@ public func executeKokoroSynthesis(
     // Stage 4: F0Ntrain Core ML.
     let t6 = CFAbsoluteTimeGetCurrent()
     guard let bucketSec = selectBucket(
-        totalSeconds: totalSeconds,
+        totalSeconds: bucketSelectionSeconds,
         availableBuckets: modelProvider.availableBucketSeconds()
     ) else {
         throw PipelineError.noBucketAvailable
@@ -477,11 +477,11 @@ private func writeDurationOutputs(
 }
 
 private func probeDurationAndBucket(
-    choice: DurationModelChoice,
     input: DurationInputBundle,
     durationModel: MLModel,
     modelProvider: KokoroModelProvider,
-    validTokenLimit: Int
+    validTokenLimit: Int,
+    bucketDurationOverrideSeconds: Double?
 ) throws -> DurationProbe {
     let output = try durationModel.prediction(from: input.provider)
     let predDurArray = output.featureValue(for: "pred_dur")!.multiArrayValue!
@@ -489,7 +489,7 @@ private func probeDurationAndBucket(
     let totalFrames = predDur.reduce(0, +)
     let totalSeconds = Double(totalFrames * 2) / PipelineConstants.f0FrameRate
     guard let bucketSec = selectBucket(
-        totalSeconds: totalSeconds,
+        totalSeconds: bucketDurationOverrideSeconds ?? totalSeconds,
         availableBuckets: modelProvider.availableBucketSeconds()
     ) else {
         throw PipelineError.noBucketAvailable
@@ -501,10 +501,6 @@ private func probeDurationAndBucket(
     let bucketSamples = bucketSec * PipelineConstants.sampleRate
     let fullF0Len = Int(round(Double(bucketSamples) / Double(HarmonicConstants.upsampleScale)))
     return DurationProbe(
-        choice: choice,
-        input: input,
-        predDur: predDur,
-        totalFrames: totalFrames,
         bucketSec: bucketSec,
         tFrames: tFrames,
         fullF0Len: fullF0Len

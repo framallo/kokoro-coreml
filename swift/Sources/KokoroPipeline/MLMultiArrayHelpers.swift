@@ -241,46 +241,30 @@ public func alignTokenMajorToFrames(
             actual: sourceShape
         )
     }
-    let result = try makeZeroArray3D(channels: channels, time: frameCount)
-    let dstPtr = result.dataPointer.assumingMemoryBound(to: Float.self)
     let tokenCount = min(predDur.count, sourceShape[1])
     let strides = source.strides.map { $0.intValue }
     let canUsePointer = source.dataType == .float32 && strides.count >= 3
 
-    var frameStart = 0
     if canUsePointer {
         let srcPtr = source.dataPointer.assumingMemoryBound(to: Float.self)
-        for token in 0..<tokenCount {
-            let repeatCount = max(0, min(predDur[token], frameCount - frameStart))
-            if repeatCount == 0 { continue }
-            let srcTokenBase = token * strides[1]
-            for channel in 0..<channels {
-                let value = srcPtr[srcTokenBase + channel * strides[2]]
-                let dstBase = channel * frameCount + frameStart
-                for frameOffset in 0..<repeatCount {
-                    dstPtr[dstBase + frameOffset] = value
-                }
-            }
-            frameStart += repeatCount
-            if frameStart >= frameCount { break }
-        }
-    } else {
-        for token in 0..<tokenCount {
-            let repeatCount = max(0, min(predDur[token], frameCount - frameStart))
-            if repeatCount == 0 { continue }
-            for channel in 0..<channels {
-                let value = source[[0, token, channel] as [NSNumber]].floatValue
-                let dstBase = channel * frameCount + frameStart
-                for frameOffset in 0..<repeatCount {
-                    dstPtr[dstBase + frameOffset] = value
-                }
-            }
-            frameStart += repeatCount
-            if frameStart >= frameCount { break }
+        return try alignValuesToFrames(
+            predDur: predDur,
+            channels: channels,
+            tokenCount: tokenCount,
+            frameCount: frameCount
+        ) { token, channel in
+            srcPtr[token * strides[1] + channel * strides[2]]
         }
     }
 
-    return result
+    return try alignValuesToFrames(
+        predDur: predDur,
+        channels: channels,
+        tokenCount: tokenCount,
+        frameCount: frameCount
+    ) { token, channel in
+        source[[0, token, channel] as [NSNumber]].floatValue
+    }
 }
 
 /// Align token-domain features to frame-domain features by repeating each
@@ -304,42 +288,55 @@ public func alignChannelMajorToFrames(
             actual: sourceShape
         )
     }
-    let result = try makeZeroArray3D(channels: channels, time: frameCount)
-    let dstPtr = result.dataPointer.assumingMemoryBound(to: Float.self)
     let tokenCount = min(predDur.count, sourceShape[2])
     let strides = source.strides.map { $0.intValue }
     let canUsePointer = source.dataType == .float32 && strides.count >= 3
 
-    var frameStart = 0
     if canUsePointer {
         let srcPtr = source.dataPointer.assumingMemoryBound(to: Float.self)
-        for token in 0..<tokenCount {
-            let repeatCount = max(0, min(predDur[token], frameCount - frameStart))
-            if repeatCount == 0 { continue }
-            for channel in 0..<channels {
-                let value = srcPtr[channel * strides[1] + token * strides[2]]
-                let dstBase = channel * frameCount + frameStart
-                for frameOffset in 0..<repeatCount {
-                    dstPtr[dstBase + frameOffset] = value
-                }
-            }
-            frameStart += repeatCount
-            if frameStart >= frameCount { break }
+        return try alignValuesToFrames(
+            predDur: predDur,
+            channels: channels,
+            tokenCount: tokenCount,
+            frameCount: frameCount
+        ) { token, channel in
+            srcPtr[channel * strides[1] + token * strides[2]]
         }
-    } else {
-        for token in 0..<tokenCount {
-            let repeatCount = max(0, min(predDur[token], frameCount - frameStart))
-            if repeatCount == 0 { continue }
-            for channel in 0..<channels {
-                let value = source[[0, channel, token] as [NSNumber]].floatValue
-                let dstBase = channel * frameCount + frameStart
-                for frameOffset in 0..<repeatCount {
-                    dstPtr[dstBase + frameOffset] = value
-                }
+    }
+
+    return try alignValuesToFrames(
+        predDur: predDur,
+        channels: channels,
+        tokenCount: tokenCount,
+        frameCount: frameCount
+    ) { token, channel in
+        source[[0, channel, token] as [NSNumber]].floatValue
+    }
+}
+
+private func alignValuesToFrames(
+    predDur: [Int],
+    channels: Int,
+    tokenCount: Int,
+    frameCount: Int,
+    valueAt: (Int, Int) -> Float
+) throws -> MLMultiArray {
+    let result = try makeZeroArray3D(channels: channels, time: frameCount)
+    let dstPtr = result.dataPointer.assumingMemoryBound(to: Float.self)
+    var frameStart = 0
+
+    for token in 0..<tokenCount {
+        let repeatCount = max(0, min(predDur[token], frameCount - frameStart))
+        if repeatCount == 0 { continue }
+        for channel in 0..<channels {
+            let value = valueAt(token, channel)
+            let dstBase = channel * frameCount + frameStart
+            for frameOffset in 0..<repeatCount {
+                dstPtr[dstBase + frameOffset] = value
             }
-            frameStart += repeatCount
-            if frameStart >= frameCount { break }
         }
+        frameStart += repeatCount
+        if frameStart >= frameCount { break }
     }
 
     return result

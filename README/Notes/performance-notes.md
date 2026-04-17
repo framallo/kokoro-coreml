@@ -145,8 +145,10 @@ available under `outputs/bakeoff/listen/`:
 - Rerun command after `scripts/setup_bakeoff.sh`: `BAKEOFF_SKIP_SMOKE=1 PYTORCH_ENABLE_MPS_FALLBACK=1 uv run --no-sync python scripts/bakeoff_harness.py run --configs a,d,e,f --iterations 5 --order-seed 0 --machine-id m2_ultra_parity_final_20260417`
 - Result: `outputs/bakeoff/results_m2_ultra_parity_final_20260417.json`
 - Result provenance note: the JSON was collected before the final cleanup
-  commit and records `git_dirty: true`; the Swift source changes that affect
-  Config F were already present in that working tree.
+  commit and records `git_dirty: true`; the Config F hot-path fixes were
+  already present in that working tree. The later shared-executor audit refactor
+  was verified separately with
+  `outputs/bakeoff/results_shared_executor_smoke_20260417.json`.
 - F-only confirmation: `outputs/bakeoff/results_m2_ultra_f_stride_float16_final_20260417.json`
 - Listen samples:
   - `outputs/bakeoff/listen/config_f_3s.wav`

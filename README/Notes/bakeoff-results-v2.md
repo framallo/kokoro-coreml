@@ -11,6 +11,10 @@ are populated here because they come from the completed controlled run on the
 working tree used during this session. The result JSON records `git_dirty: true`
 because it was collected before the final cleanup commit; the M2 Air and M1 Mini
 sections are placeholders until those machines rerun the same setup and harness.
+A later audit refactor moved the timed Swift synthesis orchestration into the
+shared pipeline library. That refactor was verified with the F-only smoke result
+`outputs/bakeoff/results_shared_executor_smoke_20260417.json`; it does not
+replace the full A/D/E/F medians below.
 
 The useful rule from the latest debugging pass is simple: measure the deployed
 pipeline boundary, not an attractive subgraph. Config F wins on M2 Ultra only
@@ -47,6 +51,7 @@ with audio-quality gates before ranking configurations.
 **Machine:** Apple M2 Ultra Mac Studio, 64 GB
 **Status:** Complete
 **Result file:** `outputs/bakeoff/results_m2_ultra_parity_final_20260417.json`
+**Shared-executor smoke:** `outputs/bakeoff/results_shared_executor_smoke_20260417.json`
 
 ### Wall Time
 
