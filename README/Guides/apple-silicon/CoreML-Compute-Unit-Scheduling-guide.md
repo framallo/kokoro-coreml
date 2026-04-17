@@ -8,6 +8,7 @@ April 14, 2026
 
 - **[PyTorch MPS and Core ML field guide](pytorch-mps.md)**: Broader Apple Silicon training and conversion context next to Core ML deployment.
 - **[Hugging Face Transformers on Apple Silicon](HF-transformers-MPS-guide.md)**: MPS-side Trainer and dtype pitfalls that surface again at export time.
+- **[PyTorch LSTM → Core ML (padding, EnumeratedShapes)](CoreML-LSTM-export-guide.md)**: BiLSTM padding, MIL `lstm` limits, `ct.EnumeratedShapes`, and ANE tradeoffs for recurrent exports.
 
 The landscape of on-device machine learning execution on Apple Silicon is defined by a delicate interplay between high-level software abstraction and rigid, heterogeneous hardware architecture. Core ML serves as the primary orchestration layer, designed to seamlessly distribute mathematical operations across the Central Processing Unit (CPU), Graphics Processing Unit (GPU), and the highly specialized Apple Neural Engine (ANE).1 However, beneath this polished abstraction lies a complex, opaque scheduling heuristic characterized by stringent hardware constraints, volatile graph partitioning logic, and a pervasive phenomenon known within the engineering community as "silent fallback".2
 

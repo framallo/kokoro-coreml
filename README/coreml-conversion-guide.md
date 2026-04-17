@@ -248,6 +248,7 @@ All tested on macOS 14.5 (Apple Silicon).
 ## Appendix E – Resources
 
 * **Apple docs:** Core ML Programming Guide, Core ML Tools repo, WWDC 2024 “Optimize for ANE”.
+* **Recurrent exports (BiLSTM, padding, EnumeratedShapes):** [PyTorch LSTM → Core ML on Apple Silicon](Guides/apple-silicon/CoreML-LSTM-export-guide.md).
 * **Community:** `coremltools` Slack, `ml-c` Discord, Whisper & Phi GitHub issues tagged `coreml`.
 * **Visual tools:** Netron, CoreMLProfiler (open‑source).
 * **Reference repos:** `whisper.cpp`, `ane-transformers`, `coreml-stable-diffusion`, `mps-transformer`.
