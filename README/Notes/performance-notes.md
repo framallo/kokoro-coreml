@@ -38,6 +38,86 @@ Inputs used:
 - `tiny`: `"Hello world!"`
 - `long`: bakeoff-style longer sentence routed to the 10s HAR-post bucket
 
+## Bakeoff v10: PyTorch baselines on M1 Mini (Configs A/F blocked)
+
+**First collected:** 2026-04-17
+**Status:** Partial — Configs D and E complete; Configs A and F blocked by broken `decoder_har_post` exports
+
+### Summary
+
+Ran the controlled bakeoff on an Apple M1 Mini (16 GB, macOS 15.7.5). During
+setup the pre-existing `kokoro_decoder_har_post_<N>s.mlpackage` artifacts (dated
+Apr 15) were found to emit half the advertised samples (e.g. 3s bucket →
+`waveform (1, 1, 36000)` instead of 72000). This made Config F trip the
+canonical-duration-agreement guard: observed 1.5s vs canonical 2.8s at every
+bucket. Attempting to re-export with
+`uv run --no-sync python -m export_synth.main --mode decoder-har --buckets 3s,7s,10s,15s,30s -o coreml`
+failed with `AttributeError: 'MaskedBidirectionalLSTM' object has no attribute 'num_layers'`,
+so the HAR-post buckets could not be rebuilt in this session.
+
+Configs D (PyTorch MPS) and E (PyTorch CPU) ran cleanly and are published
+below. Config A (Python HAR-post) and Config F (Swift + Core ML) are marked
+`config_unavailable` pending a fix to `export_synth/wrappers.py` so the
+GeneratorFromHar trace can see `num_layers` on the duration/prosody LSTMs.
+
+### End-to-end wall time (warm median, milliseconds)
+
+| Input | Audio | A (Python HAR) | D (MPS) | E (CPU) | F (Swift) |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| 3s | 2.80s | — | 456 ms | 768 ms | — |
+| 7s | 6.75s | — | 960 ms | 1998 ms | — |
+| 15s | 13.90s | — | 1847 ms | 4007 ms | — |
+| 30s | 27.38s | — | 3680 ms | 8074 ms | — |
+
+### RTF
+
+| Input | D RTF | E RTF |
+| --- | ---: | ---: |
+| 3s | 0.163 | 0.274 |
+| 7s | 0.142 | 0.296 |
+| 15s | 0.133 | 0.288 |
+| 30s | 0.134 | 0.295 |
+
+### Cross-machine comparison (D and E only)
+
+Config D (PyTorch MPS), 30s input wall time: M2 Ultra v9 1602 ms → M1 Mini
+3680 ms (**2.3× slower**). Config E (PyTorch CPU), 30s: M2 Ultra v9 2714 ms →
+M1 Mini 8074 ms (**3.0× slower**).
+
+| Input | D (M2 Ultra, v9) | D (M1 Mini) | Mini/Ultra | E (M2 Ultra, v9) | E (M1 Mini) | Mini/Ultra |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: |
+| 3s | 225 ms | 456 ms | 2.0× | 409 ms | 768 ms | 1.9× |
+| 7s | 412 ms | 960 ms | 2.3× | 811 ms | 1998 ms | 2.5× |
+| 15s | 673 ms | 1847 ms | 2.7× | 1467 ms | 4007 ms | 2.7× |
+| 30s | 1602 ms | 3680 ms | 2.3× | 2714 ms | 8074 ms | 3.0× |
+
+### Interpretation
+
+1. **M1 Mini is ~2–3× slower than M2 Ultra on the PyTorch baselines.** Gap
+   widens slightly on long inputs and on CPU, consistent with the Ultra's
+   larger GPU and memory bandwidth.
+2. **E/D ratio on M1 Mini is ~2.2× at long inputs** (8074 / 3680), roughly
+   matching M2 Ultra's E/D ratio (~1.7× at 30s). MPS still pays off on the
+   Mini, but less dramatically.
+3. **No Config F numbers here.** The half-samples `decoder_har_post` artifacts
+   are an upstream export bug, not a Swift-pipeline regression. Once
+   `export_synth` is fixed and the HAR-post mlpackages are re-exported, this
+   machine should be re-bakedoff for A and F.
+
+### Provenance
+
+- Machine: Apple M1 Mini, 16 GB, macOS 15.7.5
+- Command: `BAKEOFF_SKIP_SMOKE=1 PYTORCH_ENABLE_MPS_FALLBACK=1 uv run --no-sync python scripts/bakeoff_harness.py run --configs a,d,e --iterations 5 --order-seed 0 --machine-id m1_mini`
+- Result: `outputs/bakeoff/results_m1_mini.json` (60 records; 20 × `config_unavailable` for A, 20 × ok for D, 20 × ok for E)
+- Order seed: 0, iterations: 5
+- Known blockers:
+  - `coreml/kokoro_decoder_har_post_*.mlpackage` produced at
+    `bucket_samples / 2` output length; re-export needed.
+  - `export_synth.main --mode decoder-har` raises
+    `AttributeError: 'MaskedBidirectionalLSTM' object has no attribute 'num_layers'`
+    on the current repo; fix required before the HAR-post mlpackages can be
+    regenerated.
+
 ## Bakeoff v9: Config F host-materialization fix on M2 Ultra
 
 **First collected:** 2026-04-17
