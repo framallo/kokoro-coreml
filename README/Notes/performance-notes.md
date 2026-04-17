@@ -38,6 +38,95 @@ Inputs used:
 - `tiny`: `"Hello world!"`
 - `long`: bakeoff-style longer sentence routed to the 10s HAR-post bucket
 
+## Bakeoff v7: Duration-correct Config F on M2 Ultra
+
+**First collected:** 2026-04-16
+**Status:** Complete
+
+### Summary
+
+Reran the complete A/D/E/F bakeoff after fixing Config F Duration padding
+semantics for all enum shapes. This run proves Config F now produces
+canonical-duration audio, but it also shows the corrected Swift/Core ML path is
+slower than Config A at every length on this M2 Ultra.
+
+The fix replaced padded bidirectional LSTM execution in the Duration export
+with mask-aware recurrent unrolls. That restores audio parity, but it makes the
+large static Duration graphs expensive, especially `T=512`.
+
+### Audio gate
+
+Before the bakeoff, Config F listen samples were regenerated with:
+
+```bash
+uv run python scripts/bakeoff_listen.py --quality-plots
+```
+
+All four samples passed the waveform health gate:
+
+| Input | Observed duration | RMS | Active32 | ZCR | Decision |
+| --- | ---: | ---: | ---: | ---: | --- |
+| 3s | `2.800s` | `4607.8` | `78.863%` | `9.128%` | `needs_listening` |
+| 7s | `6.750s` | `4500.8` | `84.739%` | `10.063%` | `needs_listening` |
+| 15s | `13.900s` | `5147.8` | `86.396%` | `10.785%` | `needs_listening` |
+| 30s | `27.400s` | `4309.6` | `86.300%` | `10.937%` | `needs_listening` |
+
+### End-to-end wall time (warm median, milliseconds)
+
+| Input | Audio | A (Python HAR) | D (MPS) | E (CPU) | F (Swift) |
+| --- | --- | ---: | ---: | ---: | ---: |
+| 3s | 2.80s | **162 ms** | 188 ms | 349 ms | 169 ms |
+| 7s | 6.75s | **247 ms** | 345 ms | 642 ms | 368 ms |
+| 15s | 13.90s | **482 ms** | 640 ms | 1224 ms | 766 ms |
+| 30s | 27.38s | **713 ms** | 1340 ms | 2231 ms | 1595 ms |
+
+### RTF
+
+| Input | A RTF | D RTF | E RTF | F RTF |
+| --- | ---: | ---: | ---: | ---: |
+| 3s | **0.058** | 0.067 | 0.125 | 0.060 |
+| 7s | **0.037** | 0.051 | 0.095 | 0.054 |
+| 15s | **0.035** | 0.046 | 0.088 | 0.055 |
+| 30s | **0.026** | 0.049 | 0.082 | 0.058 |
+
+### Speedup: Config F vs baselines
+
+| Input | F vs A (Python HAR) | F vs D (MPS) | F vs E (CPU) |
+| --- | ---: | ---: | ---: |
+| 3s | 1.0x | **1.1x** | **2.1x** |
+| 7s | 0.7x | 0.9x | **1.7x** |
+| 15s | 0.6x | 0.8x | **1.6x** |
+| 30s | 0.4x | 0.8x | **1.4x** |
+
+### Interpretation
+
+1. **Config A is not cheating.** It produces valid, canonical-duration audio and
+   remains the fastest path after Config F is made duration-correct.
+2. **Config F is now correct, not fast.** The old shorter outputs were invalid
+   for performance comparison. After padding semantics are fixed, F no longer
+   wins against A.
+3. **The fixed Duration stage is a new bottleneck.** Median Config F duration
+   time is `78 ms`, `157 ms`, `342 ms`, and `751 ms` for 3s/7s/15s/30s.
+4. **Waveform materialization remains expensive.** Median Config F trim/output
+   materialization is `43 ms`, `99 ms`, `220 ms`, and `433 ms` across the same
+   lengths.
+5. **The largest hidden cost is first-use compile/load.** T=512 Duration
+   warmup requires minutes inside Core ML's E5/ANE compiler. The harness timeout
+   was raised so publication runs do not falsely mark F as dead during warmup.
+
+### Provenance
+
+- Machine: Apple M2 Ultra Mac Studio, 64 GB
+- Command: `BAKEOFF_SKIP_SMOKE=1 PYTORCH_ENABLE_MPS_FALLBACK=1 uv run python scripts/bakeoff_harness.py run --configs a,d,e,f --iterations 5 --order-seed 0 --machine-id m2_ultra_v7`
+- Git recorded in results: `c251622b458d`, dirty tree with Duration masking,
+  exporter controls, harness timeout/recovery, and notes updates
+- Python: 3.12.13
+- Torch: 2.6.0 / coremltools: 8.3.0
+- Order seed: 0, iterations: 5
+- Results: `outputs/bakeoff/results_m2_ultra_v7.json`
+- Summary: `outputs/bakeoff/summary.md`
+- Quality report: `outputs/bakeoff/listen/quality/audio_quality_report.json`
+
 ## Bakeoff v6: Audio-fixed Config F on M2 Ultra
 
 **First collected:** 2026-04-16

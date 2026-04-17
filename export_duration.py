@@ -19,6 +19,7 @@ import coremltools as ct
 _ROOT = Path(__file__).resolve().parent
 import torch
 import torch.nn as nn
+import torch.nn.functional as F
 
 from kokoro._export_utils import load_kokoro_for_export
 from kokoro.coreml_export_verify import (
@@ -37,8 +38,9 @@ class CoreMLFriendlyTextEncoder(nn.Module):
         super().__init__()
         self.embedding = original_encoder.embedding
         self.cnn = original_encoder.cnn
-        self.lstm = original_encoder.lstm
+        self.lstm = MaskedBidirectionalLSTM(original_encoder.lstm)
     def forward(self, x, input_lengths, m):
+        valid_mask = (~m).to(dtype=torch.long)
         x = self.embedding(x)
         x = x.transpose(1, 2)
         m = m.unsqueeze(1)
@@ -47,8 +49,7 @@ class CoreMLFriendlyTextEncoder(nn.Module):
             x = c(x)
             x.masked_fill_(m, 0.0)
         x = x.transpose(1, 2)
-        self.lstm.flatten_parameters()
-        x, _ = self.lstm(x)
+        x = self.lstm(x, valid_mask)
         x = x.transpose(-1, -2)
         x.masked_fill_(m, 0.0)
         return x
@@ -56,10 +57,14 @@ class CoreMLFriendlyTextEncoder(nn.Module):
 class CoreMLFriendlyDurationEncoder(nn.Module):
     def __init__(self, original_encoder):
         super().__init__()
-        self.lstms = original_encoder.lstms
+        self.lstms = nn.ModuleList(
+            MaskedBidirectionalLSTM(block) if isinstance(block, nn.LSTM) else block
+            for block in original_encoder.lstms
+        )
         self.dropout = original_encoder.dropout
     def forward(self, x, style, text_lengths, m):
         masks = m
+        valid_mask = (~masks).to(dtype=torch.long)
         x = x.permute(2, 0, 1)
         # Replace expand with explicit repeat operations to avoid tile reps validation issues
         # style is [batch, style_dim], we need [seq_len, batch, style_dim]
@@ -78,12 +83,99 @@ class CoreMLFriendlyDurationEncoder(nn.Module):
                 x.masked_fill_(masks.unsqueeze(-1).transpose(-1, -2), 0.0)
             else:
                 x = x.transpose(-1, -2)
-                if isinstance(block, nn.LSTM):
-                    block.flatten_parameters()
-                x, _ = block(x)
+                x = block(x, valid_mask)
                 x = nn.functional.dropout(x, p=self.dropout, training=False)
                 x = x.transpose(-1, -2)
         return x.transpose(-1, -2)
+
+class MaskedBidirectionalLSTM(nn.Module):
+    """Exportable one-layer bidirectional LSTM that ignores right-padding.
+
+    The production Kokoro duration path packs variable-length sequences before
+    the shared duration LSTM. Static Core ML duration models are right-padded to
+    enumerated token counts, so a vanilla bidirectional LSTM would let the
+    backward direction read padding before valid tokens. This module reproduces
+    packed semantics for trailing-padding masks while remaining traceable for
+    each fixed export length.
+    """
+    def __init__(self, original_lstm: nn.LSTM):
+        super().__init__()
+        if original_lstm.num_layers != 1 or not original_lstm.bidirectional or not original_lstm.batch_first:
+            raise ValueError("MaskedBidirectionalLSTM expects one-layer batch-first bidirectional LSTM")
+        self.hidden_size = original_lstm.hidden_size
+        self.register_buffer("weight_ih_l0", original_lstm.weight_ih_l0.detach().clone())
+        self.register_buffer("weight_hh_l0", original_lstm.weight_hh_l0.detach().clone())
+        self.register_buffer("bias_ih_l0", original_lstm.bias_ih_l0.detach().clone())
+        self.register_buffer("bias_hh_l0", original_lstm.bias_hh_l0.detach().clone())
+        self.register_buffer("weight_ih_l0_reverse", original_lstm.weight_ih_l0_reverse.detach().clone())
+        self.register_buffer("weight_hh_l0_reverse", original_lstm.weight_hh_l0_reverse.detach().clone())
+        self.register_buffer("bias_ih_l0_reverse", original_lstm.bias_ih_l0_reverse.detach().clone())
+        self.register_buffer("bias_hh_l0_reverse", original_lstm.bias_hh_l0_reverse.detach().clone())
+
+    def _cell(
+        self,
+        x_t: torch.Tensor,
+        h: torch.Tensor,
+        c: torch.Tensor,
+        weight_ih: torch.Tensor,
+        weight_hh: torch.Tensor,
+        bias_ih: torch.Tensor,
+        bias_hh: torch.Tensor,
+    ) -> tuple[torch.Tensor, torch.Tensor]:
+        gates = F.linear(x_t, weight_ih, bias_ih) + F.linear(h, weight_hh, bias_hh)
+        i_gate, f_gate, g_gate, o_gate = gates.chunk(4, dim=1)
+        i_gate = torch.sigmoid(i_gate)
+        f_gate = torch.sigmoid(f_gate)
+        g_gate = torch.tanh(g_gate)
+        o_gate = torch.sigmoid(o_gate)
+        c_new = f_gate * c + i_gate * g_gate
+        h_new = o_gate * torch.tanh(c_new)
+        return h_new, c_new
+
+    def forward(self, x: torch.Tensor, attention_mask: torch.Tensor) -> torch.Tensor:
+        batch, steps, _ = x.shape
+        mask = attention_mask.to(dtype=x.dtype)
+        h_f = x.new_zeros((batch, self.hidden_size))
+        c_f = x.new_zeros((batch, self.hidden_size))
+        forward_outputs: list[torch.Tensor] = []
+        for t in range(steps):
+            active = mask[:, t].unsqueeze(1)
+            h_new, c_new = self._cell(
+                x[:, t, :],
+                h_f,
+                c_f,
+                self.weight_ih_l0,
+                self.weight_hh_l0,
+                self.bias_ih_l0,
+                self.bias_hh_l0,
+            )
+            h_f = h_new * active + h_f * (1.0 - active)
+            c_f = c_new * active + c_f * (1.0 - active)
+            forward_outputs.append(h_f * active)
+
+        h_b = x.new_zeros((batch, self.hidden_size))
+        c_b = x.new_zeros((batch, self.hidden_size))
+        backward_reversed: list[torch.Tensor] = []
+        for t in range(steps - 1, -1, -1):
+            active = mask[:, t].unsqueeze(1)
+            h_new, c_new = self._cell(
+                x[:, t, :],
+                h_b,
+                c_b,
+                self.weight_ih_l0_reverse,
+                self.weight_hh_l0_reverse,
+                self.bias_ih_l0_reverse,
+                self.bias_hh_l0_reverse,
+            )
+            h_b = h_new * active + h_b * (1.0 - active)
+            c_b = c_new * active + c_b * (1.0 - active)
+            backward_reversed.append(h_b * active)
+        backward_outputs = list(reversed(backward_reversed))
+
+        return torch.cat(
+            [torch.stack(forward_outputs, dim=1), torch.stack(backward_outputs, dim=1)],
+            dim=2,
+        )
 
 class DurationModel(nn.Module):
     def __init__(self, kmodel: KModel):
@@ -91,6 +183,7 @@ class DurationModel(nn.Module):
         self.kmodel = kmodel
         self.kmodel.text_encoder = CoreMLFriendlyTextEncoder(kmodel.text_encoder)
         self.kmodel.predictor.text_encoder = CoreMLFriendlyDurationEncoder(kmodel.predictor.text_encoder)
+        self.duration_lstm = MaskedBidirectionalLSTM(kmodel.predictor.lstm)
         if hasattr(self.kmodel.bert.embeddings, 'token_type_ids'):
             delattr(self.kmodel.bert.embeddings, 'token_type_ids')
     def forward(self, input_ids: torch.LongTensor, ref_s: torch.FloatTensor, speed: torch.FloatTensor, attention_mask: torch.LongTensor):
@@ -102,7 +195,7 @@ class DurationModel(nn.Module):
         d_en = k.bert_encoder(bert_dur).transpose(-1, -2)
         s = ref_s[:, 128:]  # style half
         d = k.predictor.text_encoder(d_en, s, input_lengths, text_mask)
-        x, _ = k.predictor.lstm(d)
+        x = self.duration_lstm(d, attention_mask)
         duration = k.predictor.duration_proj(x)
         duration = torch.sigmoid(duration).sum(axis=-1) / speed
         pred_dur = torch.round(duration).clamp(min=1).long()
@@ -179,7 +272,12 @@ def main():
     #
     # Export one model per enumerated size. The caller picks the smallest model
     # that fits the actual token count and pads to that size.
-    ENUM_SIZES = [32, 64, 128, 256, 512]
+    sizes_env = os.environ.get("KOKORO_DURATION_EXPORT_SIZES")
+    if sizes_env:
+        ENUM_SIZES = [int(value.strip()) for value in sizes_env.split(",") if value.strip()]
+    else:
+        ENUM_SIZES = [32, 64, 128, 256, 512]
+    validate_max_t = int(os.environ.get("KOKORO_DURATION_EXPORT_VALIDATE_MAX_T", "128"))
 
     out_dir = _ROOT / "coreml"
     out_dir.mkdir(parents=True, exist_ok=True)
@@ -217,6 +315,7 @@ def main():
             minimum_deployment_target=ct.target.macOS12,
             compute_precision=ct.precision.FLOAT16,
             compute_units=ct.ComputeUnit.ALL,  # Allow ANE optimization
+            skip_model_load=T > validate_max_t,
         )
         assert_no_cpu_fallback_in_logs(convert_buf.getvalue(), phase=f"duration T={T} ct.convert")
 
@@ -224,21 +323,26 @@ def main():
         duration_ml.save(str(out_path))
         print(f"Saved: {out_path}")
 
-        # Quick validation: predict with the exported model
-        test_tokens = min(T, T - 2)
-        test_ids = np.zeros((1, T), dtype=np.int32)
-        test_ids[0, :test_tokens] = np.random.randint(1, 100, test_tokens)
-        test_mask = np.zeros((1, T), dtype=np.int32)
-        test_mask[0, :test_tokens] = 1
+        if T <= validate_max_t:
+            # Quick validation: predict with the exported model. Larger static
+            # packages can spend minutes compiling here; full parity checks run
+            # separately after export.
+            test_tokens = min(T, T - 2)
+            test_ids = np.zeros((1, T), dtype=np.int32)
+            test_ids[0, :test_tokens] = np.random.randint(1, 100, test_tokens)
+            test_mask = np.zeros((1, T), dtype=np.int32)
+            test_mask[0, :test_tokens] = 1
 
-        test_input = {
-            "input_ids": test_ids,
-            "ref_s": np.zeros((1, 256), dtype=np.float32),
-            "speed": np.array([1.0], dtype=np.float32),
-            "attention_mask": test_mask,
-        }
-        test_output = duration_ml.predict(test_input)
-        print(f"  Predict OK: output keys = {list(test_output.keys())}")
+            test_input = {
+                "input_ids": test_ids,
+                "ref_s": np.zeros((1, 256), dtype=np.float32),
+                "speed": np.array([1.0], dtype=np.float32),
+                "attention_mask": test_mask,
+            }
+            test_output = duration_ml.predict(test_input)
+            print(f"  Predict OK: output keys = {list(test_output.keys())}")
+        else:
+            print(f"  Predict skipped for T={T}; validate_max_t={validate_max_t}")
 
     # Also save the T=128 model as the default (backward compat)
     default_src = out_dir / "kokoro_duration_t128.mlpackage"

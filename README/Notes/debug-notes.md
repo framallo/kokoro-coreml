@@ -6,6 +6,557 @@ Institutional memory for Kokoro PyTorch → Core ML (`mlprogram`) export, synthe
 
 ---
 
+## Issue: Config F duration drift versus Config A — Resolved
+
+**First spotted:** 2026-04-16
+**Resolved:** 2026-04-16
+**Status:** Resolved
+
+### Summary
+
+Config F spoke shorter than Config A because the exported static-shape
+Duration model ran three bidirectional LSTM boundaries across right-padding:
+the duration encoder LSTMs, text encoder LSTM, and shared duration predictor
+LSTM. Config A runs those recurrent layers on exact token lengths, with no
+right-padding. The fix exports mask-aware LSTM equivalents so padded enum
+shapes preserve exact-prefix recurrent state.
+
+### Symptom
+
+On the frozen bakeoff inputs, Config F's observed duration is consistently
+shorter than Config A/PyTorch canonical duration:
+
+| Input | Config A / PyTorch frames | Config F Duration frames | A duration | F duration |
+| --- | ---: | ---: | ---: | ---: |
+| `3s` | `112` | `101` | `2.800s` | `2.525s` |
+| `7s` | `270` | `240` | `6.750s` | `6.000s` |
+| `15s` | `556` | `504` | `13.900s` | `12.600s` |
+| `30s` | `1095` | `1030` | `27.375s` | `25.750s` |
+
+This is why direct A-vs-F PCM correlation looks poor even when both outputs pass
+the speech-health gate: the two pipelines are not producing the same frame
+timeline.
+
+### Root Cause
+
+Confirmed. The first real divergent tensor is the output of
+`kmodel.predictor.lstm(d)` in the Duration stage.
+
+The exact-length path matches Config A:
+
+```python
+d = k.predictor.text_encoder(d_en, s, input_lengths, text_mask)
+x, _ = k.predictor.lstm(d)
+duration = k.predictor.duration_proj(x)
+```
+
+The static Core ML path pads token inputs to `[32, 64, 128, 256, 512]`, then
+runs the same bidirectional LSTM across the full padded `T`. Even though earlier
+features are masked, the LSTM's backward direction still sees the trailing zero
+timesteps and changes valid-token hidden states. Cropping `d` back to the valid
+token length, or using `pack_padded_sequence` before this LSTM, restores the
+exact Config A frame counts.
+
+Measured first-divergence evidence on the original PyTorch model:
+
+| Stage | 3s max abs | 7s max abs | 15s max abs | 30s max abs |
+| --- | ---: | ---: | ---: | ---: |
+| `bert_dur` valid prefix | `0` | `1.39e-5` | `1.69e-5` | `0` |
+| `d_en` valid prefix | `0` | `3.36e-5` | `4.29e-5` | `0` |
+| `d` valid prefix | `0` | `3.68e-5` | `2.14e-5` | `0` |
+| `predictor.lstm(d)` valid prefix | `1.75` | `1.68` | `1.82` | `1.60` |
+| `duration_logits` valid prefix | `22.46` | `21.90` | `20.15` | `13.34` |
+
+Measured frame-count proof:
+
+| Input | Exact | Padded | Cropped before LSTM | Packed before LSTM |
+| --- | ---: | ---: | ---: | ---: |
+| `3s` | `112` | `104` | `112` | `112` |
+| `7s` | `270` | `242` | `270` | `270` |
+| `15s` | `556` | `505` | `556` | `556` |
+| `30s` | `1095` | `1043` | `1095` | `1095` |
+
+The exported Duration package is not the primary source of the drift. It matches
+the padded PyTorch export wrapper:
+
+| Input | Export wrapper padded | Core ML padded |
+| --- | ---: | ---: |
+| `3s` | `101` | `101` |
+| `7s` | `240` | `240` |
+| `15s` | `503` | `504` |
+| `30s` | `1030` | `1030` |
+
+The `15s` one-frame delta is expected FP16 rounding sensitivity around
+`pred_dur`, already documented in the Duration numeric gate note below.
+
+### Related Guides
+
+- [Swift prefix rewrite plan](../Plans/swift-prefix-rewrite-v1.md)
+  - Documents the static enumerated Duration model contract and the assumption
+    that it replaces Python `extract_vocoder_inputs()`.
+- [Core ML compute-unit scheduling guide](../Guides/apple-silicon/CoreML-Compute-Unit-Scheduling-guide.md)
+  - Explains why static shapes are used for ANE execution and why output parity
+    still needs empirical proof.
+- [Notes consolidation guide](../Guides/content/notes-consolidation-guide.md)
+  - This is a new issue in the existing Core ML debug notes, not a new note file.
+- Context7 `/pytorch/pytorch`
+  - Confirmed `pack_padded_sequence -> LSTM -> pad_packed_sequence` is the
+    PyTorch pattern for variable-length RNN processing with padded inputs.
+
+### Fix
+
+Implemented a Core ML-exportable `MaskedBidirectionalLSTM` in both Duration
+export wrappers:
+
+- `export_synth/wrappers.py`
+- `export_duration.py`
+
+The helper copies the trained one-layer bidirectional LSTM weights and manually
+unrolls the forward/backward LSTM cells while applying `attention_mask` at each
+step. Padded timesteps no longer update recurrent state, and padded outputs are
+zeroed. This is intentionally used for:
+
+- `CoreMLFriendlyDurationEncoder.lstms`
+- `CoreMLFriendlyTextEncoder.lstm`
+- `DurationModel.duration_lstm`
+
+All five duration enum packages were re-exported:
+
+- `coreml/kokoro_duration_t32.mlpackage`
+- `coreml/kokoro_duration_t64.mlpackage`
+- `coreml/kokoro_duration_t128.mlpackage`
+- `coreml/kokoro_duration_t256.mlpackage`
+- `coreml/kokoro_duration_t512.mlpackage`
+- `coreml/kokoro_duration.mlpackage` copied from `t128`
+
+The exporter now supports targeted re-export with
+`KOKORO_DURATION_EXPORT_SIZES` and skips expensive runtime model loading for
+large shapes with `skip_model_load=True` when prediction validation is disabled.
+
+### Verification
+
+Commands used:
+
+```bash
+uv run python - <<'PY'
+# compared production exact-length duration, original padded duration,
+# CoreML-friendly wrapper exact/padded duration, export_duration wrapper padded,
+# and coreml/kokoro_duration_t{T}.mlpackage output
+PY
+
+uv run python - <<'PY'
+# identified first divergent tensor between exact and padded duration paths
+PY
+
+uv run python - <<'PY'
+# proved crop/pack before predictor.lstm restores exact Config A frame counts
+PY
+```
+
+Artifacts:
+
+- `outputs/audio-parity/config-a-audit/duration_root_cause_report.json`
+- `outputs/audio-parity/config-a-audit/padding_first_divergence_report.json`
+
+Post-fix Core ML duration parity against exact PyTorch frame counts:
+
+| Input | Enum T | Exact frames | Core ML frames | Delta |
+| --- | ---: | ---: | ---: | ---: |
+| `3s` | `64` | `112` | `112` | `0` |
+| `7s` | `128` | `270` | `273` | `+3` |
+| `15s` | `256` | `556` | `557` | `+1` |
+| `30s` | `512` | `1095` | `1096` | `+1` |
+
+The remaining deltas are FP16 rounding-level differences at the integer
+duration boundary, not padding drift. The regenerated Config F listen samples
+now match canonical durations:
+
+| Input | Observed duration | Quality decision |
+| --- | ---: | --- |
+| `3s` | `2.800s` | `needs_listening` |
+| `7s` | `6.750s` | `needs_listening` |
+| `15s` | `13.900s` | `needs_listening` |
+| `30s` | `27.400s` | `needs_listening` |
+
+### Investigation Log
+
+**2026-04-16**
+
+- **Hypothesis:** Config F's shorter WAVs might come from Swift trim logic or
+  duration-output parsing.
+- **Tried:** Compared export-wrapper PyTorch `pred_dur` sums with Core ML
+  `kokoro_duration_t{T}.mlpackage` outputs for the same padded prepared inputs.
+- **Outcome:** Ruled out. Core ML matches padded PyTorch semantics almost
+  exactly; Swift is reading the integer duration output correctly.
+
+**2026-04-16**
+
+- **Hypothesis:** The CoreML-friendly wrapper might be intrinsically different
+  from Config A.
+- **Tried:** Ran the CoreML-friendly DurationModel on exact-length inputs, with
+  no right-padding.
+- **Outcome:** Ruled out. Exact-length wrapper predictions match Config A
+  frame counts exactly for all four bakeoff inputs.
+
+**2026-04-16**
+
+- **Hypothesis:** Right-padding changes the shared duration LSTM hidden states.
+- **Tried:** Compared intermediate tensors between exact and padded runs on the
+  original PyTorch model and then re-ran the LSTM after cropping/packing `d`.
+- **Outcome:** Confirmed. `d` is identical on the valid prefix, but
+  `predictor.lstm(d)` diverges because the bidirectional LSTM sees trailing
+  padded zeros. Cropping or packing before the LSTM restores exact frame counts.
+
+**2026-04-16**
+
+- **Hypothesis:** Masking only the shared `predictor.lstm` is sufficient.
+- **Tried:** Patched that LSTM and compared exact vs padded wrapper outputs.
+- **Outcome:** Ruled out. The shared LSTM fix restored most of the drift, but
+  the CoreML-friendly duration encoder and text encoder LSTMs still crossed
+  right-padding. Masking all three bidirectional LSTM sites restored padded
+  enum outputs to exact-length semantics.
+
+**2026-04-16**
+
+- **Hypothesis:** Fixed enum packages can reproduce Config A durations in the
+  actual Swift pipeline.
+- **Tried:** Re-exported all Duration enum packages, ran Core ML frame checks,
+  regenerated `outputs/bakeoff/listen/config_f_{3s,7s,15s,30s}.wav`, and ran
+  the full A/D/E/F bakeoff.
+- **Outcome:** Confirmed. Config F now produces canonical-duration WAVs that
+  pass the waveform health gate. The full bakeoff has `ok` status for all
+  A/D/E/F records in `outputs/bakeoff/results_m2_ultra_v7.json`.
+
+### If This Recurs
+
+- [ ] Compare duration frame sums before comparing waveforms.
+- [ ] Check whether a model path is exact-token or enum-padded.
+- [ ] Inspect the valid prefix of `d` and `predictor.lstm(d)`; if `d` matches
+      but `x` diverges, padding crossed the bidirectional LSTM boundary.
+- [ ] Treat `pred_dur` FP16 allclose failures carefully; one-frame rounding
+      drift is possible, but the larger A-vs-F drift is padding semantics.
+
+---
+
+## Issue: Config F loses to Config A at 15s/30s after truthful waveform timing — Active
+
+**First spotted:** 2026-04-16
+**Status:** Active
+
+### Summary
+
+Config F no longer beats Config A at 15s and 30s because the final audit made
+the Swift benchmark honestly materialize the waveform inside `wall_time_s`.
+The model and prep stages are still faster in Config F; the crossover is caused
+by the stride-safe Swift `MLMultiArray` reader using per-element subscript access
+for hundreds of thousands of waveform samples.
+
+### Symptom
+
+From `outputs/bakeoff/results_m2_ultra_v6.json` warm medians:
+
+| Input | A wall | F wall | A trim | F trim |
+| --- | ---: | ---: | ---: | ---: |
+| 15s | `422.4 ms` | `453.4 ms` | `0.011 ms` | `223.3 ms` |
+| 30s | `692.4 ms` | `880.5 ms` | `0.010 ms` | `430.4 ms` |
+
+Config F is still faster in the generator Core ML call:
+
+| Input | A `t_coreml_predict_s` | F `t_coreml_predict_s` |
+| --- | ---: | ---: |
+| 15s | `136.3 ms` | `108.3 ms` |
+| 30s | `231.4 ms` | `209.2 ms` |
+
+### Root Cause
+
+Confirmed. `swift/Sources/KokoroPipeline/MLMultiArrayHelpers.swift` implements
+`floatValues(from:)` with:
+
+```swift
+array[multiIndex(offset: offset, shape: shape)].floatValue
+```
+
+That is correct for non-contiguous Core ML outputs, but expensive: it builds a
+logical index and boxes through `NSNumber` for every element. The final
+waveform is large enough that this dominates long clips. A synthetic Swift
+microbenchmark over strided arrays showed pointer-plus-stride addressing reading
+the same values about 9-10x faster than the current subscript reader.
+
+This is not a warmup, model reload, or bucket mismatch:
+
+- `kokoro-bench` starts `t0` after model loading and explicit warmup.
+- Config A and Config F both route 15s/30s inputs to matching buckets.
+- Config A trims a NumPy array with a cheap slice after `np.asarray(...).squeeze()`;
+  it does not pay a Swift per-sample `MLMultiArray` subscript loop.
+
+### Related Guides
+
+- [Core ML compute-unit scheduling guide](../Guides/apple-silicon/CoreML-Compute-Unit-Scheduling-guide.md)
+  - Confirms that Core ML runtime behavior and memory layout must be validated
+    empirically, not inferred from successful prediction calls.
+- [Notes consolidation guide](../Guides/content/notes-consolidation-guide.md)
+  - This belongs in the existing Core ML debug notes rather than a new note.
+- Apple Core ML docs via Context7 (`/websites/developer_apple_coreml`)
+  - `MLMultiArray` logical element access is stride-based; direct pointer access
+    with calculated stride offsets is the documented faster path for frequent
+    access.
+
+### Current Status
+
+No optimization fix has been applied yet in this investigation. After the
+Duration padding fix, the full `v7` bakeoff shows Config F is slower than
+Config A at every enumerated length:
+
+| Input | A median | F median | Main F costs |
+| --- | ---: | ---: | --- |
+| `3s` | `162 ms` | `169 ms` | duration `78 ms`, trim `43 ms` |
+| `7s` | `247 ms` | `368 ms` | duration `157 ms`, trim `99 ms` |
+| `15s` | `482 ms` | `766 ms` | duration `342 ms`, trim `220 ms` |
+| `30s` | `713 ms` | `1595 ms` | duration `751 ms`, trim `433 ms` |
+
+So this issue now has two separable costs:
+
+- The previously identified waveform materialization cost remains: long-output
+  `MLMultiArray` flattening is still hundreds of milliseconds.
+- The correctness fix added a large mask-aware static Duration graph; it is
+  exact enough for audio parity, but the large enum shapes have expensive
+  Core ML compile/load behavior and non-trivial steady-state Duration time.
+
+The likely waveform optimization is still to replace `floatValues(from:)` with
+a stride-aware pointer implementation:
+
+- Fast path for contiguous float32 arrays: bulk copy only the requested prefix
+  when possible.
+- General path: compute pointer offsets from `array.strides` without allocating
+  `[NSNumber]` per sample.
+- Keep the current subscript behavior as a fallback for unsupported dtypes or
+  unclear layout.
+- Measure `t_trim_s` again on 15s/30s and re-run `scripts/bakeoff_listen.py`
+  before accepting the optimization.
+
+### Verification
+
+Commands used:
+
+```bash
+uv run python - <<'PY'
+# parsed outputs/bakeoff/results_m2_ultra_v6.json and printed median stage times
+PY
+
+swift - <<'SWIFT'
+// synthetic MLMultiArray microbenchmark comparing subscript flattening
+// against pointer-plus-stride flattening
+SWIFT
+```
+
+Observed synthetic strided-array read times:
+
+| Elements | Current subscript reader | Pointer-plus-stride reader |
+| ---: | ---: | ---: |
+| `60,600` | `76 ms` | `8 ms` |
+| `302,400` | `372 ms` | `39 ms` |
+| `618,000` | `751 ms` | `78 ms` |
+
+### Investigation Log
+
+**2026-04-16**
+
+- **Hypothesis:** Config F loses to Config A at long durations because the final
+  audit included previously-hidden waveform extraction work in the timed path.
+- **Tried:** Parsed `outputs/bakeoff/results_m2_ultra_v6.json` stage medians for
+  Config A and Config F, then compared generator predict, prep, and trim stages.
+- **Outcome:** Confirmed. The F trim/materialization stage alone is larger than
+  the 15s/30s deficit versus A.
+
+**2026-04-16**
+
+- **Hypothesis:** The loss could be from model reload, warmup, or unfair bucket
+  selection rather than waveform materialization.
+- **Tried:** Inspected `SwiftPipelineContext`, `kokoro-bench runPipeline`,
+  bucket-selection logic, and Config A artifact loading with multiple read-only
+  agents.
+- **Outcome:** Ruled out. Model load and explicit warmup happen before `t0`;
+  bucket selection is aligned; both paths use the same 15s/30s bucket family.
+
+**2026-04-16**
+
+- **Hypothesis:** Correct stride-safe reads can be made much cheaper without
+  returning to the old raw-contiguous bug.
+- **Tried:** Queried Apple Core ML docs through Context7 and ran a synthetic
+  Swift `MLMultiArray` microbenchmark comparing subscript flattening to direct
+  pointer offset calculation using `strides`.
+- **Outcome:** Strongly supported. Pointer-plus-stride addressing preserved
+  logical order and was about 9-10x faster on the synthetic strided arrays.
+
+### If This Recurs
+
+- [ ] Check `t_trim_s` before interpreting Config F vs Config A.
+- [ ] Confirm every Core ML output flattening path respects `MLMultiArray.strides`.
+- [ ] Avoid per-element `array[[NSNumber]]` reads on large tensors unless it is
+      a debug-only path.
+- [ ] Keep quality gates in place; do not go back to raw `dataPointer` linear
+      traversal without proving output contiguity.
+
+---
+
+## Issue: Config A suspected of cheating with broken audio — Resolved
+
+**First spotted:** 2026-04-16
+**Resolved:** 2026-04-16
+**Status:** Resolved
+
+### Summary
+
+Config A is not hiding the same garbage-audio failure that affected Config F.
+Exact Config A HAR-post WAVs pass the objective speech-health gate, and the
+current 3s HAR-post package reproduces the golden demo as a speech-like waveform
+with the expected current-package duration. Config A avoided the old Config F
+failure because Python `coremltools` returns prediction outputs as dictionary
+values that are consumed as NumPy-style arrays, while the broken Swift path read
+`MLMultiArray.dataPointer` as if every output were contiguous in logical order.
+
+### Symptom
+
+After fixing Config F's stride-safe waveform extraction, Config A still looked
+suspicious because it stayed competitive at 15s/30s and did not exhibit the
+same audible garbage symptom. The specific concern was that Config A might be
+"winning" by producing broken or padded output.
+
+### Root Cause
+
+Not a Config A audio bug. Config A's output path does not use the Swift
+`MLMultiArray` raw-pointer flattening that corrupted Config F. In Config A,
+`scripts/bakeoff_harness.py` and `kokoro/synthesis_backends.py` call
+`MLModel.predict(...)`, then convert the returned `waveform` value with
+`np.asarray(..., dtype=np.float32).squeeze()` before slicing. Context7's
+`/apple/coremltools` docs confirm `MLModel.predict(inputs) -> dict`, with output
+values used directly as NumPy-style arrays.
+
+The remaining A-vs-F waveform differences come from different prefixes, not
+from A generating noise:
+
+- Config A uses PyTorch `extract_vocoder_inputs()` and trims to the resulting
+  `T_f0`.
+- Config F uses exported Core ML Duration/F0N/DecoderPre plus Swift HN-SF and
+  trims to its predicted frame count.
+- On the frozen bakeoff inputs, Config F predicts shorter observed durations
+  than Config A/PyTorch reference (`2.525s` vs `2.800s`, `6.000s` vs `6.750s`,
+  `12.600s` vs `13.900s`, `25.750s` vs `27.375s`). This makes raw PCM
+  correlation between A and F a poor validity signal even when both files are
+  speech-like.
+
+### Related Guides
+
+- [Core ML compute-unit scheduling guide](../Guides/apple-silicon/CoreML-Compute-Unit-Scheduling-guide.md)
+  - Runtime success does not prove the output was read correctly; output layout
+    and backend behavior need empirical validation.
+- [Notes consolidation guide](../Guides/content/notes-consolidation-guide.md)
+  - This belongs in the existing Core ML debug note because it is a follow-up to
+    the Config F audio corruption and timing investigations.
+- Context7 `/apple/coremltools`
+  - Used to verify `MLModel.predict` output API shape instead of relying on
+    memory for Python/Core ML behavior.
+
+### Fix
+
+No code fix was required for Config A. The investigation produced debug
+artifacts only:
+
+- `outputs/audio-parity/config-a-audit/config_a_exact_3s.wav`
+- `outputs/audio-parity/config-a-audit/config_a_exact_7s.wav`
+- `outputs/audio-parity/config-a-audit/config_a_exact_15s.wav`
+- `outputs/audio-parity/config-a-audit/config_a_exact_30s.wav`
+- `outputs/audio-parity/config-a-audit/config_a_exact_demo_text.wav`
+- `outputs/audio-parity/config-a-audit/exact-quality/audio_quality_summary.md`
+- `outputs/audio-parity/config-a-audit/exact_pairwise_and_tail.json`
+
+### Verification
+
+Exact Config A WAVs generated through a minimal Python prefix plus the current
+HAR-post Core ML packages passed the same speech-health gate as Config F:
+
+| Sample | Duration | RMS | Active >32 | ZCR |
+| --- | ---: | ---: | ---: | ---: |
+| `config_a_exact_3s.wav` | `2.800s` | `4309.8` | `73.844%` | `8.961%` |
+| `config_a_exact_7s.wav` | `6.750s` | `5033.9` | `84.379%` | `9.963%` |
+| `config_a_exact_15s.wav` | `13.900s` | `5180.4` | `86.501%` | `10.921%` |
+| `config_a_exact_30s.wav` | `27.375s` | `4411.3` | `85.930%` | `11.031%` |
+| `config_a_exact_demo_text.wav` | `2.725s` | `5958.9` | `74.055%` | `9.070%` |
+
+The exact demo-text Config A output compared against the golden
+`outputs/decoder_har_post_demo.wav` over the golden prefix with Pearson
+`0.940` and SNR `9.80 dB`. The current-package repro already recorded in
+`outputs/audio-parity/demo-provenance.json` compares at Pearson `0.947`, while
+the historical 0620205 package plus historical trim compares at Pearson `0.996`.
+The duration mismatch is expected: the golden used the old historical trim
+(`1.3625s`), while the current correct trim is `2.725s`.
+
+Commands used:
+
+```bash
+uv run python scripts/audio_quality_probe.py \
+  --reference outputs/audio-parity/references/pytorch_3s.wav \
+              outputs/audio-parity/references/pytorch_7s.wav \
+              outputs/audio-parity/references/pytorch_15s.wav \
+              outputs/audio-parity/references/pytorch_30s.wav \
+              outputs/audio-parity/comparators/decoder_har_post_demo.wav \
+  --candidate outputs/audio-parity/config-a-audit/config_a_exact_3s.wav \
+              outputs/audio-parity/config-a-audit/config_a_exact_7s.wav \
+              outputs/audio-parity/config-a-audit/config_a_exact_15s.wav \
+              outputs/audio-parity/config-a-audit/config_a_exact_30s.wav \
+              outputs/audio-parity/config-a-audit/config_a_exact_demo_text.wav \
+              outputs/bakeoff/listen/config_f_3s.wav \
+              outputs/bakeoff/listen/config_f_7s.wav \
+              outputs/bakeoff/listen/config_f_15s.wav \
+              outputs/bakeoff/listen/config_f_30s.wav \
+  --out-dir outputs/audio-parity/config-a-audit/exact-quality --plots
+```
+
+### Investigation Log
+
+**2026-04-16**
+
+- **Hypothesis:** Config A might be faster or cleaner because it is generating
+  invalid, silent, or garbage waveform data.
+- **Tried:** Generated exact Config A HAR-post WAVs for the four frozen bakeoff
+  inputs and the golden demo text, then ran `scripts/audio_quality_probe.py`.
+- **Outcome:** Ruled out. All exact Config A samples passed the objective
+  speech-health gate with no rejection reasons.
+
+**2026-04-16**
+
+- **Hypothesis:** Config A might hide bad audio only in the tail that Config F
+  trims away.
+- **Tried:** Compared exact Config A durations against Config F durations and
+  measured the A tail after F's shorter predicted duration.
+- **Outcome:** Mostly ruled out. The 3s A tail after F's endpoint is effectively
+  silent, but 7s/15s/30s tails retain speech-band activity (`RMS 1249`, `3145`,
+  and `3043` respectively). The full A files pass quality thresholds.
+
+**2026-04-16**
+
+- **Hypothesis:** The golden demo comparison would expose current Config A as
+  broken.
+- **Tried:** Generated `config_a_exact_demo_text.wav` for
+  `Hello from the new decoder har split.` and compared it with
+  `outputs/decoder_har_post_demo.wav` plus the recovered historical repros.
+- **Outcome:** Ruled out. The current package produces speech-like audio with
+  the known current trim length. The golden's shorter duration comes from the
+  historical trim formula, not from a current A corruption.
+
+### If This Recurs
+
+- [ ] Generate exact Config A samples with the minimal Python prefix, not the
+      full `HybridTTSPipeline` loader, to avoid slow all-bucket startup.
+- [ ] Run `scripts/audio_quality_probe.py` against PyTorch references, the
+      golden demo, Config A, and Config F before asking for listening.
+- [ ] Check A-vs-F duration and prefix differences before interpreting raw PCM
+      correlation.
+- [ ] Keep Config F stride-safe `MLMultiArray` reading in place; do not replace
+      it with raw contiguous pointer traversal.
+
+---
+
 ## Issue: Swift Config F bakeoff samples were near-silent garbage — Resolved
 
 **First spotted:** 2026-04-16
