@@ -6,11 +6,11 @@ April 17, 2026
 
 This note records the current corrected bakeoff series after the Config F
 host-materialization fix and supersedes the archived v1 comparison for current
-performance claims. It is intentionally conservative: only the M2 Ultra numbers
-are populated here because they come from the completed controlled run on the
-working tree used during this session. The result JSON records `git_dirty: true`
-because it was collected before the final cleanup commit; the M2 Air and M1 Mini
-sections are placeholders until those machines rerun the same setup and harness.
+performance claims. It is intentionally conservative: M2 Ultra and M1 Mini
+numbers are populated here because both sets come from completed controlled runs
+on this branch. The result JSON records `git_dirty: true` because it was
+collected before the final cleanup commit; M2 Air remains a placeholder until it
+reruns the same setup and harness.
 A later audit refactor moved the timed Swift synthesis orchestration into the
 shared pipeline library. That refactor was verified with the F-only smoke result
 `outputs/bakeoff/results_shared_executor_smoke_20260417.json`; it does not
@@ -117,27 +117,72 @@ Config F listen samples passed the waveform health gate and remain available at:
 | 15s | 13.90s | TBD | TBD | TBD | TBD |
 | 30s | 27.38s | TBD | TBD | TBD | TBD |
 
+### Realtime Factor
+
+Lower is better.
+
+| Input | A RTF | D RTF | E RTF | F RTF |
+| --- | ---: | ---: | ---: | ---: |
+| 3s | TBD | TBD | TBD | TBD |
+| 7s | TBD | TBD | TBD | TBD |
+| 15s | TBD | TBD | TBD | TBD |
+| 30s | TBD | TBD | TBD | TBD |
+
+### Config F Speedups
+
+| Input | F vs A | F vs MPS |
+| --- | ---: | ---: |
+| 3s | TBD | TBD |
+| 7s | TBD | TBD |
+| 15s | TBD | TBD |
+| 30s | TBD | TBD |
+
 ## M1 Mini
 
 **Machine:** Apple M1 Mac Mini
-**Status:** Pending rerun
-**Result file:** TBD
+**Status:** Complete
+**Result files:**
+`outputs/bakeoff/results_m1_mini_a.json` and
+`outputs/bakeoff/results_m1_mini_def.json`
 
 ### Wall Time
 
 | Input | Audio | A Python HAR | D MPS | E CPU | F Swift |
 | --- | ---: | ---: | ---: | ---: | ---: |
-| 3s | 2.80s | TBD | TBD | TBD | TBD |
-| 7s | 6.75s | TBD | TBD | TBD | TBD |
-| 15s | 13.90s | TBD | TBD | TBD | TBD |
-| 30s | 27.38s | TBD | TBD | TBD | TBD |
+| 3s | 2.80s | 237.9 ms | 491.5 ms | 893.9 ms | **156.8 ms** |
+| 7s | 6.75s | 577.1 ms | 1038.2 ms | 2232.8 ms | **510.8 ms** |
+| 15s | 13.90s | 836.6 ms | 1958.3 ms | 4457.7 ms | **691.5 ms** |
+| 30s | 27.38s | 1636.9 ms | 4166.7 ms | 8934.2 ms | **1228.9 ms** |
+
+### Realtime Factor
+
+Lower is better.
+
+| Input | A RTF | D RTF | E RTF | F RTF |
+| --- | ---: | ---: | ---: | ---: |
+| 3s | 0.0850 | 0.1755 | 0.3192 | **0.0560** |
+| 7s | 0.0855 | 0.1538 | 0.3308 | **0.0757** |
+| 15s | 0.0602 | 0.1409 | 0.3207 | **0.0497** |
+| 30s | 0.0598 | 0.1522 | 0.3264 | **0.0449** |
+
+### Config F Speedups
+
+| Input | F vs A | F vs MPS |
+| --- | ---: | ---: |
+| 3s | 1.5x | 3.1x |
+| 7s | 1.1x | 2.0x |
+| 15s | 1.2x | 2.8x |
+| 30s | 1.3x | 3.4x |
 
 ## Cross-Machine Comparison
 
-Pending. Do not reuse older M2 Air or M1 Mini tables in this v2 ledger. Those
-machines must run the current setup script and current Swift binary because the
-result depends on exact Duration packages, direct alignment expansion, and
-stride-aware `Float16` waveform extraction.
+Cross-machine takeaway (completed runs):
+
+- M2 Ultra still leads for this suite and remains the top speed point.
+- M1 Mini now has complete A/D/E/F medians and follows the same ordering: `F > A > D > E`.
+- Do not reuse pre-2026 M2 Air or M1 Mini tables, because output depends on exact
+  Duration packages, direct alignment expansion, and stride-aware `Float16`
+  waveform extraction.
 
 ## Provenance
 

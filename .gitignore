@@ -193,6 +193,9 @@ kokoro.js/voices/*.bin
 # macOS
 .DS_Store
 
+# Claude Code local runtime (not for version control)
+.claude/scheduled_tasks.lock
+
 # Local Python virtualenv (named variants; `.venv` alone does not match `.venv-coreml`)
 .venv-coreml/
 
