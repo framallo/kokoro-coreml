@@ -2,17 +2,6 @@
 
 April 17, 2026
 
-## Scope
-
-Corrected bakeoff numbers after the Config F host-materialization fix—use this
-note, not v1, for current latency claims. Every table below is from a finished
-run on this branch (M2 Ultra, M2 Air, M1 Mini). The saved JSON may still show
-`git_dirty: true` from the pre-cleanup collection window.
-
-A later refactor moved timed Swift synthesis into the shared pipeline library;
-proof lives in `outputs/bakeoff/results_shared_executor_smoke_20260417.json`.
-That smoke does not replace the full A/D/E/F medians in this file.
-
 ## Configs
 
 | Config | Plain meaning |
@@ -38,6 +27,17 @@ sparse one-hot alignment expanded into dense matmul through zeros, and boxed
 
 Ship rule: small model split, cheap host setup only, full wall-clock timed
 behind the listen gate before you rank configs.
+
+## Scope
+
+Corrected bakeoff numbers after the Config F host-materialization fix—use this
+note, not v1, for current latency claims. Every table below is from a finished
+run on this branch (M2 Ultra, M2 Air, M1 Mini). The saved JSON may still show
+`git_dirty: true` from the pre-cleanup collection window.
+
+A later refactor moved timed Swift synthesis into the shared pipeline library;
+proof lives in `outputs/bakeoff/results_shared_executor_smoke_20260417.json`.
+That smoke does not replace the full A/D/E/F medians in this file.
 
 ## M2 Ultra
 

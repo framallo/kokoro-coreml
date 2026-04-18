@@ -31,7 +31,8 @@ CONFIG_LABELS = {
     "c": "Config C (decoder-only .cpuAndGPU)",
     "d": "Config D (PyTorch MPS)",
     "e": "Config E (PyTorch CPU)",
-    "f": "Config F (Swift + CoreML)",
+    "f": "Config F (Swift + CoreML .all)",
+    "g": "Config G (Swift + CoreML .cpuAndGPU)",
     "bcpu": "Config Bcpu (decoder-only .cpuOnly)",
 }
 
@@ -371,6 +372,48 @@ def cmd_summarize(args: argparse.Namespace) -> None:
         lines.append("M1 Mini data available -- see per-machine tables above.\n")
     else:
         lines.append("M1 Mini data not available for this benchmark run.\n")
+
+    # Gate 6: Swift Core ML ANE ablation.
+    lines.append("\n### Gate 6: Does `.all` beat `.cpuAndGPU` for the Swift Core ML pipeline?\n")
+    f_wall = _config_median("f")
+    g_wall = _config_median("g")
+    if f_wall is not None and g_wall is not None:
+        headers = ["Input", "Audio (s)", "F .all (ms)", "G .cpuAndGPU (ms)", "G/F"]
+        align = ["l", "r", "r", "r", "r"]
+        rows = []
+        for ik in gate_input_keys:
+            f_ik = _config_median_by_input("f", ik)
+            g_ik = _config_median_by_input("g", ik)
+            dur_vals = [
+                r["canonical_audio_duration_s"] for r in ok_results
+                if r.get("input_key") == ik and r.get("canonical_audio_duration_s") is not None
+            ]
+            dur = dur_vals[0] if dur_vals else 0
+            if f_ik is not None and g_ik is not None:
+                ratio = g_ik / f_ik if f_ik > 0 else 0
+                rows.append([
+                    ik,
+                    f"{dur:.2f}",
+                    f"{f_ik * 1000:.1f}",
+                    f"{g_ik * 1000:.1f}",
+                    f"{ratio:.2f}",
+                ])
+        if rows:
+            lines.append(_format_table(headers, rows, align) + "\n")
+        if g_wall < f_wall:
+            lines.append(
+                f"Config G is faster overall in this run "
+                f"(median G/F={g_wall / f_wall:.2f}); `.all` does not isolate a latency win here.\n"
+            )
+        elif f_wall < g_wall:
+            lines.append(
+                f"Config F is faster overall in this run "
+                f"(median F/G={f_wall / g_wall:.2f}); ANE participation may be helping, pending telemetry.\n"
+            )
+        else:
+            lines.append("Config F and G have identical aggregate medians in this run.\n")
+    else:
+        lines.append("Insufficient data for Gate 6 (configs F and/or G not available).\n")
 
     # Write summary.
     summary_text = "\n".join(lines)

@@ -15,6 +15,8 @@ Configs
   C   Naive decoder-only 10s artifact, compute_units=CPU_AND_GPU
   D   PyTorch end-to-end on MPS (requires PYTORCH_ENABLE_MPS_FALLBACK=1)
   E   PyTorch end-to-end on CPU
+  F   Swift + CoreML pipeline, compute_units=ALL
+  G   Swift + CoreML pipeline, compute_units=CPU_AND_GPU
 
 Diagnostic-only (telemetry-loop only, not for ``run --configs``):
   bcpu  Naive decoder-only 10s artifact, compute_units=CPU_ONLY
@@ -22,8 +24,8 @@ Diagnostic-only (telemetry-loop only, not for ``run --configs``):
 Usage::
 
     python scripts/bakeoff_harness.py prepare-inputs
-    python scripts/bakeoff_harness.py run --configs a,b,c,d,e --iterations 5 --order-seed 0
-    python scripts/bakeoff_harness.py telemetry-loop --config b --input long --seconds 60
+    python scripts/bakeoff_harness.py run --configs a,b,c,d,e,f,g --iterations 5 --order-seed 0
+    python scripts/bakeoff_harness.py telemetry-loop --config f --input 30s --seconds 60
     python scripts/bakeoff_harness.py summarize --results outputs/bakeoff/results_m2_ultra.json
 """
 from __future__ import annotations
@@ -104,7 +106,7 @@ MAX_CANONICAL_DURATION_S = 30.0
 CONFIG_F_DURATION_TOLERANCE_FRACTION = 0.15
 
 # Headline config IDs valid for ``run --configs``.
-HEADLINE_CONFIGS = {"a", "b", "c", "d", "e", "f"}
+HEADLINE_CONFIGS = {"a", "b", "c", "d", "e", "f", "g"}
 # Diagnostic config valid only for ``telemetry-loop --config``.
 DIAGNOSTIC_CONFIGS = {"bcpu"}
 ALL_CONFIGS = HEADLINE_CONFIGS | DIAGNOSTIC_CONFIGS
@@ -523,7 +525,7 @@ class PyTorchContext:
         _run_pytorch(self, text)
 
 class SwiftPipelineContext:
-    """Config F: Swift + CoreML pipeline via persistent kokoro-bench subprocess.
+    """Swift + CoreML pipeline via persistent kokoro-bench subprocess.
 
     Uses ``--batch`` mode so CoreML models are compiled once and cached across
     iterations. The subprocess stays alive for the entire bakeoff run. Commands
@@ -531,8 +533,8 @@ class SwiftPipelineContext:
     prints "DONE\\n" on stdout when each command completes.
     """
 
-    def __init__(self, compute_units: str = "all") -> None:
-        self.config_id = "f"
+    def __init__(self, compute_units: str = "all", config_id: str = "f") -> None:
+        self.config_id = config_id
         self.available = True
         self.unavailable_reason = ""
         self.artifacts: dict[str, dict] = {}
@@ -562,6 +564,15 @@ class SwiftPipelineContext:
                 "Run: uv run python scripts/prepare_swift_bench_inputs.py"
             )
             return
+
+        self.artifacts[f"config_{config_id}_swift_runtime"] = {
+            "swift_binary": str(self._swift_binary),
+            "swift_binary_sha256": _sha256_file(str(self._swift_binary)),
+            "models_dir": str(self._models_dir),
+            "hnsf_weights": str(self._hnsf_weights),
+            "hnsf_weights_sha256": _sha256_file(str(self._hnsf_weights)),
+            "compute_units": compute_units,
+        }
 
         # Read manifest to get the first input key for warmup
         manifest_path = _REPO_ROOT / "outputs" / "bakeoff" / "input_manifest.json"
@@ -712,7 +723,7 @@ class SwiftPipelineContext:
 def _run_swift_timed(
     ctx: SwiftPipelineContext, input_key: str, manifest_entry: dict
 ) -> dict[str, Any]:
-    """Run Config F via the persistent Swift batch subprocess.
+    """Run a Swift CoreML config via the persistent Swift batch subprocess.
 
     Models are already compiled and cached in the subprocess — this only
     measures inference time.
@@ -720,7 +731,7 @@ def _run_swift_timed(
     import tempfile
 
     record: dict[str, Any] = {
-        "config": "f",
+        "config": ctx.config_id,
         "input_key": input_key,
         "status": "ok",
         "error": None,
@@ -748,7 +759,7 @@ def _run_swift_timed(
 
         swift_result = json.loads(Path(out_file.name).read_text())
         record.update(swift_result)
-        record["config"] = "f"
+        record["config"] = ctx.config_id
         record["input_key"] = input_key
         if record.get("status") == "ok" and not _duration_agreement_ok(
             record.get("observed_audio_duration_s"),
@@ -1084,13 +1095,14 @@ def _smoke_check_config_a(ctx: ConfigAContext, text: str) -> None:
         )
     print(f"  Config A smoke check passed: timed={timed_wall:.4f}s, prod={prod_time:.4f}s, ratio={ratio:.3f}")
 
-def _smoke_check_config_f(ctx: SwiftPipelineContext, manifest: dict) -> None:
-    """Verify Config F does not mark invalid-duration audio as successful."""
+def _smoke_check_swift_config(ctx: SwiftPipelineContext, manifest: dict) -> None:
+    """Verify a Swift config does not mark invalid-duration audio as successful."""
+    config_label = ctx.config_id.upper()
     for input_key, entry in manifest["inputs"].items():
         record = _run_swift_timed(ctx, input_key, {**entry, "_input_key": input_key})
         if record["status"] != "ok":
             raise RuntimeError(
-                f"Config F smoke failed for {input_key}: "
+                f"Config {config_label} smoke failed for {input_key}: "
                 f"{record.get('status')} {record.get('error')}"
             )
         if not _duration_agreement_ok(
@@ -1098,13 +1110,13 @@ def _smoke_check_config_f(ctx: SwiftPipelineContext, manifest: dict) -> None:
             entry.get("canonical_duration_s"),
         ):
             raise RuntimeError(
-                f"Config F smoke duration mismatch for {input_key}: "
+                f"Config {config_label} smoke duration mismatch for {input_key}: "
                 f"observed={record.get('observed_audio_duration_s')}s, "
                 f"canonical={entry.get('canonical_duration_s')}s"
             )
         if record.get("wall_time_s", 0) <= 0:
-            raise RuntimeError(f"Config F smoke has no wall time for {input_key}")
-    print(f"  Config F smoke check passed: {len(manifest['inputs'])} input(s)")
+            raise RuntimeError(f"Config {config_label} smoke has no wall time for {input_key}")
+    print(f"  Config {config_label} smoke check passed: {len(manifest['inputs'])} input(s)")
 
 # ---------------------------------------------------------------------------
 # run mode
@@ -1172,8 +1184,12 @@ def cmd_run(args: argparse.Namespace) -> None:
         contexts["e"] = PyTorchContext("cpu", "e")
 
     if "f" in requested:
-        print("\nLoading Config F (Swift + CoreML pipeline)...")
-        contexts["f"] = SwiftPipelineContext()
+        print("\nLoading Config F (Swift + CoreML pipeline, ALL)...")
+        contexts["f"] = SwiftPipelineContext(compute_units="all", config_id="f")
+
+    if "g" in requested:
+        print("\nLoading Config G (Swift + CoreML pipeline, CPU_AND_GPU)...")
+        contexts["g"] = SwiftPipelineContext(compute_units="cpuAndGPU", config_id="g")
 
     # --- Print availability summary ---
     print("\n" + "-" * 40)
@@ -1211,12 +1227,14 @@ def cmd_run(args: argparse.Namespace) -> None:
             print("\nRunning Config A smoke check...")
             _smoke_check_config_a(contexts["a"], warmup_text)
 
-    if "f" in contexts and contexts["f"].available:
+    for swift_config in ("f", "g"):
+        if swift_config not in contexts or not contexts[swift_config].available:
+            continue
         if os.environ.get("BAKEOFF_SKIP_SMOKE") == "1":
-            print("\nSkipping Config F smoke check (BAKEOFF_SKIP_SMOKE=1)")
+            print(f"\nSkipping Config {swift_config.upper()} smoke check (BAKEOFF_SKIP_SMOKE=1)")
         else:
-            print("\nRunning Config F smoke check...")
-            _smoke_check_config_f(contexts["f"], manifest)
+            print(f"\nRunning Config {swift_config.upper()} smoke check...")
+            _smoke_check_swift_config(contexts[swift_config], manifest)
 
     # --- Timed iterations with independently shuffled config and input order ---
     # Note: configs and inputs are shuffled separately per plan spec. All inputs
@@ -1268,7 +1286,7 @@ def cmd_run(args: argparse.Namespace) -> None:
                         rec = _run_decoder_only_timed(ctx, text, entry_with_key)
                     elif cfg_id in ("d", "e"):
                         rec = _run_pytorch_timed(ctx, text, entry_with_key)
-                    elif cfg_id == "f":
+                    elif cfg_id in ("f", "g"):
                         rec = _run_swift_timed(ctx, ik, entry_with_key)
                     else:
                         rec = {"config": cfg_id, "status": "unknown_config", "error": cfg_id}
@@ -1372,6 +1390,10 @@ def cmd_telemetry_loop(args: argparse.Namespace) -> None:
         ctx = PyTorchContext("mps", "d")
     elif config_id == "e":
         ctx = PyTorchContext("cpu", "e")
+    elif config_id == "f":
+        ctx = SwiftPipelineContext(compute_units="all", config_id="f")
+    elif config_id == "g":
+        ctx = SwiftPipelineContext(compute_units="cpuAndGPU", config_id="g")
     else:
         print(f"Unimplemented config: {config_id}")
         sys.exit(1)
@@ -1398,9 +1420,14 @@ def cmd_telemetry_loop(args: argparse.Namespace) -> None:
             _run_decoder_only(ctx, text)
         elif config_id in ("d", "e"):
             _run_pytorch(ctx, text)
+        elif config_id in ("f", "g"):
+            _run_swift_timed(ctx, input_key, {**manifest["inputs"][input_key], "_input_key": input_key})
         iteration += 1
         if iteration % 5 == 0:
             print(f"  iteration {iteration}, elapsed={time.time() - (t_end - seconds):.1f}s")
+
+    if hasattr(ctx, "close"):
+        ctx.close()
 
     print(f"\nTelemetry loop complete: {iteration} iterations in {seconds}s")
 
@@ -1433,7 +1460,7 @@ def main() -> None:
     # run
     p_run = sub.add_parser("run", help="Run timed benchmark iterations")
     p_run.add_argument(
-        "--configs", required=True, help="Comma-separated config IDs (a,b,c,d,e,f)"
+        "--configs", required=True, help="Comma-separated config IDs (a,b,c,d,e,f,g)"
     )
     p_run.add_argument(
         "--iterations", type=int, default=5, help="Iterations per config/input pair"
@@ -1450,11 +1477,11 @@ def main() -> None:
         "telemetry-loop", help="Sustained inference loop for powermetrics"
     )
     p_tl.add_argument(
-        "--config", required=True, help="Single config ID (b, c, bcpu)"
+        "--config", required=True, help="Single config ID (a,b,c,d,e,f,g,bcpu)"
     )
     p_tl.add_argument(
         "--input", required=True,
-        help="Input key from manifest (tiny, short, medium, long)",
+        help="Input key from manifest (3s, 7s, 15s, 30s)",
     )
     p_tl.add_argument(
         "--seconds", type=int, default=60, help="Duration of the loop in seconds"

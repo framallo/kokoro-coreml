@@ -8,3 +8,7 @@ session; see [../Guides/content/notes-consolidation-guide.md](../Guides/content/
 
 Long-running learnings also appear under `README/learnings.md` and other
 top-level `README/*.md` files; link from notes instead of duplicating.
+
+## Index
+
+- [Core ML compute-unit ablation](coreml-compute-unit-ablation.md) - F/G/G-prime/G-double-prime benchmark logic for isolating `.all`, ANE, GPU, and CPU behavior in the Swift pipeline.
