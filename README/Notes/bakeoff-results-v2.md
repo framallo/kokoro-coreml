@@ -104,18 +104,83 @@ Config F listen samples passed the waveform health gate and remain available at:
 
 ## M2 Air
 
-**Machine:** Apple M2 MacBook Air
-**Status:** Pending rerun
-**Result file:** TBD
+**Machine:** Apple M2 MacBook Air, 24 GB, macOS 15.7.5
+**Status:** Complete (Config D partial; OOM at 15s and 30s)
+**Result files:**
+- `outputs/bakeoff/results_m2_air_v6.json` (A, E, F; 20/20 ok each)
+- `outputs/bakeoff/results_m2_air_v6_mps.json` (D solo pass; 3s/7s ok,
+  15s/30s MPS OOM)
+
+Collected on commit `fa2a24d` (plus the `export_synth/wrappers.py`
+idempotent-wrap fix landed in the same commit series) after a full
+`setup_bakeoff.sh --skip-download` re-export of every Duration,
+F0Ntrain, DecoderPre, and GeneratorFromHar package. Swift binary
+rebuilt from current sources; same harness, same 5 iterations, same
+order seed 0.
 
 ### Wall Time
 
+Warm median end-to-end wall time, milliseconds.
+
 | Input | Audio | A Python HAR | D MPS | E CPU | F Swift |
 | --- | ---: | ---: | ---: | ---: | ---: |
-| 3s | 2.80s | TBD | TBD | TBD | TBD |
-| 7s | 6.75s | TBD | TBD | TBD | TBD |
-| 15s | 13.90s | TBD | TBD | TBD | TBD |
-| 30s | 27.38s | TBD | TBD | TBD | TBD |
+| 3s | 2.80s | 461 ms | 739 ms | 723 ms | **185 ms** |
+| 7s | 6.75s | 771 ms | 907 ms | 1839 ms | **396 ms** |
+| 15s | 13.90s | 1896 ms | OOM | 3737 ms | **1326 ms** |
+| 30s | 27.38s | 3918 ms | OOM | 7567 ms | **3021 ms** |
+
+### Realtime Factor
+
+Lower is better.
+
+| Input | A RTF | D RTF | E RTF | F RTF |
+| --- | ---: | ---: | ---: | ---: |
+| 3s | 0.165 | 0.264 | 0.258 | **0.066** |
+| 7s | 0.114 | 0.134 | 0.272 | **0.059** |
+| 15s | 0.136 | OOM | 0.269 | **0.095** |
+| 30s | 0.143 | OOM | 0.276 | **0.110** |
+
+### Config F Speedups
+
+| Input | F vs A | F vs D | F vs E |
+| --- | ---: | ---: | ---: |
+| 3s | 2.5x | 4.0x | 3.9x |
+| 7s | 1.9x | 2.3x | 4.6x |
+| 15s | 1.4x | OOM | 2.8x |
+| 30s | 1.3x | OOM | 2.5x |
+
+### Config F Stage Medians
+
+| Input | Duration | F0Ntrain | DecoderPre | Matrix | hn-sf | Trim | Core ML total |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| 3s | 10.6 ms | 3.3 ms | 2.6 ms | 0.1 ms | 9.0 ms | 0.2 ms | 175.6 ms |
+| 7s | 12.8 ms | 7.5 ms | 4.9 ms | 0.3 ms | 21.3 ms | 0.4 ms | 374.1 ms |
+| 15s | 39.6 ms | 35.1 ms | 13.0 ms | 0.5 ms | 46.9 ms | 0.8 ms | 1276.1 ms |
+| 30s | 48.5 ms | 68.7 ms | 28.4 ms | 1.0 ms | 95.7 ms | 1.7 ms | 2925.7 ms |
+
+GeneratorFromHar dominates on M2 Air even harder than M2 Ultra (86% at
+3s, 92% at 30s of Config F wall time). This is the optimization target
+for M2 Air.
+
+### Notes
+
+- Config D OOM at 15s/30s even in a solo pass. MPS pool cap on 24 GB
+  M2 Air is ~27 GB, and the kokoro pipeline plus prior MPS
+  allocations exceeded that for longer buckets. The production app
+  should never route to MPS on this hardware.
+- Config F regressed relative to the prior v5 M2 Air numbers (v5: F at
+  200/326/783/1829 ms) by roughly `+60-70%` at 15s/30s, driven by a
+  `~2x` slowdown in GeneratorFromHar. Candidate causes not yet
+  isolated: `torch==2.5.0` in the current
+  `requirements-bakeoff.txt` vs `torch==2.6.0` in the v5 provenance;
+  thermal state after back-to-back exports; variance in CoreML ANE
+  plan compilation across fresh `.mlpackage` directories.
+- The `export_synth/wrappers.py` fix was required to produce fresh
+  GeneratorFromHar packages at all — without it, the second-stage
+  `SynthesizerModel(kmodel)` raised
+  `AttributeError: 'MaskedBidirectionalLSTM' object has no attribute
+  'num_layers'` when wrapping an already-masked `text_encoder.lstm`
+  from `DurationModel(kmodel)`.
 
 ## M1 Mini
 
