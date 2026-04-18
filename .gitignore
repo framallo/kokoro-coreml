@@ -195,6 +195,7 @@ kokoro.js/voices/*.bin
 
 # Claude Code local runtime (not for version control)
 .claude/scheduled_tasks.lock
+.claude/worktrees/
 
 # Local Python virtualenv (named variants; `.venv` alone does not match `.venv-coreml`)
 .venv-coreml/

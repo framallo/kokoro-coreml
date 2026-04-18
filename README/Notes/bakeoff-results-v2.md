@@ -4,21 +4,14 @@ April 17, 2026
 
 ## Scope
 
-This note records the current corrected bakeoff series after the Config F
-host-materialization fix and supersedes the archived v1 comparison for current
-performance claims. It is intentionally conservative: M2 Ultra, M2 Air, and M1
-Mini numbers are populated here because each set comes from a completed
-controlled run on this branch. The result JSON records `git_dirty: true` because
-it was collected before the final cleanup commit.
-A later audit refactor moved the timed Swift synthesis orchestration into the
-shared pipeline library. That refactor was verified with the F-only smoke result
-`outputs/bakeoff/results_shared_executor_smoke_20260417.json`; it does not
-replace the full A/D/E/F medians below.
+Corrected bakeoff numbers after the Config F host-materialization fix—use this
+note, not v1, for current latency claims. Every table below is from a finished
+run on this branch (M2 Ultra, M2 Air, M1 Mini). The saved JSON may still show
+`git_dirty: true` from the pre-cleanup collection window.
 
-The useful rule from the latest debugging pass is simple: measure the deployed
-pipeline boundary, not an attractive subgraph. Config F wins on M2 Ultra only
-after the Swift hot path stopped doing accidental host work around the Core ML
-models.
+A later refactor moved timed Swift synthesis into the shared pipeline library;
+proof lives in `outputs/bakeoff/results_shared_executor_smoke_20260417.json`.
+That smoke does not replace the full A/D/E/F medians in this file.
 
 ## Configs
 
@@ -31,19 +24,20 @@ models.
 
 ## Headline Result
 
-On M2 Ultra, Config F is now the fastest measured path at every canonical input
-length. It beats the fixed Config A HAR-post path by `1.8-5.9x`, PyTorch MPS by
-`2.8-4.0x`, and PyTorch CPU by `5.7-7.2x`.
+**M2 Ultra:** Config F wins every canonical length—`1.8-5.9x` vs Config A
+(Python HAR-post), `2.8-4.0x` vs PyTorch MPS, `5.7-7.2x` vs CPU.
 
-The reason is not a new model. The graph was already good enough. The final
-performance fix removed two host-side mistakes:
+**M1 Mini:** vs MPS, `2.0-3.4x` at every length; vs A, only `1.1-1.5x`.
 
-- sparse one-hot alignment materialization plus dense matmul through zeros
-- boxed `MLMultiArray` reads from strided `Float16` waveform output during trim
+**M2 Air:** vs MPS where D finishes (3s, 7s), `2.3-4.0x`. At 15s and 30s,
+PyTorch MPS OOMs on 24 GB; you get A, E, and F medians only.
 
-The current rule for future work is: keep the model split simple, keep dynamic
-setup on the host only when it is cheap, and prove the full wall-clock path
-with audio-quality gates before ranking configurations.
+Weights did not change. The graph was already sound. Two host bugs ate the rest:
+sparse one-hot alignment expanded into dense matmul through zeros, and boxed
+`MLMultiArray` reads over strided `Float16` waveform during trim.
+
+Ship rule: small model split, cheap host setup only, full wall-clock timed
+behind the listen gate before you rank configs.
 
 ## M2 Ultra
 
@@ -157,16 +151,14 @@ Lower is better.
 | 15s | 39.6 ms | 35.1 ms | 13.0 ms | 0.5 ms | 46.9 ms | 0.8 ms | 1276.1 ms |
 | 30s | 48.5 ms | 68.7 ms | 28.4 ms | 1.0 ms | 95.7 ms | 1.7 ms | 2925.7 ms |
 
-GeneratorFromHar dominates on M2 Air even harder than M2 Ultra (86% at
-3s, 92% at 30s of Config F wall time). This is the optimization target
-for M2 Air.
+On M2 Air, GeneratorFromHar is **86%** of Config F wall at 3s and **92%** at
+30s—higher than on Ultra. That stage is the lever on this machine.
 
 ### Notes
 
-- Config D OOM at 15s/30s even in a solo pass. MPS pool cap on 24 GB
-  M2 Air is ~27 GB, and the kokoro pipeline plus prior MPS
-  allocations exceeded that for longer buckets. The production app
-  should never route to MPS on this hardware.
+- Config D OOMs at 15s/30s even solo. On 24 GB Air the MPS pool caps near
+  **27 GB**; kokoro plus retained MPS allocations cross it on longer buckets.
+  Do not send production traffic down MPS here.
 - Config F regressed relative to the prior v5 M2 Air numbers (v5: F at
   200/326/783/1829 ms) by roughly `+60-70%` at 15s/30s, driven by a
   `~2x` slowdown in GeneratorFromHar. Candidate causes not yet
@@ -220,20 +212,15 @@ Lower is better.
 
 ## Cross-Machine Comparison
 
-Cross-machine takeaway (completed runs):
-
-- M2 Ultra still leads for this suite and remains the top speed point.
-- M2 Air has complete A/E/F medians; Config D is partial (MPS OOM at 15s/30s on
-  24 GB). Ordering where measured matches M2 Ultra: `F > A > D > E` for the
-  shorter inputs.
-- M1 Mini now has complete A/D/E/F medians and follows the same ordering: `F > A > D > E`.
-- Do not reuse pre-2026 M2 Air or M1 Mini tables, because output depends on exact
-  Duration packages, direct alignment expansion, and stride-aware `Float16`
-  waveform extraction.
+- **M2 Ultra:** fastest absolute times in this suite.
+- **M2 Air:** full A/E/F; D stops after 7s (MPS OOM). Where all four run, order
+  matches Ultra: `F > A > D > E`.
+- **M1 Mini:** full A/D/E/F; same order.
+- Ignore pre-2026 Air and Mini tables—these numbers move when Duration packages, alignment expansion, or stride-aware `Float16` reads change.
 
 ## Provenance
 
-M2 Ultra command used for the recorded run:
+Command that produced the M2 Ultra JSON:
 
 ```bash
 BAKEOFF_SKIP_SMOKE=1 PYTORCH_ENABLE_MPS_FALLBACK=1 \
