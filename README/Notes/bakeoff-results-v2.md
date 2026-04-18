@@ -6,11 +6,10 @@ April 17, 2026
 
 This note records the current corrected bakeoff series after the Config F
 host-materialization fix and supersedes the archived v1 comparison for current
-performance claims. It is intentionally conservative: M2 Ultra and M1 Mini
-numbers are populated here because both sets come from completed controlled runs
-on this branch. The result JSON records `git_dirty: true` because it was
-collected before the final cleanup commit; M2 Air remains a placeholder until it
-reruns the same setup and harness.
+performance claims. It is intentionally conservative: M2 Ultra, M2 Air, and M1
+Mini numbers are populated here because each set comes from a completed
+controlled run on this branch. The result JSON records `git_dirty: true` because
+it was collected before the final cleanup commit.
 A later audit refactor moved the timed Swift synthesis orchestration into the
 shared pipeline library. That refactor was verified with the F-only smoke result
 `outputs/bakeoff/results_shared_executor_smoke_20260417.json`; it does not
@@ -182,26 +181,6 @@ for M2 Air.
   'num_layers'` when wrapping an already-masked `text_encoder.lstm`
   from `DurationModel(kmodel)`.
 
-### Realtime Factor
-
-Lower is better.
-
-| Input | A RTF | D RTF | E RTF | F RTF |
-| --- | ---: | ---: | ---: | ---: |
-| 3s | TBD | TBD | TBD | TBD |
-| 7s | TBD | TBD | TBD | TBD |
-| 15s | TBD | TBD | TBD | TBD |
-| 30s | TBD | TBD | TBD | TBD |
-
-### Config F Speedups
-
-| Input | F vs A | F vs MPS |
-| --- | ---: | ---: |
-| 3s | TBD | TBD |
-| 7s | TBD | TBD |
-| 15s | TBD | TBD |
-| 30s | TBD | TBD |
-
 ## M1 Mini
 
 **Machine:** Apple M1 Mac Mini
@@ -244,6 +223,9 @@ Lower is better.
 Cross-machine takeaway (completed runs):
 
 - M2 Ultra still leads for this suite and remains the top speed point.
+- M2 Air has complete A/E/F medians; Config D is partial (MPS OOM at 15s/30s on
+  24 GB). Ordering where measured matches M2 Ultra: `F > A > D > E` for the
+  shorter inputs.
 - M1 Mini now has complete A/D/E/F medians and follows the same ordering: `F > A > D > E`.
 - Do not reuse pre-2026 M2 Air or M1 Mini tables, because output depends on exact
   Duration packages, direct alignment expansion, and stride-aware `Float16`
