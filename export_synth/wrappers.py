@@ -59,6 +59,11 @@ LinearNorm = kokoro_modules.LinearNorm
 AdainResBlk1d = kokoro_modules.AdainResBlk1d
 
 
+def _is_masked_bidirectional_lstm(module: nn.Module) -> bool:
+    """Return true for this module's mask-aware LSTM, including re-imported copies."""
+    return isinstance(module, MaskedBidirectionalLSTM) or type(module).__name__ == "MaskedBidirectionalLSTM"
+
+
 class GeneratorFromHar(nn.Module):
     """Vocoder tail after hn-nsf harmonic features: same as ``Generator.forward`` once ``har`` exists.
 
@@ -119,7 +124,7 @@ class CoreMLFriendlyTextEncoder(nn.Module):
         # Idempotent: `DurationModel` and `SynthesizerModel` may both wrap a
         # shared `KModel.text_encoder` within one export run. If the LSTM is
         # already masked, reuse it instead of wrapping a wrapper.
-        if isinstance(original_encoder.lstm, MaskedBidirectionalLSTM):
+        if _is_masked_bidirectional_lstm(original_encoder.lstm):
             self.lstm = original_encoder.lstm
         else:
             self.lstm = MaskedBidirectionalLSTM(original_encoder.lstm)
@@ -146,7 +151,7 @@ class CoreMLFriendlyDurationEncoder(nn.Module):
         # Idempotent: skip re-wrapping already-masked LSTM blocks when this
         # encoder is constructed twice from a shared `KModel` during export.
         self.lstms = nn.ModuleList(
-            block if isinstance(block, MaskedBidirectionalLSTM)
+            block if _is_masked_bidirectional_lstm(block)
             else MaskedBidirectionalLSTM(block) if isinstance(block, nn.LSTM)
             else block
             for block in original_encoder.lstms
@@ -275,7 +280,12 @@ class DurationModel(nn.Module):
         self.kmodel = kmodel
         self.kmodel.text_encoder = CoreMLFriendlyTextEncoder(kmodel.text_encoder)
         self.kmodel.predictor.text_encoder = CoreMLFriendlyDurationEncoder(kmodel.predictor.text_encoder)
-        self.duration_lstm = MaskedBidirectionalLSTM(kmodel.predictor.lstm)
+        # Idempotent for re-export/debug sessions that pass a shared KModel
+        # whose predictor LSTM has already been replaced by this export wrapper.
+        if _is_masked_bidirectional_lstm(kmodel.predictor.lstm):
+            self.duration_lstm = kmodel.predictor.lstm
+        else:
+            self.duration_lstm = MaskedBidirectionalLSTM(kmodel.predictor.lstm)
         if hasattr(self.kmodel.bert.embeddings, 'token_type_ids'):
              delattr(self.kmodel.bert.embeddings, 'token_type_ids')
 

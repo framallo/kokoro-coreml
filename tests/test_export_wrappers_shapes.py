@@ -36,6 +36,16 @@ def test_duration_model_returns_five_tensors_expected_shapes(kmodel):
     assert ref_s_out.shape == ref_s.shape
 
 
+def test_duration_model_reuses_already_masked_predictor_lstm(kmodel):
+    from export_synth.wrappers import DurationModel, MaskedBidirectionalLSTM
+
+    kmodel.predictor.lstm = MaskedBidirectionalLSTM(kmodel.predictor.lstm)
+
+    dm = DurationModel(kmodel)
+
+    assert dm.duration_lstm is kmodel.predictor.lstm
+
+
 def test_duration_model_padded_input_matches_exact_valid_prefix(kmodel):
     from export_synth.wrappers import DurationModel
 

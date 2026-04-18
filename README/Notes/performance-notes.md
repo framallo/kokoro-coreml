@@ -38,10 +38,10 @@ Inputs used:
 - `tiny`: `"Hello world!"`
 - `long`: bakeoff-style longer sentence routed to the 10s HAR-post bucket
 
-## Bakeoff v10: PyTorch baselines on M1 Mini (Configs A/F blocked)
+## Bakeoff v10: PyTorch baselines on M1 Mini (Configs A/F initially blocked)
 
 **First collected:** 2026-04-17
-**Status:** Partial — Configs D and E complete; Configs A and F blocked by broken `decoder_har_post` exports
+**Status:** Partial timed results — Configs D and E complete; the A/F export blocker was resolved later on 2026-04-17 and needs a timed rerun
 
 ### Summary
 
@@ -56,9 +56,33 @@ failed with `AttributeError: 'MaskedBidirectionalLSTM' object has no attribute '
 so the HAR-post buckets could not be rebuilt in this session.
 
 Configs D (PyTorch MPS) and E (PyTorch CPU) ran cleanly and are published
-below. Config A (Python HAR-post) and Config F (Swift + Core ML) are marked
-`config_unavailable` pending a fix to `export_synth/wrappers.py` so the
-GeneratorFromHar trace can see `num_layers` on the duration/prosody LSTMs.
+below. Config A (Python HAR-post) and Config F (Swift + Core ML) were marked
+`config_unavailable` in the original v10 result file.
+
+### Follow-up Resolution
+
+On 2026-04-17, `export_synth/wrappers.py` was made idempotent for an already
+masked `kmodel.predictor.lstm`, and the full HAR-post set was regenerated:
+
+```bash
+uv run --no-sync python -m export_synth.main --mode decoder-har --buckets 3s,7s,10s,15s,30s -o coreml
+```
+
+The saved package specs now advertise the expected waveform lengths:
+
+| Bucket | Waveform samples |
+| --- | ---: |
+| 3s | 72000 |
+| 7s | 168000 |
+| 10s | 240000 |
+| 15s | 360000 |
+| 30s | 720000 |
+
+Config A and Config F both loaded as `READY` in a zero-iteration smoke run, and
+Config F passed the canonical-duration-agreement guard for all four frozen
+inputs. The smoke result is
+`outputs/bakeoff/results_debug_af_smoke.json`. The timed v10 A/F numbers still
+need to be collected in a fresh bakeoff run.
 
 ### End-to-end wall time (warm median, milliseconds)
 

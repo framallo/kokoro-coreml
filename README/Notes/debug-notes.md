@@ -6,6 +6,115 @@ Institutional memory for Kokoro PyTorch → Core ML (`mlprogram`) export, synthe
 
 ---
 
+## Issue: HAR-post buckets emitted half-duration audio and re-export could double-wrap LSTMs — Resolved
+
+**First spotted:** 2026-04-17
+**Resolved:** 2026-04-17
+**Status:** Resolved
+
+### Summary
+
+The M1 Mini v10 bakeoff found stale `kokoro_decoder_har_post_<N>s.mlpackage`
+artifacts that emitted half their advertised waveform length, blocking Config A
+and Config F. The current exporter already had the corrected 2x HAR internal
+geometry, but one remaining wrapper site could still raise
+`AttributeError: 'MaskedBidirectionalLSTM' object has no attribute 'num_layers'`
+when a reused/shared `KModel` arrived with `predictor.lstm` already masked.
+
+### Symptom
+
+```log
+coreml/kokoro_decoder_har_post_3s.mlpackage -> waveform (1, 1, 36000)
+Config F duration mismatch: observed 1.5s vs canonical 2.8s
+AttributeError: 'MaskedBidirectionalLSTM' object has no attribute 'num_layers'
+```
+
+### Root Cause
+
+Two separate problems overlapped:
+
+- The local HAR-post packages were stale relative to the corrected
+  `decoder-har` geometry. `GeneratorFromHar` emits half the nominal internal
+  HAR coverage, so export must trace with `bucket_samples * 2` internal
+  geometry for a package name like `3s` to emit at least `72000` waveform
+  samples.
+- The export wrappers were only partially idempotent. `CoreMLFriendlyTextEncoder`
+  and `CoreMLFriendlyDurationEncoder` reused already masked LSTMs, but
+  `DurationModel.duration_lstm` still unconditionally called
+  `MaskedBidirectionalLSTM(kmodel.predictor.lstm)`. If that predictor LSTM was
+  already wrapped, the wrapper constructor looked for `num_layers` on another
+  `MaskedBidirectionalLSTM` and crashed.
+
+### Related Guides
+
+- [Performance notes](performance-notes.md)
+  - Records the v10 M1 Mini partial bakeoff and the original A/F blocker.
+- [ANE optimization plan](../Plans/ane-optimization-v1.md)
+  - Documents the `decoder-har` split and `GeneratorFromHar` export contract.
+- [Core ML LSTM enumerated shapes guide](../Guides/apple-silicon/CoreML-LSTM-Enumerated-Shapes.md)
+  - Gives context for static-shape LSTM export and why wrapper idempotence
+    matters during repeated export/debug sessions.
+
+### Fix
+
+**Files:**
+
+- `export_synth/wrappers.py`
+- `tests/test_export_wrappers_shapes.py`
+- `coreml/kokoro_decoder_har_post_{3,7,10,15,30}s.mlpackage` (regenerated local
+  artifacts)
+
+Changes:
+
+- Added `_is_masked_bidirectional_lstm(...)` so wrapper reuse also works when a
+  masked LSTM class was imported through another module path.
+- Reused an already masked `kmodel.predictor.lstm` in `DurationModel` instead of
+  wrapping it again.
+- Added a regression test that pre-wraps `kmodel.predictor.lstm` and verifies
+  `DurationModel` reuses it.
+- Re-exported the full HAR-post bucket set with the corrected 2x internal
+  geometry.
+
+### Verification
+
+```bash
+uv run --no-sync python -m py_compile export_synth/wrappers.py
+uv run --no-sync python -m export_synth.main --mode decoder-har --buckets 3s,7s,10s,15s,30s -o coreml
+uv run --no-sync python scripts/bakeoff_harness.py run --configs a,f --iterations 0 --order-seed 0 --machine-id debug_af_smoke
+```
+
+The export completed for every bucket. Traced/Core ML waveform lengths:
+
+| Bucket | Waveform samples |
+| --- | ---: |
+| 3s | 72000 |
+| 7s | 168000 |
+| 10s | 240000 |
+| 15s | 360000 |
+| 30s | 720000 |
+
+Saved-package spec checks also passed:
+
+| Bucket | `x_pre` T | `har` T | `waveform` samples |
+| --- | ---: | ---: | ---: |
+| 3s | 240 | 28801 | 72000 |
+| 7s | 560 | 67201 | 168000 |
+| 10s | 800 | 96001 | 240000 |
+| 15s | 1200 | 144001 | 360000 |
+| 30s | 2400 | 288001 | 720000 |
+
+Config A and Config F both loaded as `READY` in the zero-iteration smoke run.
+Config A smoke passed, and Config F passed duration agreement for all four
+frozen inputs. The smoke run wrote
+`outputs/bakeoff/results_debug_af_smoke.json`.
+
+`pytest` was not installed in the local uv environment
+(`No module named pytest`), so the regression test was covered by a direct
+script that pre-wrapped `kmodel.predictor.lstm` and asserted `DurationModel`
+reused the same `MaskedBidirectionalLSTM`.
+
+---
+
 ## Issue: Config F loses to A at 15s/30s — Resolved
 
 **First spotted:** 2026-04-17
