@@ -184,6 +184,13 @@ sudo powermetrics -i 1000 --samplers ane
   the compute-unit scheduling guide: run the ANE-eligible static conv island on
   ANE, and keep the generator away from the ANE compiler until the model
   architecture changes.
+- **Verification after commit `cdc4f86`:** Studio and Irvine both built the
+  Swift package. Irvine's staged full workload completed without the earlier
+  `.all` `ANECompilerService` stall and powermetrics showed nonzero ANE samples
+  (p95 47 mW, max 82 mW). Studio still reported 0 mW ANE even when an isolated
+  `kokoro_decoder_pre_3s` loop was loaded with `CPU_AND_NE`; the compute plan
+  for that exact model remains 100% NeuralEngine-preferred, so Studio
+  powermetrics is non-confirming rather than proof of a different plan.
 
 **2026-04-17**
 
