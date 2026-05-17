@@ -160,6 +160,31 @@ sudo powermetrics -i 1000 --samplers ane
 
 ### Investigation Log
 
+**2026-05-17**
+
+- **Powermetrics result:** Config F/reference single-stream was not ANE-bound
+  on Studio (`ANE Power: 0 mW`) even when the 3s path stayed fast. Irvine
+  single-stream showed only tiny ANE readings while GPU power dominated.
+- **Production-shaped result:** Irvine `.all` could stall in
+  `ANECompilerService` before emitting workload traces. The same shape completed
+  when forced to `.cpuAndGPU`.
+- **Compute-plan result:** `kokoro_decoder_pre_3s.mlpackage` is
+  NeuralEngine-preferred, but `kokoro_decoder_har_post_3s.mlpackage`
+  (`GeneratorFromHar`) is GPU-preferred. The generator contains ANE-hostile
+  structure: exported `conv_transpose`, >16k temporal axes in the harmonic
+  branch, and Snake activations lowered to `sin` ops.
+- **Prototype tried:** Rewriting `conv_transpose1d` as zero-insertion plus
+  `conv1d` removed MIL `conv_transpose`, but the compute plan remained
+  GPU-preferred. Cropping the harmonic branch before residual convs reduced the
+  >16k conv surface but changed output because AdaIN normalizes over the full
+  time axis. That path was not shipped.
+- **Runtime decision:** The Swift pipeline now uses explicit stage placement:
+  duration/F0 on `.cpuAndGPU`, `decoder_pre` on `.cpuAndNeuralEngine`, and
+  `GeneratorFromHar` on `.cpuAndGPU`. This is a manual partition in the sense of
+  the compute-unit scheduling guide: run the ANE-eligible static conv island on
+  ANE, and keep the generator away from the ANE compiler until the model
+  architecture changes.
+
 **2026-04-17**
 
 - **Hypothesis:** Config F's speedup over Config A may not isolate ANE, because
@@ -169,4 +194,3 @@ sudo powermetrics -i 1000 --samplers ane
 - **Outcome:** Config G was faster than F on the local Apple M2 24 GB machine.
   The result invalidates an ANE-latency-win claim for this machine, but does not
   yet identify whether `.all` used ANE, mixed a bad plan, or fell back poorly.
-

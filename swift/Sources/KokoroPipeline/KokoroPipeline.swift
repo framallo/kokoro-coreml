@@ -178,7 +178,7 @@ public class KokoroPipeline: KokoroModelProvider {
         var durModels: [String: MLModel] = [:]
         for choice in durationChoices {
             let config = MLModelConfiguration()
-            config.computeUnits = .all
+            config.computeUnits = .cpuAndGPU
             durModels[choice.cacheKey] = try MLModel(
                 contentsOf: MLModel.compileModel(at: choice.packageURL),
                 configuration: config
@@ -197,7 +197,7 @@ public class KokoroPipeline: KokoroModelProvider {
                 let url = modelsDirectory.appendingPathComponent("kokoro_f0ntrain_t\(t).mlpackage")
                 if FileManager.default.fileExists(atPath: url.path) {
                     let config = MLModelConfiguration()
-                    config.computeUnits = .all
+                    config.computeUnits = .cpuAndGPU
                     f0Models[t] = try MLModel(contentsOf: MLModel.compileModel(at: url), configuration: config)
                 }
             }
@@ -210,7 +210,7 @@ public class KokoroPipeline: KokoroModelProvider {
             let url = modelsDirectory.appendingPathComponent("kokoro_decoder_pre_\(sec)s.mlpackage")
             if FileManager.default.fileExists(atPath: url.path) {
                 let config = MLModelConfiguration()
-                config.computeUnits = .all
+                config.computeUnits = .cpuAndNeuralEngine
                 decPreModels[sec] = try MLModel(contentsOf: MLModel.compileModel(at: url), configuration: config)
             }
         }
@@ -222,7 +222,7 @@ public class KokoroPipeline: KokoroModelProvider {
             let url = modelsDirectory.appendingPathComponent("kokoro_decoder_har_post_\(sec)s.mlpackage")
             if FileManager.default.fileExists(atPath: url.path) {
                 let config = MLModelConfiguration()
-                config.computeUnits = .all
+                config.computeUnits = .cpuAndGPU
                 genModels[sec] = try MLModel(contentsOf: MLModel.compileModel(at: url), configuration: config)
             }
         }
