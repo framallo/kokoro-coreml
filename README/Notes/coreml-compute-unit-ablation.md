@@ -191,6 +191,12 @@ sudo powermetrics -i 1000 --samplers ane
   `kokoro_decoder_pre_3s` loop was loaded with `CPU_AND_NE`; the compute plan
   for that exact model remains 100% NeuralEngine-preferred, so Studio
   powermetrics is non-confirming rather than proof of a different plan.
+- **Decoder-pre latency control:** Isolated `kokoro_decoder_pre_3s` was faster
+  with `CPU_AND_NE` than `CPU_ONLY`, and `CPU_AND_NE` matched `.all`: Studio
+  p50 3.231ms (`CPU_ONLY`) vs 2.476ms (`CPU_AND_NE`) vs 2.469ms (`.all`);
+  Irvine p50 5.024ms vs 2.734ms vs 2.741ms. This is the strongest confirmation
+  that the staged runtime is preserving the ANE-eligible decoder-pre island
+  while deliberately keeping the ANE-hostile generator on CPU+GPU.
 
 **2026-04-17**
 
