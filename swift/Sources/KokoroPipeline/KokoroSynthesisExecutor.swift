@@ -356,14 +356,19 @@ public func executeKokoroSynthesis(
     )
     let trimLen = min(waveformArray.count, targetLen)
     let rawAudio = floatValues(from: waveformArray, limit: trimLen)
-    let samplesPerDurationFrame = Int(
-        round(Double(PipelineConstants.sampleRate) / (PipelineConstants.f0FrameRate / 2.0))
-    )
+    let expectedAudioSamples = predDur.reduce(0, +) * PipelineConstants.samplesPerDurationFrame
+    #if DEBUG
+    if trimLen < expectedAudioSamples {
+        assertionFailure(
+            "Trimmed waveform (\(trimLen) samples) is shorter than pred_dur span " +
+            "(\(expectedAudioSamples) samples); punctuation suppression may be partial"
+        )
+    }
+    #endif
     let audio = suppressPunctuationTokenAudio(
         rawAudio,
-        inputIds: request.inputIds,
-        predDur: predDur,
-        samplesPerDurationFrame: samplesPerDurationFrame
+        inputIds: Array(request.inputIds.prefix(predDur.count)),
+        predDur: predDur
     )
     let t17 = CFAbsoluteTimeGetCurrent()
     timings.trim = t17 - t16

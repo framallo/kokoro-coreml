@@ -170,6 +170,7 @@ The `swift/` directory contains a Swift Package (`KokoroPipeline`) with:
 - **`HarmonicSource.swift`** -- hn-nsf in Swift/Accelerate (Double-precision phase accumulator)
 - **`AlignmentBuilder.swift`** -- one-hot alignment matrix from phoneme durations
 - **`MLMultiArrayHelpers.swift`** -- matrix multiply (cblas_sgemm), zero-padding, stride-safe MLMultiArray ops
+- **`WaveformPostProcess.swift`** -- punctuation-span fade-to-silence after generator trim
 - **`BucketSelector.swift`** -- smallest bucket >= ceil(audio_seconds)
 
 ```swift

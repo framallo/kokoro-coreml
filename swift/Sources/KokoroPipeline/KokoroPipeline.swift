@@ -31,6 +31,10 @@ public enum PipelineConstants {
     public static let sampleRate: Int = 24000
     /// F0 frame rate (Hz). Converts F0 frame count to seconds.
     public static let f0FrameRate: Double = 80.0
+    /// Samples per duration-model frame (40 fps). Matches Python ``AudioConstants.HOP_LENGTH``.
+    public static let samplesPerDurationFrame: Int = sampleRate * 2 / Int(f0FrameRate)
+    /// Fade length (~5 ms @ 24 kHz) applied around punctuation-owned spans.
+    public static let punctuationFadeSamples: Int = 120
     /// Legacy duration model fixed token length.
     public static let durationTokenLength: Int = 128
     /// Voice embedding total dimension.
