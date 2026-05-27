@@ -355,7 +355,16 @@ public func executeKokoroSynthesis(
         round(Double(originalF0Len) / PipelineConstants.f0FrameRate * Double(PipelineConstants.sampleRate))
     )
     let trimLen = min(waveformArray.count, targetLen)
-    let audio = floatValues(from: waveformArray, limit: trimLen)
+    let rawAudio = floatValues(from: waveformArray, limit: trimLen)
+    let samplesPerDurationFrame = Int(
+        round(Double(PipelineConstants.sampleRate) / (PipelineConstants.f0FrameRate / 2.0))
+    )
+    let audio = suppressPunctuationTokenAudio(
+        rawAudio,
+        inputIds: request.inputIds,
+        predDur: predDur,
+        samplesPerDurationFrame: samplesPerDurationFrame
+    )
     let t17 = CFAbsoluteTimeGetCurrent()
     timings.trim = t17 - t16
 
@@ -366,6 +375,7 @@ public func executeKokoroSynthesis(
             values: waveformValues,
             shape: waveformArray.shape.map { $0.intValue }
         )
+        try tensorDump?.writeFloatArray(name: "waveform_raw_trimmed", values: rawAudio, shape: [trimLen])
         try tensorDump?.writeFloatArray(name: "waveform", values: audio, shape: [trimLen])
     }
 
