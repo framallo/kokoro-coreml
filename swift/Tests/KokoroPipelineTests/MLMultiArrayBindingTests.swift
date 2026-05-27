@@ -145,6 +145,41 @@ final class MLMultiArrayBindingTests: XCTestCase {
         )
     }
 
+    func testSuppressPunctuationTokenAudioSilencesPunctuationSpansWithFades() throws {
+        let audio = [Float](repeating: 1.0, count: 20)
+        let result = suppressPunctuationTokenAudio(
+            audio,
+            inputIds: [99, 3, 100, 4],
+            predDur: [1, 2, 1, 1],
+            samplesPerDurationFrame: 4,
+            fadeSamples: 2
+        )
+
+        XCTAssertEqual(result[0], 1.0)
+        XCTAssertEqual(result[2], 1.0, accuracy: 0.0001)
+        XCTAssertEqual(result[3], 0.5, accuracy: 0.0001)
+        XCTAssertEqual(Array(result[4..<12]), Array(repeating: 0.0, count: 8))
+        XCTAssertEqual(result[12], 0.5, accuracy: 0.0001)
+        XCTAssertEqual(result[13], 1.0, accuracy: 0.0001)
+        XCTAssertEqual(result[15], 0.5, accuracy: 0.0001)
+        XCTAssertEqual(Array(result[16..<20]), Array(repeating: 0.0, count: 4))
+    }
+
+    func testSuppressPunctuationTokenAudioSilencesAdjacentPunctuationWhitespace() throws {
+        let audio = [Float](repeating: 1.0, count: 16)
+        let result = suppressPunctuationTokenAudio(
+            audio,
+            inputIds: [99, 3, 16, 100],
+            predDur: [1, 1, 1, 1],
+            samplesPerDurationFrame: 4,
+            fadeSamples: 0
+        )
+
+        XCTAssertEqual(Array(result[0..<4]), Array(repeating: 1.0, count: 4))
+        XCTAssertEqual(Array(result[4..<12]), Array(repeating: 0.0, count: 8))
+        XCTAssertEqual(Array(result[12..<16]), Array(repeating: 1.0, count: 4))
+    }
+
     func testTensorDumpWriterWritesManifestAndPayloads() throws {
         let dir = FileManager.default.temporaryDirectory
             .appendingPathComponent("kokoro-tensor-dump-\(UUID().uuidString)")
