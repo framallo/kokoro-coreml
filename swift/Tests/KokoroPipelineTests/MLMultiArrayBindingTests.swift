@@ -145,6 +145,27 @@ final class MLMultiArrayBindingTests: XCTestCase {
         )
     }
 
+    func testPcmJoinerCrossfadesSyntheticDiscontinuity() {
+        let first = Array(repeating: Float(1.0), count: 240)
+        let second = Array(repeating: Float(-1.0), count: 240)
+
+        let joined = PcmJoiner.join(segments: [first, second], sampleRate: 24_000, crossfadeMs: 5)
+
+        XCTAssertLessThan(joined.count, first.count + second.count)
+        XCTAssertGreaterThan(joined[120], -1.0)
+        XCTAssertLessThan(joined[120], 1.0)
+    }
+
+    func testPcmJoinerPreservesConcatenationWhenDisabled() {
+        let joined = PcmJoiner.join(
+            segments: [[1.0, 2.0], [], [3.0, 4.0]],
+            sampleRate: 24_000,
+            crossfadeMs: 0
+        )
+
+        XCTAssertEqual(joined, [1.0, 2.0, 3.0, 4.0])
+    }
+
     func testTensorDumpWriterWritesManifestAndPayloads() throws {
         let dir = FileManager.default.temporaryDirectory
             .appendingPathComponent("kokoro-tensor-dump-\(UUID().uuidString)")
