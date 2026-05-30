@@ -131,6 +131,8 @@ public struct SynthesisResult {
     public let harExpectedTime: Int
     /// Number of audio samples retained after trimming.
     public let trimSampleCount: Int
+    /// Per-input-token duration frame counts (BOS + phoneme ids + EOS), aligned with the caller's ``inputIds`` prefix.
+    public let tokenDurationFrames: [Int]
 }
 
 public struct DurationModelChoice {

@@ -400,7 +400,8 @@ public func executeKokoroSynthesis(
         decoderFrameCount: frameCount,
         xPreExpectedTime: xPreExpectedTime,
         harExpectedTime: harExpectedTime,
-        trimSampleCount: trimLen
+        trimSampleCount: trimLen,
+        tokenDurationFrames: predDur
     )
 }
 
