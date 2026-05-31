@@ -156,6 +156,10 @@ final class MLMultiArrayBindingTests: XCTestCase {
         XCTAssertLessThan(joined[120], 1.0)
     }
 
+    func testPcmJoinerDefaultCrossfadeMatchesProductionPolicy() {
+        XCTAssertEqual(PcmJoiner.defaultCrossfadeMs, 5.0)
+    }
+
     func testPcmJoinerPreservesConcatenationWhenDisabled() {
         let joined = PcmJoiner.join(
             segments: [[1.0, 2.0], [], [3.0, 4.0]],
