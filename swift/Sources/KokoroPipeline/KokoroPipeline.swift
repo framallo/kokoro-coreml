@@ -60,7 +60,7 @@ public enum PipelineConstants {
     public static let defaultBuckets: [Int] = [3, 7, 10, 15, 30]
 
     /// Duration model enumerated token sizes. Caller pads to nearest.
-    public static let durationTokenSizes: [Int] = [32, 64, 128, 256, 512]
+    public static let durationTokenSizes: [Int] = [32, 64, 128, 256, 320, 384, 512]
 
     /// Largest duration-token bucket shipped in the Core ML bundle.
     public static var maxDurationTokenLength: Int {

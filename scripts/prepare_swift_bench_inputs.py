@@ -43,7 +43,7 @@ BAKEOFF_INPUTS = {
     ),
 }
 # Duration model enumerated sizes — pad tokens to nearest.
-ENUM_SIZES = [32, 64, 128, 256, 512]
+ENUM_SIZES = [32, 64, 128, 256, 320, 384, 512]
 VOICE = "af_heart"
 SPEED = 1.0
 
