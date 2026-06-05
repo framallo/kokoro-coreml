@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import argparse
+import csv
 import html
 import os
 import sys
@@ -111,6 +112,53 @@ def _record_index(records: list[dict[str, Any]]) -> dict[tuple[str, str, str], d
     return indexed
 
 
+def _review_rows(
+    results_dir: Path,
+    records: list[dict[str, Any]],
+    quality: dict[str, dict[str, Any]],
+) -> list[dict[str, str]]:
+    """Return one listening-review row per available result record."""
+    inputs = _manifest_inputs(results_dir)
+    indexed = _record_index(records)
+    machines = sorted({str(record.get("machine_id")) for record in records})
+    rows: list[dict[str, str]] = []
+    for machine in machines:
+        for key in RUNTIME_BUCKETS:
+            expected = str(inputs.get(key, {}).get("text", ""))
+            for impl in IMPL_ORDER:
+                record = indexed.get((machine, key, impl))
+                if not record:
+                    continue
+                status = str(record.get("status") or "")
+                wav = ""
+                duration = ""
+                decision = "n/a"
+                if status == "ok":
+                    wav = _spotcheck_path(record)
+                    sample = quality.get(wav, {})
+                    metrics = sample.get("metrics", {})
+                    raw_duration = metrics.get("duration_s", record.get("observed_audio_duration_s"))
+                    duration = f"{float(raw_duration):.3f}" if raw_duration is not None else ""
+                    decision = str(sample.get("decision") or "needs_listening")
+                rows.append(
+                    {
+                        "machine_id": machine,
+                        "input_key": key,
+                        "impl": str(record.get("impl") or ""),
+                        "impl_label": IMPL_LABELS.get(impl, impl),
+                        "status": status,
+                        "wav_path": wav,
+                        "duration_s": duration,
+                        "waveform_decision": decision,
+                        "caveat": _caveat(record),
+                        "expected_text": expected,
+                        "human_decision": "",
+                        "notes": "",
+                    }
+                )
+    return rows
+
+
 def _markdown(results_dir: Path, records: list[dict[str, Any]], quality: dict[str, dict[str, Any]]) -> str:
     """Render the markdown checklist."""
     inputs = _manifest_inputs(results_dir)
@@ -179,6 +227,30 @@ def _markdown(results_dir: Path, records: list[dict[str, Any]], quality: dict[st
     return "\n".join(lines).rstrip() + "\n"
 
 
+def _write_decisions_csv(path: Path, rows: list[dict[str, str]]) -> None:
+    """Write a fillable human listening decision sheet."""
+    fieldnames = [
+        "machine_id",
+        "input_key",
+        "impl",
+        "impl_label",
+        "status",
+        "wav_path",
+        "duration_s",
+        "waveform_decision",
+        "caveat",
+        "human_decision",
+        "notes",
+        "expected_text",
+    ]
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with path.open("w", newline="") as handle:
+        writer = csv.DictWriter(handle, fieldnames=fieldnames)
+        writer.writeheader()
+        for row in rows:
+            writer.writerow(row)
+
+
 def _html_review(markdown_text: str, output_path: Path) -> str:
     """Render a minimal local HTML review page from generated markdown rows."""
     rows: list[str] = []
@@ -241,16 +313,26 @@ def main() -> None:
         type=Path,
         default=DEFAULT_OUTPUT_DIR / "listening" / "external_bakeoff_listening_review.html",
     )
+    parser.add_argument(
+        "--decisions-output",
+        type=Path,
+        default=DEFAULT_OUTPUT_DIR / "listening" / "external_bakeoff_listening_decisions.csv",
+    )
     parser.add_argument("--no-html", action="store_true")
+    parser.add_argument("--no-decisions-csv", action="store_true")
     args = parser.parse_args()
 
     records = _result_records(args.results_dir)
     quality = _quality_index(args.results_dir)
     markdown_text = _markdown(args.results_dir, records, quality)
+    rows = _review_rows(args.results_dir, records, quality)
 
     args.output.parent.mkdir(parents=True, exist_ok=True)
     args.output.write_text(markdown_text)
     print(f"Wrote {args.output}")
+    if not args.no_decisions_csv:
+        _write_decisions_csv(args.decisions_output, rows)
+        print(f"Wrote {args.decisions_output}")
     if not args.no_html:
         args.html_output.parent.mkdir(parents=True, exist_ok=True)
         args.html_output.write_text(_html_review(markdown_text, args.html_output))

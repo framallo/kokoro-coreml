@@ -302,9 +302,11 @@ lightweight waveform sanity gate: duration, RMS, active fraction,
 zero-crossing rate, speech-band energy, clipping, sample rate, and channel
 count. Human listening is still required before interpreting any latency cell
 as quality parity. The reproducible listening checklist can be generated with
-`python scripts/external_bakeoff/create_listening_review.py`; it writes Markdown
-and local HTML review files under `outputs/external_bakeoff/listening/` using
-only the collected Kokoro TTS WAVs.
+`python scripts/external_bakeoff/create_listening_review.py`; it writes
+Markdown, local HTML, and a fillable
+`external_bakeoff_listening_decisions.csv` under
+`outputs/external_bakeoff/listening/` using only the collected Kokoro TTS WAVs.
+The CSV intentionally leaves `human_decision` blank until the operator listens.
 
 Known caveats:
 

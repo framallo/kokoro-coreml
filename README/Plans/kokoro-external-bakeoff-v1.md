@@ -5,7 +5,8 @@
 compile-contaminated 30s Config F cells replaced with warmed-inference reruns;
 local Config F, MLX, Soniqo, and laishere powermetrics captured; human
 listening and signed iPhone execution remain before this plan can be marked
-complete
+complete; a fillable TTS-only listening decision CSV is generated for the
+remaining human review gate
 
 > Internal bakeoff methodology lives in `README/Plans/kokoro-bakeoff-v2.md`.
 > This plan extends that methodology to external Apple Silicon Kokoro
@@ -403,7 +404,8 @@ audio buffer.
       machine.
 - [x] Add a reproducible TTS-only listening review generator that reads the
       collected WAVs and waveform-quality reports without Whisper, ASR, VAD, or
-      echo-demo dependencies.
+      echo-demo dependencies. The generator emits Markdown, HTML, and a
+      fillable CSV decision sheet with blank `human_decision` fields.
 - [ ] Listen against Config F for the same text and voice.
 - [x] Run lightweight waveform sanity checks using `scripts/audio_quality_probe.py`
       where applicable: duration, RMS, clipping, silence, and gross spectral
@@ -413,9 +415,12 @@ audio buffer.
 
 **Verification:** Each implementation has a short quality note. Any latency
 table cell without quality parity evidence is marked with a caveat. Running
-`python scripts/external_bakeoff/create_listening_review.py` emits Markdown and
-HTML review artifacts under `outputs/external_bakeoff/listening/`. Human
-listening is still pending, so no speed row is interpreted as quality parity.
+`python scripts/external_bakeoff/create_listening_review.py` emits Markdown,
+HTML, and `external_bakeoff_listening_decisions.csv` review artifacts under
+`outputs/external_bakeoff/listening/`. The generated CSV has one row per
+available result cell plus error rows, and `human_decision` remains blank until
+the operator listens. Human listening is still pending, so no speed row is
+interpreted as quality parity.
 
 ---
 
