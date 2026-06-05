@@ -94,7 +94,11 @@ observed-duration RTF. The signed-device pass should start with
 `SPEECH_SWIFT_PATH=/tmp/kokoro-external-bakeoff/speech-swift python scripts/external_bakeoff/preflight_ios_runner.py --generate-project --output outputs/external_bakeoff/ios_runner_preflight_latest.json`;
 with that environment, preflight
 reports the phone available and project generation succeeds, but still blocks
-on `DEVELOPMENT_TEAM` and a valid local code-signing identity.
+on `DEVELOPMENT_TEAM` and a valid local code-signing identity. After signed
+execution, paste the copied app JSON into
+`outputs/external_bakeoff/ios_runner_payload_latest.json` and run
+`python scripts/external_bakeoff/ingest_ios_runner_result.py --input outputs/external_bakeoff/ios_runner_payload_latest.json --machine-id iphone-12-pro`
+to normalize the timing records.
 
 Whisper, ASR, VAD, and echo-demo dependencies are not part of this bakeoff
 boundary. The iOS runner is intentionally Kokoro TTS only.

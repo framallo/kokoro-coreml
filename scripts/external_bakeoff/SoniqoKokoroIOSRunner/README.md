@@ -51,3 +51,17 @@ the five runtime bucket inputs from
 one cold call plus five warm calls per bucket. It remains Kokoro TTS only:
 Whisper, ASR, VAD, playback, and the full Soniqo echo demo are outside the
 measurement path.
+
+When the run finishes, the app copies the rendered JSON to the iPhone
+clipboard. Paste that JSON into
+`outputs/external_bakeoff/ios_runner_payload_latest.json`, then ingest it into
+the common result schema:
+
+```bash
+python scripts/external_bakeoff/ingest_ios_runner_result.py \
+  --input outputs/external_bakeoff/ios_runner_payload_latest.json \
+  --machine-id iphone-12-pro
+```
+
+The ingested result records do not include a spot-check WAV or output SHA-256
+because the minimal on-device runner currently exposes timing JSON only.

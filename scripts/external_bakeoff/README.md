@@ -48,6 +48,15 @@ SPEECH_SWIFT_PATH=/tmp/kokoro-external-bakeoff/speech-swift \
   --output outputs/external_bakeoff/ios_runner_preflight_latest.json
 ```
 
+After the signed app runs, paste its copied JSON into
+`outputs/external_bakeoff/ios_runner_payload_latest.json` and ingest it:
+
+```bash
+python scripts/external_bakeoff/ingest_ios_runner_result.py \
+  --input outputs/external_bakeoff/ios_runner_payload_latest.json \
+  --machine-id iphone-12-pro
+```
+
 ## Laishere Core ML Backup
 
 Clone and convert `laishere/kokoro-coreml` outside the repo. The converter can

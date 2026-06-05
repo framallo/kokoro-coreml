@@ -1,6 +1,7 @@
 import SwiftUI
 import KokoroTTS
 import CoreML
+import UIKit
 
 struct BenchmarkPayload: Codable, Sendable {
     let impl: String
@@ -127,8 +128,10 @@ final class BenchmarkViewModel: ObservableObject {
                 let encoder = JSONEncoder()
                 encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
                 let data = try encoder.encode(payload)
-                result = String(data: data, encoding: .utf8) ?? ""
-                status = "Done"
+                let rendered = String(data: data, encoding: .utf8) ?? ""
+                result = rendered
+                UIPasteboard.general.string = rendered
+                status = "Done; JSON copied"
             } catch {
                 status = "Failed"
                 result = String(describing: error)
@@ -151,6 +154,10 @@ struct BenchmarkView: View {
                 model.run()
             }
             .buttonStyle(.borderedProminent)
+            Button("Copy JSON") {
+                UIPasteboard.general.string = model.result
+            }
+            .disabled(model.result.isEmpty)
             List(runtimeInputs) { input in
                 HStack {
                     Text(input.key)

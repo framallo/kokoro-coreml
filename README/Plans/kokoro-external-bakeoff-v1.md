@@ -336,9 +336,12 @@ identity, so no iPhone inference result exists yet. Run
 before the next signed-device attempt. With that environment, the preflight
 proves the device is available and Xcode project generation succeeds; the
 remaining blockers are `DEVELOPMENT_TEAM` and a valid local code-signing
-identity. The iOS runner remains deliberately Kokoro-only; Whisper, ASR, VAD,
-and the full Soniqo echo-demo dependency graph are excluded from the
-measurement path.
+identity. After the signed app runs, paste its copied JSON into
+`outputs/external_bakeoff/ios_runner_payload_latest.json` and run
+`python scripts/external_bakeoff/ingest_ios_runner_result.py --input outputs/external_bakeoff/ios_runner_payload_latest.json --machine-id iphone-12-pro`
+to normalize the on-device timing results. The iOS runner remains deliberately
+Kokoro-only; Whisper, ASR, VAD, and the full Soniqo echo-demo dependency graph
+are excluded from the measurement path.
 
 **Current collection note:** M2 Studio, irvine-m1, and M2 Air now have
 schema-valid JSON for Config F, MLX, Soniqo, and laishere, and every successful
