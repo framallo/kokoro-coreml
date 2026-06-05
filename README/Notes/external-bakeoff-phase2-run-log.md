@@ -267,6 +267,64 @@ Because `claimedFresh` stayed high, no additional benchmark runs were started.
 Resume Phase 2 only after both queue depth and active fresh claims are low
 enough that a benchmark host will not compete with production TTS work.
 
+## Phase 3 Partial Quality Sanity
+
+While remote collection was paused, the existing spot-check WAVs were run
+through `scripts/audio_quality_probe.py`. Config F WAVs were used as
+machine-local references, and competitor WAVs were classified against derived
+thresholds for RMS, activity, zero-crossing rate, speech-band energy, clipping,
+sample rate, and channel count.
+
+Generated, uncommitted reports:
+
+- `outputs/external_bakeoff/quality/m2-studio/audio_quality_report.json`
+- `outputs/external_bakeoff/quality/m2-studio/audio_quality_summary.md`
+- `outputs/external_bakeoff/quality/m2-air/audio_quality_report.json`
+- `outputs/external_bakeoff/quality/m2-air/audio_quality_summary.md`
+
+No collected competitor WAV was rejected by the waveform sanity gate. Every
+candidate requires human listening before quality parity is claimed. Soniqo's
+longer-bucket files remain duration caveats: they look healthy by waveform
+metrics but are 5.0s clips for 7s, 10s, 15s, and 30s manifest inputs.
+
+### M2 Studio Quality Probe
+
+| Impl | Input | Decision | Duration s | RMS |
+| --- | --- | --- | ---: | ---: |
+| Config F reference | 3s | reference_pass | 2.800 | 4433.4 |
+| Config F reference | 7s | reference_pass | 6.750 | 4696.9 |
+| Config F reference | 10s | reference_pass | 9.625 | 4261.0 |
+| Config F reference | 15s | reference_pass | 13.900 | 5226.7 |
+| Config F reference | 30s | reference_pass | 27.400 | 4590.8 |
+| MLX | 7s | needs_listening | 6.750 | 3471.8 |
+| MLX | 10s | needs_listening | 9.600 | 2355.2 |
+| MLX | 15s | needs_listening | 13.900 | 4836.9 |
+| MLX | 30s | needs_listening | 27.375 | 3267.7 |
+| Soniqo | 3s | needs_listening | 2.700 | 4504.1 |
+| Soniqo | 7s | needs_listening | 5.000 | 5136.5 |
+| Soniqo | 10s | needs_listening | 5.000 | 4235.7 |
+| Soniqo | 15s | needs_listening | 5.000 | 4937.7 |
+| Soniqo | 30s | needs_listening | 5.000 | 5243.8 |
+| laishere | 3s | needs_listening | 2.775 | 4592.0 |
+| laishere | 7s | needs_listening | 6.800 | 3864.8 |
+| laishere | 10s | needs_listening | 9.625 | 3279.0 |
+| laishere | 15s | needs_listening | 13.975 | 4906.4 |
+| laishere | 30s | needs_listening | 27.375 | 3602.0 |
+
+### M2 Air Quality Probe
+
+| Impl | Input | Decision | Duration s | RMS |
+| --- | --- | --- | ---: | ---: |
+| Config F reference | 3s | reference_pass | 2.800 | 920.8 |
+| Config F reference | 7s | reference_pass | 6.750 | 4603.5 |
+| Config F reference | 10s | reference_pass | 9.625 | 4204.8 |
+| Config F reference | 15s | reference_pass | 13.900 | 6087.4 |
+| Config F reference | 30s | reference_pass | 27.400 | 4592.0 |
+| MLX | 7s | needs_listening | 6.750 | 3424.5 |
+| MLX | 10s | needs_listening | 9.600 | 2346.2 |
+| MLX | 15s | needs_listening | 13.900 | 4788.8 |
+| MLX | 30s | needs_listening | 27.375 | 3114.0 |
+
 ## Remaining Phase 2 Work
 
 - Decide whether the MLX 3s public-implementation failure is a paper caveat or
@@ -277,4 +335,5 @@ enough that a benchmark host will not compete with production TTS work.
   clears.
 - Re-run `irvine-m1` during a lower-traffic window with stdout/stderr redirected
   from the start.
+- Listen to all `needs_listening` WAVs before making quality-parity claims.
 - Capture hardware-placement evidence for MLX GPU and Core ML / ANE paths.
