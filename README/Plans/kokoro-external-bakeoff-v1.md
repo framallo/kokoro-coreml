@@ -1,8 +1,8 @@
 # Kokoro External Bakeoff Plan
 
 **Date:** 2026-06-05
-**Status:** Phase 2 in progress; M2 Studio local collection includes a
-long-bucket Core ML backup, iPhone runner needs signing team setup
+**Status:** Phase 2 in progress; M2 Studio primary collection plus m2-air
+Config F/MLX are collected, iPhone runner needs signing team setup
 
 > Internal bakeoff methodology lives in `README/Plans/kokoro-bakeoff-v2.md`.
 > This plan extends that methodology to external Apple Silicon Kokoro
@@ -313,9 +313,10 @@ enabled, but device app execution is gated on local signing setup:
 `DEVELOPMENT_TEAM` is unset and `security find-identity -v -p codesigning`
 reported `0 valid identities found`.
 
-**Current M2 Studio collection note:** Local M2 Studio JSON exists for Config F,
-MLX, Soniqo macOS Core ML, and laishere Core ML and validates against the shared
-schema. The run is recorded in
+**Current collection note:** Local M2 Studio JSON exists for Config F, MLX,
+Soniqo macOS Core ML, and laishere Core ML and validates against the shared
+schema. M2 Air JSON exists for Config F and MLX and also validates against the
+shared schema. The run is recorded in
 `README/Notes/external-bakeoff-phase2-run-log.md`, and every successful result
 cell has a durable spot-check WAV. Do not mark M2 Studio complete yet: MLX fails
 deterministically on the shared `3s` input with a broadcast-shape error, and
@@ -323,6 +324,10 @@ Soniqo emits 5.0s audio for longer manifest inputs because the selected public
 Core ML model repo only publishes `kokoro_5s.mlmodelc`. Soniqo remains the
 high-adoption iOS/Core ML comparator with this public-artifact caveat; laishere
 is now the normalized long-bucket Core ML backup for quality-parity evidence.
+Do not mark m2-air complete yet: Soniqo and laishere were deferred when botnet
+health showed production pressure. `irvine-m1` Config F was aborted under the
+same no-disruption guardrail after active queue pressure appeared; rerun it in
+a lower-traffic window with stdout/stderr redirected from the start.
 
 **Tasks:**
 

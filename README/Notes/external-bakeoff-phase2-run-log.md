@@ -3,7 +3,8 @@
 **Date:** 2026-06-05
 **Plan:** `README/Plans/kokoro-external-bakeoff-v1.md`
 **Status:** M2 Studio local collection rerun with durable spot-check WAVs;
-long-bucket Core ML backup collected; fleet-wide Phase 2 remains incomplete.
+long-bucket Core ML backup collected; m2-air Config F and MLX collected;
+fleet-wide Phase 2 remains incomplete.
 
 ## M2 Studio Precheck
 
@@ -168,11 +169,93 @@ Soniqo. The full M2 Studio rerun then produced durable WAVs for every successful
 result cell. MLX has no 3s WAV because that cell errors before audio is
 materialized.
 
+## M2 Air Partial Collection
+
+`m2-air` was prepared from a disposable checkout at
+`/tmp/kokoro-coreml-bakeoff-run`, using that host's existing Core ML artifacts
+from `/Users/mattmireles/Documents/GitHub/kokoro-coreml/coreml`. Before the
+run, `pmset -g therm` reported no thermal or performance warning. Config F and
+MLX completed and were copied back to:
+
+- `outputs/external_bakeoff/results_config_f_reference_m2-air.json`
+- `outputs/external_bakeoff/results_mlx_audio_m2-air.json`
+
+Both files validate against `scripts/external_bakeoff/schema.py`, and every
+successful cell has a mono 24 kHz spot-check WAV.
+
+### M2 Air Config F
+
+| Input | Status | Cold s | Warm median s | Warm N | Observed s |
+| --- | --- | ---: | ---: | ---: | ---: |
+| 3s | ok | 0.313816 | 0.317402 | 5 | 2.800 |
+| 7s | ok | 0.683149 | 0.808074 | 5 | 6.750 |
+| 10s | ok | 1.054014 | 1.373335 | 5 | 9.625 |
+| 15s | ok | 2.134623 | 2.052364 | 5 | 13.900 |
+| 30s | ok | 9.447099 | 9.559135 | 5 | 27.400 |
+
+The 30s bucket compiled successfully after the long Core ML AOT window. The
+fanless host stayed thermally nominal during the run.
+
+### M2 Air MLX
+
+`Blaizzy/mlx-audio` ran from pinned SHA
+`862dfbe5338e91df6f74ac986b4df8bede7961a6` in a disposable Python 3.12 venv
+with `mlx-audio 0.4.3`, `mlx 0.31.2`, and MLX default device `gpu`.
+
+| Input | Status | Cold s | Warm median s | Warm N | Observed s | Caveat |
+| --- | --- | ---: | ---: | ---: | ---: | --- |
+| 3s | error | - | - | 0 | - | deterministic broadcast-shape failure |
+| 7s | ok | 0.670390 | 0.685626 | 5 | 6.750 | - |
+| 10s | ok | 20.802833 | 0.835810 | 5 | 9.600 | model/cache cold start |
+| 15s | ok | 1.636798 | 1.520953 | 5 | 13.900 | - |
+| 30s | ok | 2.851399 | 2.600340 | 5 | 27.375 | - |
+
+The 3s error matched the M2 Studio failure:
+
+```text
+ValueError: [broadcast_shapes] Shapes (1,67200,1) and (1,67500,9) cannot be broadcast.
+```
+
+Soniqo and laishere were not started on `m2-air` in this pass because the
+botnet health check later showed active production pressure.
+
+## Irvine M1 Aborted Collection
+
+`irvine-m1` was prepared from the same disposable checkout and built the current
+`kokoro-bench` successfully. The first Config F attempt reached the 30s bucket,
+and stack sampling showed Core ML / Espresso / ANE on-device AOT compilation.
+Because the original SSH session had been lost, the process later sat idle
+after writing `30s.wav` without producing a result JSON; this was treated as a
+detached-pipe stall, not a completed benchmark.
+
+A redirected rerun was started with logs at `/tmp/kokoro-configf-irvine.log`.
+It progressed through 10s and 15s and re-entered 30s compilation. During that
+rerun, botnet health showed production pressure:
+
+```json
+{
+  "ok": true,
+  "queueDepth": 9,
+  "claimedFresh": 11,
+  "freshWorkerCount": 3,
+  "canaryStatus": "passing"
+}
+```
+
+Per the plan's no-disruption guardrail, the `irvine-m1` benchmark was killed
+before a result JSON was produced. After stopping it, health improved to
+`queueDepth=1` with canary still passing. The partial `irvine-m1` WAVs under
+the remote `/tmp` directory are not publication data because there is no
+schema-valid JSON for that host.
+
 ## Remaining Phase 2 Work
 
 - Decide whether the MLX 3s public-implementation failure is a paper caveat or
   requires an alternate, predeclared 3s input.
 - Decide how the paper table presents Soniqo's high-adoption 5s-only result
   beside laishere's lower-adoption long-bucket Core ML backup.
-- Collect the same matrix on `irvine-m1` and `m2-air`.
+- Finish Soniqo and laishere collection on `m2-air` after production pressure
+  clears.
+- Re-run `irvine-m1` during a lower-traffic window with stdout/stderr redirected
+  from the start.
 - Capture hardware-placement evidence for MLX GPU and Core ML / ANE paths.
