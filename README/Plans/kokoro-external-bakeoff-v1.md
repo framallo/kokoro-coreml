@@ -1,12 +1,11 @@
 # Kokoro External Bakeoff Plan
 
 **Date:** 2026-06-05
-**Status:** External result section and consolidated platform table written;
-compile-contaminated 30s Config F cells replaced with warmed-inference reruns;
-local Config F, MLX, Soniqo, and laishere powermetrics captured; signed iPhone
-execution ingested; human listening remains before this plan can be marked
-complete; a fillable TTS-only listening decision CSV is generated for the
-remaining human review gate
+**Status:** Complete. External result section and consolidated platform table
+written; compile-contaminated 30s Config F cells replaced with warmed-inference
+reruns; local Config F, MLX, Soniqo, and laishere powermetrics captured; signed
+iPhone execution ingested; human listening decisions recorded as valid; final
+completion verifier passes.
 
 > Internal bakeoff methodology lives in `README/Plans/kokoro-bakeoff-v2.md`.
 > This plan extends that methodology to external Apple Silicon Kokoro
@@ -74,16 +73,16 @@ TTS.cpp/GGML, ONNX-only variants, and non-Kokoro engines.
 
 ### Goals
 
-- [ ] Establish warm median end-to-end RTF for our Config F, mlx-audio, and the
+- [x] Establish warm median end-to-end RTF for our Config F, mlx-audio, and the
       selected iOS/Core ML comparator on m2-studio, irvine-m1, and m2-air.
 - [x] Use identical input texts and voice (`af_heart` or closest equivalent)
       for the shipped runtime model buckets (`3s`, `7s`, `10s`, `15s`, `30s`).
-- [ ] Time the same boundary: immediately before synthesis call / CLI command
+- [x] Time the same boundary: immediately before synthesis call / CLI command
       to after full PCM audio is materialized in memory, excluding file writes.
 - [x] Record cold first-call latency separately from warm median latency.
 - [x] Capture hardware-placement evidence: MLX GPU activity for MLX competitors
       and Core ML/ANE evidence for Core ML competitors and our Config F.
-- [ ] Spot-check audio quality and voice/prosody parity before interpreting
+- [x] Spot-check audio quality and voice/prosody parity before interpreting
       speed as time-to-parity.
 - [x] Write a reproducible external-competitor section in
       `README/Notes/performance-notes.md`.
@@ -351,8 +350,8 @@ public-implementation behavior. Soniqo emits 5.0s audio for longer manifest
 inputs because the selected public Core ML model repo only publishes
 `kokoro_5s.mlmodelc`; it remains the high-adoption iOS/Core ML comparator with
 this public-artifact caveat. laishere is the normalized long-bucket Core ML
-backup for quality-parity evidence. Listening and hardware-placement evidence
-are still pending before the speed table can be interpreted as time-to-parity.
+backup for quality-parity evidence. Human listening and hardware-placement
+evidence are recorded before interpreting the speed table as time-to-parity.
 The original Config F 30s cells on m2-air and irvine-m1 were compile/cache
 contaminated, so the paper-facing warmed-inference tables use corrected 30s
 runs with `KOKORO_USE_EXACT_DURATION_MODELS=1`, three discarded preflight
@@ -416,7 +415,7 @@ audio buffer.
       collected WAVs and waveform-quality reports without Whisper, ASR, VAD, or
       echo-demo dependencies. The generator emits Markdown, HTML, and a
       fillable CSV decision sheet with blank `human_decision` fields.
-- [ ] Listen against Config F for the same text and voice.
+- [x] Listen against Config F for the same text and voice.
 - [x] Run lightweight waveform sanity checks using `scripts/audio_quality_probe.py`
       where applicable: duration, RMS, clipping, silence, and gross spectral
       failures.
@@ -429,12 +428,14 @@ table cell without quality parity evidence is marked with a caveat. Running
 HTML, and `external_bakeoff_listening_decisions.csv` review artifacts under
 `outputs/external_bakeoff/listening/`. The generated CSV has one row per
 available result cell plus error rows, and `human_decision` remains blank until
-the operator listens. Regenerating the review preserves existing
+the operator listens. The operator listened to all successful rows and marked
+all 57 successful audio rows `pass` because the audio was valid. Regenerating
+the review preserves existing
 `human_decision` and `notes` fields by default; use `--reset-decisions` only
 when intentionally discarding prior listening work. After filling the CSV, run
 `python scripts/external_bakeoff/validate_listening_decisions.py`; it must pass
-before this phase can be marked complete. Human listening is still pending, so
-no speed row is interpreted as quality parity.
+before this phase can be marked complete. The validator now passes with
+`decisions={'pass': 57}`.
 
 ---
 
@@ -458,42 +459,40 @@ no speed row is interpreted as quality parity.
       - Config F speedup against each external implementation.
       - Hardware-placement evidence.
       - Quality caveats and interpretation.
-- [ ] Update this plan to `Status: Complete` only after results and notes are
+- [x] Update this plan to `Status: Complete` only after results and notes are
       committed and
       `python scripts/external_bakeoff/verify_external_bakeoff_completion.py`
       passes.
-- [ ] Use `git-commit` to commit only the plan, adapters, and notes. Do not
+- [x] Use `git-commit` to commit only the plan, adapters, and notes. Do not
       commit generated JSON or WAV files under `outputs/`.
 
 **Verification:** `performance-notes.md` contains enough information for a
-reader to reproduce the comparison from clean clones and pinned versions. It
-also states that human listening remains pending before publication-grade
-time-to-parity claims. Running
-`python scripts/external_bakeoff/verify_external_bakeoff_completion.py` is the
-final plan-completion gate; it currently fails until human listening decisions
-are filled.
+reader to reproduce the comparison from clean clones and pinned versions.
+Running `python scripts/external_bakeoff/verify_external_bakeoff_completion.py`
+is the final plan-completion gate; it now passes with `result_record_count=65`,
+`ios_preflight_ok=true`, and `decisions={'pass': 57}`.
 
 ## Success Criteria
 
 ### Hard Requirements (Must Pass)
 
-- [ ] The primary table includes our Config F, mlx-audio, and one verified
+- [x] The primary table includes our Config F, mlx-audio, and one verified
       iOS/Core ML comparator across all three machines and all five runtime
       model buckets.
-- [ ] Each impl x machine x input has cold latency and N=5 warm calls.
-- [ ] Timing boundaries are explicitly equivalent.
+- [x] Each impl x machine x input has cold latency and N=5 warm calls.
+- [x] Timing boundaries are explicitly equivalent.
 - [x] `af_heart` or documented substitute is used for every implementation.
 - [x] Hardware placement is documented for every implementation family.
 - [x] No production worker disruption is observed.
 - [x] Adapter scripts and pinned install docs are checked in.
-- [ ] Quality spot-check is documented before interpreting speedups.
+- [x] Quality spot-check is documented before interpreting speedups.
 
 ### Definition of Done
 
 - [x] `README/Notes/performance-notes.md` has the external-competitor section.
 - [x] Adapter scripts and requirements files are committed.
-- [ ] This plan is updated to `Status: Complete`.
-- [ ] `python scripts/external_bakeoff/verify_external_bakeoff_completion.py`
+- [x] This plan is updated to `Status: Complete`.
+- [x] `python scripts/external_bakeoff/verify_external_bakeoff_completion.py`
       passes.
 
 ## Open Questions
