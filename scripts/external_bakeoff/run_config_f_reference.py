@@ -24,16 +24,23 @@ from scripts.external_bakeoff.schema import (  # noqa: E402
 )
 
 
-def _run_once(binary: Path, input_key: str, compute_units: str) -> dict:
+def _run_once(
+    binary: Path,
+    input_key: str,
+    compute_units: str,
+    models_dir: Path,
+    inputs_dir: Path,
+    hnsf_weights: Path,
+) -> dict:
     with tempfile.NamedTemporaryFile(suffix=".json", delete=False) as f:
         out = Path(f.name)
     with tempfile.NamedTemporaryFile(suffix=".wav", delete=False) as f:
         wav = Path(f.name)
     cmd = [
         str(binary),
-        "--models-dir", "coreml",
-        "--inputs-dir", "outputs/swift_bench_inputs",
-        "--hnsf-weights", "outputs/swift_bench_inputs/hnsf_weights.json",
+        "--models-dir", str(models_dir),
+        "--inputs-dir", str(inputs_dir),
+        "--hnsf-weights", str(hnsf_weights),
         "--input-key", input_key,
         "--compute-units", compute_units,
         "--output", str(out),
@@ -60,6 +67,13 @@ def main() -> None:
     parser.add_argument("--output", type=Path, default=None)
     parser.add_argument("--machine-id", required=True)
     parser.add_argument("--binary", type=Path, default=Path("swift/.build/release/kokoro-bench"))
+    parser.add_argument("--models-dir", type=Path, default=Path("coreml"))
+    parser.add_argument("--inputs-dir", type=Path, default=Path("outputs/swift_bench_inputs"))
+    parser.add_argument(
+        "--hnsf-weights",
+        type=Path,
+        default=Path("outputs/swift_bench_inputs/hnsf_weights.json"),
+    )
     parser.add_argument("--compute-units", default="all")
     parser.add_argument("--iterations", type=int, default=5)
     parser.add_argument("--input-key", action="append", default=None)
@@ -76,9 +90,23 @@ def main() -> None:
     for key in keys:
         item = manifest["inputs"][key]
         try:
-            cold_result = _run_once(args.binary, key, args.compute_units)
+            cold_result = _run_once(
+                args.binary,
+                key,
+                args.compute_units,
+                args.models_dir,
+                args.inputs_dir,
+                args.hnsf_weights,
+            )
             warm = [
-                _run_once(args.binary, key, args.compute_units)
+                _run_once(
+                    args.binary,
+                    key,
+                    args.compute_units,
+                    args.models_dir,
+                    args.inputs_dir,
+                    args.hnsf_weights,
+                )
                 for _ in range(args.iterations)
             ]
             records.append(
@@ -98,6 +126,9 @@ def main() -> None:
                     output_sha256=str(warm[-1].get("output_sha256") or ""),
                     provenance={
                         "binary": str(args.binary),
+                        "models_dir": str(args.models_dir),
+                        "inputs_dir": str(args.inputs_dir),
+                        "hnsf_weights": str(args.hnsf_weights),
                         "compute_units": args.compute_units,
                         "bucket_used": warm[-1].get("bucket_used"),
                         "raw_last_result": warm[-1],
@@ -118,6 +149,9 @@ def main() -> None:
                     canonical_audio_duration_s=float(item["canonical_duration_s"]),
                     provenance={
                         "binary": str(args.binary),
+                        "models_dir": str(args.models_dir),
+                        "inputs_dir": str(args.inputs_dir),
+                        "hnsf_weights": str(args.hnsf_weights),
                         "compute_units": args.compute_units,
                     },
                     error=f"{type(exc).__name__}: {exc}",
@@ -128,7 +162,13 @@ def main() -> None:
         impl="config-f-reference",
         machine_id=args.machine_id,
         records=records,
-        provenance={"binary": str(args.binary), "compute_units": args.compute_units},
+        provenance={
+            "binary": str(args.binary),
+            "models_dir": str(args.models_dir),
+            "inputs_dir": str(args.inputs_dir),
+            "hnsf_weights": str(args.hnsf_weights),
+            "compute_units": args.compute_units,
+        },
     )
     validate_result_payload(payload)
     output = args.output or (DEFAULT_OUTPUT_DIR / f"results_config_f_reference_{args.machine_id}.json")

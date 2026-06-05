@@ -1,7 +1,7 @@
 # Kokoro External Bakeoff Plan
 
 **Date:** 2026-06-05
-**Status:** Phase 1 complete; ready for Phase 2 collection
+**Status:** Phase 2 gated; fleet health is green, Config F collection path needs a narrower precompile strategy
 
 > Internal bakeoff methodology lives in `README/Plans/kokoro-bakeoff-v2.md`.
 > This plan extends that methodology to external Apple Silicon Kokoro
@@ -298,6 +298,13 @@ with the full Core ML model set.
 
 **Goal:** Collect same-window data from all three machines without disrupting
 production TTS workers.
+
+**Current gate:** `pnpm check:tts-worker-health --json` was green on 2026-06-05
+with queue depth `0` and `3` fresh Kokoro workers. A local one-input Config F
+smoke against the main checkout's Core ML artifacts was interrupted after more
+than four minutes of silent `kokoro-bench` runtime. Before fleet collection,
+run a narrower Config F precompile/smoke path or reuse a known-good prepared
+benchmark checkout on each host.
 
 **Tasks:**
 
