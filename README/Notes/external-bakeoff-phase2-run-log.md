@@ -457,6 +457,41 @@ candidate requires human listening before quality parity is claimed. Soniqo's
 longer-bucket files remain duration caveats: they look healthy by waveform
 metrics but are 5.0s clips for 7s, 10s, 15s, and 30s manifest inputs.
 
+## Local Hardware-Placement Capture
+
+After the warmed 30s correction, a local M2 Studio `powermetrics` capture was
+collected for Config F placement context. The first attempted 30s trace entered
+a long padded `t512` Core ML compile/load window and was stopped before result
+JSON; it remains compile-window evidence only and is not an inference-speed
+cell.
+
+The usable capture ran the debug `kokoro-bench` binary on the 3s input with
+five discarded preflight calls and forty recorded warm calls, while
+`powermetrics` sampled every 500 ms with `cpu_power,gpu_power,ane_power`.
+Artifacts are ignored under `outputs/external_bakeoff/placement/`:
+
+- `results_config_f_reference_m2-studio_3s_warm_placement.json`
+- `config_f_m2-studio_3s_warm_powermetrics.txt`
+
+Summary:
+
+| Signal | N | Min | Median | Max |
+| --- | ---: | ---: | ---: | ---: |
+| Warm wall time | 40 | 1.050493s | 1.075376s | 1.887251s |
+| CPU Power | 80 | 9987 mW | 17801 mW | 35342 mW |
+| GPU Power | 160 | 813 mW | 2384 mW | 21635 mW |
+| ANE Power | 80 | 0 mW | 0 mW | 0 mW |
+| GPU HW active residency | 80 | 52.56% | 68.835% | 99.17% |
+
+The run used a debug binary and padded duration artifacts, so the warm wall
+time is not a replacement for the paper-facing Config F table. The placement
+signal is still useful: this local path was CPU/GPU-dominant, not ANE-bound.
+The last recorded call spent `0.082838s` in Duration Core ML, `0.004875s` in
+F0Ntrain Core ML, `0.004963s` in DecoderPre Core ML, `0.034667s` in generator
+Core ML, and `0.915704s` in Swift HnSF. Fleet health remained passing after the
+capture (`queueDepth=0`, `freshWorkerCount=3`, canary passing), though
+`claimedFresh` rose from 5 to 11 during the window.
+
 ### M2 Studio Quality Probe
 
 | Impl | Input | Decision | Duration s | RMS |
@@ -531,6 +566,8 @@ metrics but are 5.0s clips for 7s, 10s, 15s, and 30s manifest inputs.
 
 ## Remaining Work
 
+- Keep every headline comparison on warmed inference only: compile-inclusive
+  and cold-start timings are operational evidence, not ranking inputs.
 - Decide whether the MLX 3s public-implementation failure is a paper caveat or
   requires an alternate, predeclared 3s input.
 - Decide how the paper table presents Soniqo's high-adoption 5s-only result

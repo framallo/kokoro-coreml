@@ -27,7 +27,7 @@ These numbers do **not** include:
 
 **Collected:** 2026-06-05
 **Status:** Phase 2 collection complete; waveform sanity complete; human
-listening and privileged hardware-placement traces still pending.
+listening and full privileged hardware-placement traces still pending.
 
 This bakeoff compares the current Swift + Core ML Config F reference against
 popular Apple Silicon Kokoro implementations:
@@ -60,12 +60,15 @@ boundary excludes G2P and feed preparation and times only the seven-stage Core
 ML chain; those numbers are therefore useful as a Core ML chain comparison, but
 not a fully equivalent end-to-end TTS boundary.
 
-The paper-facing comparison is warmed inference. For Config F 30s on m2-air and
-irvine-m1, the original same-window run let Core ML AOT compile/load work leak
-into the recorded 30s calls. Those two warm cells were rerun with three
-discarded preflight calls, `KOKORO_USE_EXACT_DURATION_MODELS=1`, and 20 recorded
-warm calls. The old compile-inclusive cells remain cold-start/operational
-evidence, but they are not used for warmed inference comparison.
+The paper-facing comparison is warmed inference only. Cold calls, Core ML AOT
+compile, model load, cache fill, and any first-use stall are retained as
+operational evidence, but excluded from ranking, speedup, and thesis tables. For
+Config F 30s on m2-air and irvine-m1, the original same-window run let Core ML
+AOT compile/load work leak into the recorded 30s calls. Those two cells were
+rerun with three discarded preflight calls,
+`KOKORO_USE_EXACT_DURATION_MODELS=1`, and 20 recorded warm calls. The old
+compile-inclusive cells remain cold-start/operational evidence, but they are not
+used for warmed inference comparison.
 
 ### Machine Provenance
 
@@ -90,7 +93,9 @@ boundary. The iOS runner is intentionally Kokoro TTS only.
 
 ### Consolidated Warm Median and RTF by Platform
 
-Each cell is `warm median wall time / observed RTF`.
+Each cell is `warm median wall time / observed RTF`. These are steady-state
+post-prime inference medians; cold and compile-inclusive timings are not
+eligible for this table.
 
 #### m2-studio
 
@@ -195,9 +200,9 @@ Macmini9,1, 16 GiB, macOS 15.7.7 / 24G720.
 
 ### Config F Speed Ratio
 
-Values are comparator warm median divided by Config F warm median. Values above
-`1.0x` mean Config F was faster. Values below `1.0x` mean the comparator was
-faster.
+Values are comparator warm median divided by Config F warm median, using only
+steady-state post-prime inference cells. Values above `1.0x` mean Config F was
+faster. Values below `1.0x` mean the comparator was faster.
 
 | Machine | Comparator | 3s | 7s | 10s | 15s | 30s |
 | --- | --- | ---: | ---: | ---: | ---: | ---: |
@@ -213,12 +218,27 @@ faster.
 
 ### Hardware Placement Evidence
 
-This bakeoff records framework and compute-unit evidence, not privileged
-per-run power traces:
+This bakeoff records framework and compute-unit evidence. One local privileged
+`powermetrics` capture was added after the primary latency collection for Config
+F placement context:
 
 - Config F ran the Swift `kokoro-bench` path over Core ML packages with
-  `--compute-units all`. The result records include per-stage Core ML timings
-  for Duration, F0Ntrain, DecoderPre, and generator calls.
+  `--compute-units all` in the collected external table. The result records
+  include per-stage Core ML timings for Duration, F0Ntrain, DecoderPre, and
+  generator calls.
+- Local M2 Studio placement check: `powermetrics -i 500 -n 80 --samplers
+  cpu_power,gpu_power,ane_power` ran while a debug `kokoro-bench` process
+  executed a post-prime 3s Config F loop with five discarded preflight calls and
+  forty recorded warm calls. The recorded JSON is ignored at
+  `outputs/external_bakeoff/placement/results_config_f_reference_m2-studio_3s_warm_placement.json`.
+  The median warm call was `1.075376s` on a 2.8s output; this number is not used
+  in the paper table because it came from a debug binary and padded duration
+  artifacts. The placement signal was CPU/GPU-dominant: `ANE Power` had 80
+  samples with min/median/max `0/0/0 mW`, while `GPU HW active residency` had 80
+  samples with min/median/max `52.56/68.835/99.17%`. The last recorded call
+  spent `0.082838s` in Duration Core ML, `0.004875s` in F0Ntrain Core ML,
+  `0.004963s` in DecoderPre Core ML, `0.034667s` in generator Core ML, and
+  `0.915704s` in Swift HnSF.
 - MLX ran through the `mlx-audio` Python package and MLX model
   `mlx-community/Kokoro-82M-bf16`; prior host setup recorded MLX default device
   as `gpu` on M2 Air, and MLX routes array kernels through Metal on Apple
@@ -229,11 +249,13 @@ per-run power traces:
 - laishere ran seven `.mlpackage` Core ML models converted from its public repo.
   Its timed boundary is the Core ML chain only.
 
-`powermetrics` was available on the local host, but it requires superuser
-privileges in this environment. No Instruments trace or privileged
-`powermetrics` capture was collected during this external bakeoff, so the data
-does not prove ANE residency. It proves the requested framework paths and
-compute-unit settings.
+This is not ANE-residency proof for the paper thesis. It is the opposite for
+the captured local path: Core ML was allowed to use all compute units, but the
+measured M2 Studio loop showed no ANE power draw and substantial GPU activity.
+That matches the existing compute-unit ablation note: the staged runtime keeps
+the ANE-eligible decoder-pre island separate and deliberately keeps the
+ANE-hostile generator on CPU/GPU. Privileged placement traces are still missing
+for MLX, Soniqo, and laishere in the external collection matrix.
 
 ### Quality Caveats
 

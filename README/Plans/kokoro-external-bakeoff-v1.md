@@ -3,8 +3,9 @@
 **Date:** 2026-06-05
 **Status:** External result section and consolidated platform table written;
 compile-contaminated 30s Config F cells replaced with warmed-inference reruns;
-human listening, signed iPhone execution, and privileged hardware-placement
-traces remain before this plan can be marked complete
+local Config F powermetrics captured; human listening, signed iPhone execution,
+and full MLX/Core ML hardware-placement traces remain before this plan can be
+marked complete
 
 > Internal bakeoff methodology lives in `README/Plans/kokoro-bakeoff-v2.md`.
 > This plan extends that methodology to external Apple Silicon Kokoro
@@ -18,11 +19,12 @@ traces remain before this plan can be marked complete
 Benchmark our Swift+Core ML pipeline (Config F) against two external Apple
 Silicon Kokoro implementations: the popular MLX Python implementation
 (`Blaizzy/mlx-audio`) and `soniqo/speech-swift` as the primary iOS/Core ML
-comparator. Measure
-time-to-parity: wall time until equivalent in-memory PCM audio is produced, with
-voice/prosody parity spot-checked and hardware placement documented. The thesis
-is falsifiable: our pipeline should have the lowest warm median RTF on each
-machine and should do so while producing comparable Kokoro audio.
+comparator. Measure time-to-parity as warmed inference: wall time until
+equivalent in-memory PCM audio is produced after model load, compile, and cache
+priming are complete, with voice/prosody parity spot-checked and hardware
+placement documented. The thesis is falsifiable: our pipeline should have the
+lowest warm median RTF on each machine and should do so while producing
+comparable Kokoro audio.
 
 ## Problem Statement
 
@@ -119,8 +121,13 @@ TTS.cpp/GGML, ONNX-only variants, and non-Kokoro engines.
   synthesis call or benchmark subprocess command and ends after the complete
   in-memory PCM/audio array is available. File I/O, playback, and WAV encoding
   are excluded.
-- **Cold vs warm:** First call on a fresh process is recorded as cold latency,
-  not discarded. Warm median is computed from the next five calls.
+- **Cold vs warm:** The paper-facing comparator is always warmed inference.
+  First call on a fresh process is recorded as cold latency for operational
+  evidence, but it is excluded from ranking, speedup, and thesis tables. If Core
+  ML compile/cache work leaks into measured calls, discard additional preflight
+  calls and rerun the affected cell until the reported median reflects
+  steady-state inference only. Warm median is computed from recorded post-prime
+  calls.
 - **Input identity:** Use the exact text strings from the internal bakeoff.
   If `outputs/bakeoff/input_manifest.json` is missing, regenerate it with
   `scripts/bakeoff_harness.py prepare-inputs` before writing adapters. Then
@@ -335,7 +342,10 @@ are still pending before the speed table can be interpreted as time-to-parity.
 The original Config F 30s cells on m2-air and irvine-m1 were compile/cache
 contaminated, so the paper-facing warmed-inference tables use corrected 30s
 runs with `KOKORO_USE_EXACT_DURATION_MODELS=1`, three discarded preflight
-calls, and 20 recorded warm calls.
+calls, and 20 recorded warm calls. A local M2 Studio powermetrics capture now
+exists for a post-prime 3s Config F debug run; it is placement evidence only,
+not a replacement latency cell, and it does not close the MLX/Soniqo/laishere
+placement requirement.
 
 **Tasks:**
 
@@ -366,8 +376,9 @@ calls, and 20 recorded warm calls.
 **Verification:** Twelve result JSON files exist: Config F, MLX, Soniqo, and
 laishere across 3 machines. Each result has cold latency, 5 warm iterations per
 successful runtime bucket, provenance, and durable spot-check WAVs.
-Framework/runtime placement is documented; privileged ANE/GPU residency traces
-remain pending.
+Framework/runtime placement is documented. One local Config F privileged
+`powermetrics` capture exists, but privileged MLX/Soniqo/laishere residency
+traces remain pending.
 
 ---
 
@@ -425,8 +436,8 @@ listening is still pending, so no speed row is interpreted as quality parity.
 
 **Verification:** `performance-notes.md` contains enough information for a
 reader to reproduce the comparison from clean clones and pinned versions. It
-also states that human listening and privileged placement traces remain pending
-before publication-grade time-to-parity claims.
+also states that human listening and full privileged placement traces remain
+pending before publication-grade time-to-parity claims.
 
 ## Success Criteria
 
