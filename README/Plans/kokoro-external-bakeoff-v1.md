@@ -1,7 +1,7 @@
 # Kokoro External Bakeoff Plan
 
 **Date:** 2026-06-05
-**Status:** Phase 0 complete; ready for Phase 1 adapters
+**Status:** Phase 1 complete; ready for Phase 2 collection
 
 > Internal bakeoff methodology lives in `README/Plans/kokoro-bakeoff-v2.md`.
 > This plan extends that methodology to external Apple Silicon Kokoro
@@ -244,49 +244,53 @@ competitors.
 
 **Tasks:**
 
-- [ ] Ensure `outputs/bakeoff/input_manifest.json` exists. If not, run:
+- [x] Ensure `outputs/bakeoff/input_manifest.json` exists. If not, run:
 
       ```bash
       uv run --with-requirements requirements-bakeoff.txt --no-sync \
         python scripts/bakeoff_harness.py prepare-inputs
       ```
 
-- [ ] Create `scripts/external_bakeoff/prepare_runtime_inputs.py`:
+- [x] Create `scripts/external_bakeoff/prepare_runtime_inputs.py`:
       - Reads the historical bakeoff manifest for `3s`, `7s`, `15s`, and `30s`.
       - Adds a new `10s` text candidate.
       - Runs Config F on every candidate and records the selected bucket.
       - Fails if any input does not route to its named runtime bucket.
       - Writes `outputs/external_bakeoff/runtime_input_manifest.json`.
-- [ ] Create `scripts/external_bakeoff/schema.py` with a tiny shared result
+- [x] Create `scripts/external_bakeoff/schema.py` with a tiny shared result
       writer/validator for:
       `impl`, `machine_id`, `framework`, `hardware_target`, `version`,
       `input_key`, `text_sha256`, `voice`, `cold_wall_time_s`,
       `warm_wall_times_s`, `canonical_audio_duration_s`,
       `observed_audio_duration_s`, `rtf_observed`, `output_sha256`,
       and `provenance`.
-- [ ] Create `scripts/external_bakeoff/run_mlx_audio.py`.
-- [ ] Create `scripts/external_bakeoff/run_speech_swift_kokoro.py` for the
+- [x] Create `scripts/external_bakeoff/run_mlx_audio.py`.
+- [x] Create `scripts/external_bakeoff/run_speech_swift_kokoro.py` for the
       selected Core ML comparator. If Phase 0 selects a different Core ML repo,
       name the adapter after that repo.
-- [ ] Create a minimal signed iOS runner for Soniqo Kokoro so the connected
+- [x] Create a minimal signed iOS runner for Soniqo Kokoro so the connected
       iPhone 12 Pro can run the Core ML comparator without the full echo demo
       dependency graph.
-- [ ] Create `scripts/external_bakeoff/run_config_f_reference.py` as a thin
+- [x] Create `scripts/external_bakeoff/run_config_f_reference.py` as a thin
       wrapper around the existing Config F harness/Swift CLI so same-window
       Config F records share the external result schema.
-- [ ] Create `scripts/external_bakeoff/summarize_external.py`:
+- [x] Create `scripts/external_bakeoff/summarize_external.py`:
       - Reads all external result JSONs.
       - Emits wall-time, RTF, cold-start, and speedup tables.
       - Computes Config F speedup per machine/input/competitor.
       - Flags missing quality or hardware-placement evidence.
-- [ ] Create pinned install docs:
+- [x] Create pinned install docs:
       `requirements_mlx_audio.txt` and `README.md` under
       `scripts/external_bakeoff/`.
 
 **Verification:** All three adapters run locally on one input and emit schema-
 valid JSON. The runtime manifest has five inputs and each routes to its named
 bucket. The summarizer emits a markdown table without hardcoded M2 Ultra only
-assumptions.
+assumptions. Local smoke status:
+`mlx-audio` and `soniqo/speech-swift` emitted successful `10s` records;
+Config F emitted a schema-valid local error because this worktree lacks Core ML
+duration artifacts (`Duration choices: ` empty), so Phase 2 must run on hosts
+with the full Core ML model set.
 
 ---
 
