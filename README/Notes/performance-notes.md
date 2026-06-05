@@ -27,7 +27,7 @@ These numbers do **not** include:
 
 **Collected:** 2026-06-05
 **Status:** Phase 2 collection complete; waveform sanity complete; human
-listening and full privileged hardware-placement traces still pending.
+listening and full Core ML comparator hardware-placement traces still pending.
 
 This bakeoff compares the current Swift + Core ML Config F reference against
 popular Apple Silicon Kokoro implementations:
@@ -218,9 +218,9 @@ faster. Values below `1.0x` mean the comparator was faster.
 
 ### Hardware Placement Evidence
 
-This bakeoff records framework and compute-unit evidence. One local privileged
-`powermetrics` capture was added after the primary latency collection for Config
-F placement context:
+This bakeoff records framework and compute-unit evidence. Local privileged
+`powermetrics` captures were added after the primary latency collection for
+Config F and MLX placement context:
 
 - Config F ran the Swift `kokoro-bench` path over Core ML packages with
   `--compute-units all` in the collected external table. The result records
@@ -243,19 +243,28 @@ F placement context:
   `mlx-community/Kokoro-82M-bf16`; prior host setup recorded MLX default device
   as `gpu` on M2 Air, and MLX routes array kernels through Metal on Apple
   Silicon.
+- Local M2 Studio MLX placement check: the pinned `mlx-audio 0.4.3` adapter ran
+  a 7s input with thirty recorded warm calls while `powermetrics` sampled every
+  500 ms with `cpu_power,gpu_power,ane_power`. The recorded JSON is ignored at
+  `outputs/external_bakeoff/placement/results_mlx_audio_m2-studio_7s_warm_placement.json`.
+  Median warm time was `0.2207245s` for a 6.75s output. The placement signal was
+  MLX/Metal as expected: `ANE Power` had 114 samples with min/median/max
+  `0/0/0 mW`, while `GPU HW active residency` had 114 samples with
+  min/median/max `32.6/49.435/98.28%`.
 - Soniqo ran Swift `KokoroTTSModel.fromPretrained(computeUnits: .all)` and
   loaded Core ML through `MLModel` via the public `speech-swift` KokoroTTS
   surface.
 - laishere ran seven `.mlpackage` Core ML models converted from its public repo.
   Its timed boundary is the Core ML chain only.
 
-This is not ANE-residency proof for the paper thesis. It is the opposite for
-the captured local path: Core ML was allowed to use all compute units, but the
-measured M2 Studio loop showed no ANE power draw and substantial GPU activity.
-That matches the existing compute-unit ablation note: the staged runtime keeps
-the ANE-eligible decoder-pre island separate and deliberately keeps the
-ANE-hostile generator on CPU/GPU. Privileged placement traces are still missing
-for MLX, Soniqo, and laishere in the external collection matrix.
+The Config F capture is not ANE-residency proof for the paper thesis. It is the
+opposite for the captured local path: Core ML was allowed to use all compute
+units, but the measured M2 Studio loop showed no ANE power draw and substantial
+GPU activity. That matches the existing compute-unit ablation note: the staged
+runtime keeps the ANE-eligible decoder-pre island separate and deliberately
+keeps the ANE-hostile generator on CPU/GPU. The MLX capture is useful GPU
+evidence for the primary MLX competitor. Privileged placement traces are still
+missing for Soniqo and laishere in the external collection matrix.
 
 ### Quality Caveats
 

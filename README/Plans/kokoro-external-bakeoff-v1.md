@@ -3,9 +3,9 @@
 **Date:** 2026-06-05
 **Status:** External result section and consolidated platform table written;
 compile-contaminated 30s Config F cells replaced with warmed-inference reruns;
-local Config F powermetrics captured; human listening, signed iPhone execution,
-and full MLX/Core ML hardware-placement traces remain before this plan can be
-marked complete
+local Config F and MLX powermetrics captured; human listening, signed iPhone
+execution, and full Core ML comparator hardware-placement traces remain before
+this plan can be marked complete
 
 > Internal bakeoff methodology lives in `README/Plans/kokoro-bakeoff-v2.md`.
 > This plan extends that methodology to external Apple Silicon Kokoro
@@ -343,9 +343,10 @@ The original Config F 30s cells on m2-air and irvine-m1 were compile/cache
 contaminated, so the paper-facing warmed-inference tables use corrected 30s
 runs with `KOKORO_USE_EXACT_DURATION_MODELS=1`, three discarded preflight
 calls, and 20 recorded warm calls. A local M2 Studio powermetrics capture now
-exists for a post-prime 3s Config F debug run; it is placement evidence only,
-not a replacement latency cell, and it does not close the MLX/Soniqo/laishere
-placement requirement.
+exists for a post-prime 3s Config F debug run, and a matching local MLX 7s
+powermetrics capture exists for the pinned `mlx-audio` path. These are placement
+evidence only, not replacement latency cells, and they do not close the
+Soniqo/laishere Core ML comparator placement requirement.
 
 **Tasks:**
 
@@ -377,8 +378,9 @@ placement requirement.
 laishere across 3 machines. Each result has cold latency, 5 warm iterations per
 successful runtime bucket, provenance, and durable spot-check WAVs.
 Framework/runtime placement is documented. One local Config F privileged
-`powermetrics` capture exists, but privileged MLX/Soniqo/laishere residency
-traces remain pending.
+`powermetrics` capture and one local MLX privileged `powermetrics` capture
+exist, but privileged Soniqo/laishere Core ML comparator residency traces remain
+pending.
 
 ---
 

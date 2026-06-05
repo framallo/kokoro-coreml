@@ -459,13 +459,13 @@ metrics but are 5.0s clips for 7s, 10s, 15s, and 30s manifest inputs.
 
 ## Local Hardware-Placement Capture
 
-After the warmed 30s correction, a local M2 Studio `powermetrics` capture was
-collected for Config F placement context. The first attempted 30s trace entered
-a long padded `t512` Core ML compile/load window and was stopped before result
-JSON; it remains compile-window evidence only and is not an inference-speed
-cell.
+After the warmed 30s correction, local M2 Studio `powermetrics` captures were
+collected for Config F and MLX placement context. The first attempted Config F
+30s trace entered a long padded `t512` Core ML compile/load window and was
+stopped before result JSON; it remains compile-window evidence only and is not
+an inference-speed cell.
 
-The usable capture ran the debug `kokoro-bench` binary on the 3s input with
+The usable Config F capture ran the debug `kokoro-bench` binary on the 3s input with
 five discarded preflight calls and forty recorded warm calls, while
 `powermetrics` sampled every 500 ms with `cpu_power,gpu_power,ane_power`.
 Artifacts are ignored under `outputs/external_bakeoff/placement/`:
@@ -491,6 +491,30 @@ F0Ntrain Core ML, `0.004963s` in DecoderPre Core ML, `0.034667s` in generator
 Core ML, and `0.915704s` in Swift HnSF. Fleet health remained passing after the
 capture (`queueDepth=0`, `freshWorkerCount=3`, canary passing), though
 `claimedFresh` rose from 5 to 11 during the window.
+
+The MLX capture recreated the pinned `Blaizzy/mlx-audio` checkout at
+`862dfbe5338e91df6f74ac986b4df8bede7961a6` in `/tmp`, installed
+`mlx-audio 0.4.3` in an ignored venv, warmed the model with a successful 7s
+smoke, then ran the 7s input with thirty recorded warm calls while
+`powermetrics` sampled the same power counters. Artifacts are ignored under
+`outputs/external_bakeoff/placement/`:
+
+- `results_mlx_audio_m2-studio_7s_warm_placement.json`
+- `mlx_m2-studio_7s_warm_powermetrics.txt`
+
+Summary:
+
+| Signal | N | Min | Median | Max |
+| --- | ---: | ---: | ---: | ---: |
+| Warm wall time | 30 | 0.193810s | 0.2207245s | 0.315039s |
+| CPU Power | 114 | 9244 mW | 22585.5 mW | 34538 mW |
+| GPU Power | 228 | 593 mW | 791.5 mW | 25391 mW |
+| ANE Power | 114 | 0 mW | 0 mW | 0 mW |
+| GPU HW active residency | 114 | 32.6% | 49.435% | 98.28% |
+
+This is placement evidence for the primary MLX competitor, not a replacement
+latency cell. Fleet health remained passing after the MLX capture
+(`queueDepth=0`, `claimedFresh=8`, `freshWorkerCount=3`, canary passing).
 
 ### M2 Studio Quality Probe
 
@@ -573,6 +597,6 @@ capture (`queueDepth=0`, `freshWorkerCount=3`, canary passing), though
 - Decide how the paper table presents Soniqo's high-adoption 5s-only result
   beside laishere's lower-adoption long-bucket Core ML backup.
 - Listen to all `needs_listening` WAVs before making quality-parity claims.
-- Capture hardware-placement evidence for MLX GPU and Core ML / ANE paths.
+- Capture hardware-placement evidence for Soniqo/laishere Core ML paths.
 - Write the external-competitor result section in
   `README/Notes/performance-notes.md`.
