@@ -3,7 +3,7 @@
 **Date:** 2026-06-05
 **Plan:** `README/Plans/kokoro-external-bakeoff-v1.md`
 **Status:** M2 Studio local collection rerun with durable spot-check WAVs;
-fleet-wide Phase 2 remains incomplete.
+long-bucket Core ML backup collected; fleet-wide Phase 2 remains incomplete.
 
 ## M2 Studio Precheck
 
@@ -40,6 +40,7 @@ Generated, uncommitted result files:
 - `outputs/external_bakeoff/results_config_f_reference_m2-studio.json`
 - `outputs/external_bakeoff/results_mlx_audio_m2-studio.json`
 - `outputs/external_bakeoff/results_soniqo_speech_swift_kokoro_m2-studio.json`
+- `outputs/external_bakeoff/results_laishere_kokoro_coreml_m2-studio.json`
 
 Each file validates against `scripts/external_bakeoff/schema.py`.
 
@@ -115,6 +116,44 @@ Source and artifact check:
 This makes the 5.0s cap public-comparator behavior for the selected Soniqo
 model artifact, not an adapter timing-boundary bug.
 
+## Laishere Core ML Backup Result
+
+`laishere/kokoro-coreml` was probed as the long-bucket Core ML backup at pinned
+SHA `484907db6a8347a6afb6e7b86850ea2878c6a3fb`. The repo does not ship
+prebuilt `.mlpackage` artifacts, so the seven public Core ML packages were
+converted under `/tmp/kokoro-external-bakeoff/laishere-kokoro-coreml/output`
+with:
+
+```bash
+PYTORCH_ENABLE_MPS_FALLBACK=1 uv run python convert.py --max-frames 2000
+```
+
+`convert.py` emitted all seven packages, then its final chained validation hit
+a Core ML/Espresso dynamic-shape error in the PostAlbert path:
+
+```text
+RuntimeError: Unable to compute the prediction using ML Program
+Tile: Shape deduction failed as reps[0]=-1317260229 < 0
+```
+
+The repo's standalone `benchmark.py --n-runs 1` still ran successfully against
+the generated packages. It rendered six built-in passages from 1.50s to 28.12s
+audio with chain times from 62.9ms to 606.7ms on this M2 Studio. The normalized
+adapter then ran the shared runtime manifest with N=5 warm calls:
+
+| Input | Status | Cold s | Warm median s | Warm N | Observed s | T_a |
+| --- | --- | ---: | ---: | ---: | ---: | ---: |
+| 3s | ok | 0.236952 | 0.212307 | 5 | 2.775 | 111 |
+| 7s | ok | 0.359018 | 0.403259 | 5 | 6.800 | 272 |
+| 10s | ok | 0.839707 | 0.626281 | 5 | 9.625 | 385 |
+| 15s | ok | 0.676127 | 0.429827 | 5 | 13.975 | 559 |
+| 30s | ok | 1.955135 | 0.925116 | 5 | 27.375 | 1095 |
+
+These cells are the current long-bucket Core ML parity backup. The adapter
+times the seven-stage Core ML chain only; G2P and feed preparation are outside
+the timed calls, matching laishere's public benchmark boundary. That boundary
+must be stated if these numbers are used beside Soniqo or MLX in the paper.
+
 ## Spot-Check WAV Support
 
 The M2 Studio collection was rerun after adapters were updated to write durable
@@ -133,7 +172,7 @@ materialized.
 
 - Decide whether the MLX 3s public-implementation failure is a paper caveat or
   requires an alternate, predeclared 3s input.
-- Treat Soniqo's 5s-only published Core ML artifact as a paper caveat, or pick
-  a backup Core ML comparator for longer-bucket parity.
+- Decide how the paper table presents Soniqo's high-adoption 5s-only result
+  beside laishere's lower-adoption long-bucket Core ML backup.
 - Collect the same matrix on `irvine-m1` and `m2-air`.
 - Capture hardware-placement evidence for MLX GPU and Core ML / ANE paths.

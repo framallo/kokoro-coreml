@@ -1,7 +1,8 @@
 # Kokoro External Bakeoff Plan
 
 **Date:** 2026-06-05
-**Status:** Phase 2 in progress; M2 Studio local collection has data-quality caveats, iPhone runner needs signing team setup
+**Status:** Phase 2 in progress; M2 Studio local collection includes a
+long-bucket Core ML backup, iPhone runner needs signing team setup
 
 > Internal bakeoff methodology lives in `README/Plans/kokoro-bakeoff-v2.md`.
 > This plan extends that methodology to external Apple Silicon Kokoro
@@ -53,7 +54,7 @@ time-to-parity claim.
 | --- | --- | --- | ---: | --- | --- | --- |
 | Primary MLX competitor | **mlx-audio** | `github.com/Blaizzy/mlx-audio` | 7,186 stars | MLX Python | GPU | In scope |
 | Primary Core ML comparator | **speech-swift KokoroTTS** | `github.com/soniqo/speech-swift` | 783 stars | Swift + Core ML | ANE | In scope |
-| Specialized Core ML candidate | **laishere/kokoro-coreml** | `github.com/laishere/kokoro-coreml` | 15 stars | Core ML pipeline | ANE | Backup / appendix |
+| Specialized Core ML candidate | **laishere/kokoro-coreml** | `github.com/laishere/kokoro-coreml` | 15 stars | Core ML pipeline | ANE | Long-bucket backup |
 | MLX Swift, not Core ML | **kokoro-ios** | `github.com/mlalma/kokoro-ios` | 256 stars | MLX Swift | GPU/Metal | Optional appendix only |
 
 **Important correction:** `mlalma/kokoro-ios` is not the primary Core ML
@@ -313,15 +314,15 @@ enabled, but device app execution is gated on local signing setup:
 reported `0 valid identities found`.
 
 **Current M2 Studio collection note:** Local M2 Studio JSON exists for Config F,
-MLX, and Soniqo macOS Core ML and validates against the shared schema. The run
-is recorded in `README/Notes/external-bakeoff-phase2-run-log.md`, and every
-successful result cell has a durable spot-check WAV. Do not mark M2 Studio
-complete yet: MLX fails deterministically on the shared `3s` input with a
-broadcast-shape error, and Soniqo emits 5.0s audio for longer manifest inputs
-because the selected public Core ML model repo only publishes
-`kokoro_5s.mlmodelc`. Soniqo's speed cells are implementation-behavior evidence,
-but not longer-bucket quality-parity evidence unless the paper accepts that
-caveat or switches to the backup Core ML comparator.
+MLX, Soniqo macOS Core ML, and laishere Core ML and validates against the shared
+schema. The run is recorded in
+`README/Notes/external-bakeoff-phase2-run-log.md`, and every successful result
+cell has a durable spot-check WAV. Do not mark M2 Studio complete yet: MLX fails
+deterministically on the shared `3s` input with a broadcast-shape error, and
+Soniqo emits 5.0s audio for longer manifest inputs because the selected public
+Core ML model repo only publishes `kokoro_5s.mlmodelc`. Soniqo remains the
+high-adoption iOS/Core ML comparator with this public-artifact caveat; laishere
+is now the normalized long-bucket Core ML backup for quality-parity evidence.
 
 **Tasks:**
 
@@ -339,6 +340,8 @@ caveat or switches to the backup Core ML comparator.
       - Copy only `scripts/external_bakeoff/`, the manifest, and any required
         Swift package wrapper.
       - Run Config F same-window first, then mlx-audio, then Core ML competitor.
+      - Run laishere/kokoro-coreml when Soniqo's public 5s artifact cannot
+        represent the longer runtime buckets.
       - Run one implementation at a time; on m2-air add a cooldown and abort if
         thermal pressure is non-nominal.
       - Copy JSON and spot-check WAVs back to
@@ -486,6 +489,7 @@ reader to reproduce the comparison from clean clones and pinned versions.
 | `scripts/external_bakeoff/prepare_runtime_inputs.py` | Create | five-bucket runtime input manifest |
 | `scripts/external_bakeoff/run_mlx_audio.py` | Create | Blaizzy MLX adapter |
 | `scripts/external_bakeoff/run_speech_swift_kokoro.py` | Create | Soniqo Core ML adapter, or rename if fallback selected |
+| `scripts/external_bakeoff/run_laishere_kokoro_coreml.py` | Create | long-bucket Core ML backup adapter |
 | `scripts/external_bakeoff/run_config_f_reference.py` | Create | same-window Config F wrapper |
 | `scripts/external_bakeoff/summarize_external.py` | Create | paper table generator |
 | `scripts/external_bakeoff/requirements_mlx_audio.txt` | Create | pinned MLX Python deps |
@@ -496,8 +500,9 @@ reader to reproduce the comparison from clean clones and pinned versions.
 ## Risks and Mitigations
 
 - **Wrong Core ML comparator:** Phase 0 verifies Core ML usage before adapter
-  work. If Soniqo cannot expose a clean Kokoro-only benchmark, fall back to
-  `laishere/kokoro-coreml` and explain the adoption tradeoff.
+  work. Soniqo exposes a clean Kokoro-only path but its public artifact is 5s
+  only; use `laishere/kokoro-coreml` for long-bucket Core ML parity evidence
+  and explain the adoption tradeoff.
 - **External API drift:** Pin git SHAs or package versions and record them in
   every result JSON.
 - **Thermal and production interference:** Run one implementation at a time,

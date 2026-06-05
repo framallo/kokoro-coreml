@@ -38,6 +38,26 @@ python scripts/external_bakeoff/run_speech_swift_kokoro.py \
   --spotcheck-dir outputs/external_bakeoff/spotcheck_wavs/soniqo_speech_swift_kokoro_m2-studio
 ```
 
+## Laishere Core ML Backup
+
+Clone and convert `laishere/kokoro-coreml` outside the repo. The converter can
+take a long time while Core ML compiles large models; do not interrupt it just
+because output is quiet.
+
+```bash
+cd /tmp/kokoro-external-bakeoff/laishere-kokoro-coreml
+PYTORCH_ENABLE_MPS_FALLBACK=1 uv run python convert.py --max-frames 2000
+PYTORCH_ENABLE_MPS_FALLBACK=1 uv run python \
+  /path/to/kokoro-coreml/scripts/external_bakeoff/run_laishere_kokoro_coreml.py \
+  --machine-id m2-studio \
+  --laishere-repo /tmp/kokoro-external-bakeoff/laishere-kokoro-coreml \
+  --manifest /path/to/kokoro-coreml/outputs/external_bakeoff/runtime_input_manifest.json \
+  --spotcheck-dir /path/to/kokoro-coreml/outputs/external_bakeoff/spotcheck_wavs/laishere_kokoro_coreml_m2-studio
+```
+
+The adapter times the seven-stage Core ML chain only; G2P and feed preparation
+are outside the timed calls, matching laishere's public benchmark.
+
 ## Config F
 
 Config F uses the existing Swift benchmark binary and prepared Swift inputs:
