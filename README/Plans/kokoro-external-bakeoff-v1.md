@@ -455,14 +455,19 @@ no speed row is interpreted as quality parity.
       - Hardware-placement evidence.
       - Quality caveats and interpretation.
 - [ ] Update this plan to `Status: Complete` only after results and notes are
-      committed.
+      committed and
+      `python scripts/external_bakeoff/verify_external_bakeoff_completion.py`
+      passes.
 - [ ] Use `git-commit` to commit only the plan, adapters, and notes. Do not
       commit generated JSON or WAV files under `outputs/`.
 
 **Verification:** `performance-notes.md` contains enough information for a
 reader to reproduce the comparison from clean clones and pinned versions. It
 also states that human listening and signed iPhone execution remain pending
-before publication-grade time-to-parity claims.
+before publication-grade time-to-parity claims. Running
+`python scripts/external_bakeoff/verify_external_bakeoff_completion.py` is the
+final plan-completion gate; it currently fails until human listening decisions
+are filled and a signed iPhone result is ingested.
 
 ## Success Criteria
 
@@ -484,6 +489,8 @@ before publication-grade time-to-parity claims.
 - [x] `README/Notes/performance-notes.md` has the external-competitor section.
 - [x] Adapter scripts and requirements files are committed.
 - [ ] This plan is updated to `Status: Complete`.
+- [ ] `python scripts/external_bakeoff/verify_external_bakeoff_completion.py`
+      passes.
 
 ## Open Questions
 

@@ -99,6 +99,18 @@ Pass `--spotcheck-dir` to use an explicit collection directory.
 python scripts/external_bakeoff/summarize_external.py
 ```
 
+## Completion Gate
+
+Before marking `README/Plans/kokoro-external-bakeoff-v1.md` complete, run:
+
+```bash
+python scripts/external_bakeoff/verify_external_bakeoff_completion.py
+```
+
+This checks the Mac result matrix, the documented MLX 3s error exception, the
+laishere backup records, signed iPhone result ingestion, the iOS preflight
+status, and filled human listening decisions.
+
 ## Human Listening Review
 
 After result JSONs, spot-check WAVs, and `scripts/audio_quality_probe.py`
