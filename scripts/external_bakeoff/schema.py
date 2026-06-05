@@ -8,6 +8,7 @@ import platform
 import subprocess
 import sys
 import time
+import wave
 from pathlib import Path
 from typing import Any
 
@@ -31,6 +32,25 @@ def sha256_text(text: str) -> str:
 
 def sha256_bytes(data: bytes) -> str:
     return hashlib.sha256(data).hexdigest()
+
+
+def write_wav_mono16(path: Path, samples: Any, sample_rate: int) -> None:
+    """Write mono float samples as peak-normalized PCM16 WAV for spot checks."""
+    import numpy as np
+
+    path.parent.mkdir(parents=True, exist_ok=True)
+    audio = np.asarray(samples, dtype=np.float32).reshape(-1)
+    peak = float(np.max(np.abs(audio))) if audio.size else 0.0
+    if peak <= 1e-7:
+        pcm = np.zeros(audio.shape, dtype=np.int16)
+    else:
+        pcm = np.clip(audio / peak, -1.0, 1.0)
+        pcm = np.rint(pcm * 32767.0).astype(np.int16)
+    with wave.open(str(path), "wb") as f:
+        f.setnchannels(1)
+        f.setsampwidth(2)
+        f.setframerate(int(sample_rate))
+        f.writeframes(pcm.tobytes())
 
 
 def load_json(path: Path) -> dict[str, Any]:

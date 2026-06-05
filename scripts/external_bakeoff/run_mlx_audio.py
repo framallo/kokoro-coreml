@@ -22,6 +22,7 @@ from scripts.external_bakeoff.schema import (  # noqa: E402
     validate_manifest,
     validate_result_payload,
     load_json,
+    write_wav_mono16,
     write_json,
 )
 
@@ -45,6 +46,7 @@ def main() -> None:
     parser.add_argument("--voice", default=DEFAULT_VOICE)
     parser.add_argument("--iterations", type=int, default=5)
     parser.add_argument("--input-key", action="append", default=None)
+    parser.add_argument("--spotcheck-dir", type=Path, default=None)
     args = parser.parse_args()
 
     from mlx_audio.tts.utils import load_model
@@ -54,6 +56,9 @@ def main() -> None:
     keys = args.input_key or list(manifest["inputs"].keys())
     version = importlib.metadata.version("mlx-audio")
     model = load_model(args.model_id)
+    spotcheck_dir = args.spotcheck_dir or (
+        DEFAULT_OUTPUT_DIR / "spotcheck_wavs" / f"mlx_audio_{args.machine_id}"
+    )
 
     records = []
     for key in keys:
@@ -66,6 +71,8 @@ def main() -> None:
                 elapsed, last_audio, sample_rate = _generate_once(model, item["text"], args.voice)
                 warm_times.append(elapsed)
             observed = float(last_audio.size) / float(sample_rate)
+            spotcheck_wav = spotcheck_dir / f"{key}.wav"
+            write_wav_mono16(spotcheck_wav, last_audio, sample_rate)
             records.append(
                 result_record(
                     impl="mlx-audio",
@@ -84,6 +91,7 @@ def main() -> None:
                     provenance={
                         "model_id": args.model_id,
                         "sample_rate": sample_rate,
+                        "spotcheck_wav": str(spotcheck_wav),
                         "adapter_note": "Use np.array(result.audio).size; GenerationResult.samples is not reliable for Kokoro.",
                     },
                 )
@@ -100,7 +108,7 @@ def main() -> None:
                     text=item["text"],
                     voice=args.voice,
                     canonical_audio_duration_s=float(item["canonical_duration_s"]),
-                    provenance={"model_id": args.model_id},
+                    provenance={"model_id": args.model_id, "spotcheck_dir": str(spotcheck_dir)},
                     error=f"{type(exc).__name__}: {exc}",
                 )
             )
@@ -109,7 +117,11 @@ def main() -> None:
         impl="mlx-audio",
         machine_id=args.machine_id,
         records=records,
-        provenance={"model_id": args.model_id, "mlx_audio_version": version},
+        provenance={
+            "model_id": args.model_id,
+            "mlx_audio_version": version,
+            "spotcheck_dir": str(spotcheck_dir),
+        },
     )
     validate_result_payload(payload)
     output = args.output or (DEFAULT_OUTPUT_DIR / f"results_mlx_audio_{args.machine_id}.json")

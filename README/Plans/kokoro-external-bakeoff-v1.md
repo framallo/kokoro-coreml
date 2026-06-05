@@ -1,7 +1,7 @@
 # Kokoro External Bakeoff Plan
 
 **Date:** 2026-06-05
-**Status:** Phase 2 in progress; Config F batch collection gate resolved, iPhone runner needs signing team setup
+**Status:** Phase 2 in progress; M2 Studio local collection has data-quality caveats, iPhone runner needs signing team setup
 
 > Internal bakeoff methodology lives in `README/Plans/kokoro-bakeoff-v2.md`.
 > This plan extends that methodology to external Apple Silicon Kokoro
@@ -311,6 +311,14 @@ The connected iPhone 12 Pro is visible to CoreDevice and developer mode is
 enabled, but device app execution is gated on local signing setup:
 `DEVELOPMENT_TEAM` is unset and `security find-identity -v -p codesigning`
 reported `0 valid identities found`.
+
+**Current M2 Studio collection note:** Local M2 Studio JSON exists for Config F,
+MLX, and Soniqo macOS Core ML and validates against the shared schema. The run
+is recorded in `README/Notes/external-bakeoff-phase2-run-log.md`. Do not mark
+M2 Studio complete yet: the first full run happened before durable spot-check
+WAV support landed, MLX fails deterministically on the shared `3s` input with a
+broadcast-shape error, and Soniqo emits 5.0s audio for longer manifest inputs,
+so its speed cells are not quality-parity evidence.
 
 **Tasks:**
 

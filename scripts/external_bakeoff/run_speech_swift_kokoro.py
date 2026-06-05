@@ -58,6 +58,45 @@ struct Result: Codable {
     let availableVoiceCount: Int
 }
 
+func writeWavMono16(path: String, samples: [Float], sampleRate: Int) throws {
+    var peak: Float = 1e-7
+    for sample in samples {
+        peak = max(peak, abs(sample))
+    }
+    var pcm = [Int16]()
+    pcm.reserveCapacity(samples.count)
+    for sample in samples {
+        let scaled = max(-1.0, min(1.0, sample / peak))
+        pcm.append(Int16((scaled * 32767.0).rounded()))
+    }
+
+    var data = Data()
+    data.append(contentsOf: "RIFF".utf8)
+    var riffChunkSize = UInt32(36 + pcm.count * 2).littleEndian
+    withUnsafeBytes(of: &riffChunkSize) { data.append(contentsOf: $0) }
+    data.append(contentsOf: "WAVE".utf8)
+    data.append(contentsOf: "fmt ".utf8)
+    var subchunk1Size = UInt32(16).littleEndian
+    withUnsafeBytes(of: &subchunk1Size) { data.append(contentsOf: $0) }
+    var audioFormat = UInt16(1).littleEndian
+    withUnsafeBytes(of: &audioFormat) { data.append(contentsOf: $0) }
+    var numChannels = UInt16(1).littleEndian
+    withUnsafeBytes(of: &numChannels) { data.append(contentsOf: $0) }
+    var sr = UInt32(sampleRate).littleEndian
+    withUnsafeBytes(of: &sr) { data.append(contentsOf: $0) }
+    var byteRate = UInt32(sampleRate * 2).littleEndian
+    withUnsafeBytes(of: &byteRate) { data.append(contentsOf: $0) }
+    var blockAlign = UInt16(2).littleEndian
+    withUnsafeBytes(of: &blockAlign) { data.append(contentsOf: $0) }
+    var bitsPerSample = UInt16(16).littleEndian
+    withUnsafeBytes(of: &bitsPerSample) { data.append(contentsOf: $0) }
+    data.append(contentsOf: "data".utf8)
+    var dataSize = UInt32(pcm.count * 2).littleEndian
+    withUnsafeBytes(of: &dataSize) { data.append(contentsOf: $0) }
+    pcm.withUnsafeBytes { data.append(contentsOf: $0) }
+    try data.write(to: URL(fileURLWithPath: path))
+}
+
 func sha256Hex(_ floats: [Float]) -> String {
     var bytes = floats
     let digest = bytes.withUnsafeMutableBytes { raw -> SHA256.Digest in
@@ -67,8 +106,8 @@ func sha256Hex(_ floats: [Float]) -> String {
 }
 
 let args = CommandLine.arguments
-guard args.count >= 5 else {
-    fputs("usage: SoniqoKokoroBench TEXT VOICE ITERATIONS COMPUTE_UNITS\n", stderr)
+guard args.count >= 6 else {
+    fputs("usage: SoniqoKokoroBench TEXT VOICE ITERATIONS COMPUTE_UNITS WAV_PATH\n", stderr)
     exit(2)
 }
 
@@ -83,6 +122,7 @@ case "cpuonly": computeUnits = .cpuOnly
 case "cpuandneuralengine": computeUnits = .cpuAndNeuralEngine
 default: computeUnits = .all
 }
+let wavPath = args[5]
 
 let model = try await KokoroTTSModel.fromPretrained(computeUnits: computeUnits)
 
@@ -97,6 +137,11 @@ for _ in 0..<iterations {
     lastAudio = try model.synthesize(text: text, voice: voice, language: "en", speed: 1.0)
     warm.append(CFAbsoluteTimeGetCurrent() - start)
 }
+try FileManager.default.createDirectory(
+    at: URL(fileURLWithPath: wavPath).deletingLastPathComponent(),
+    withIntermediateDirectories: true
+)
+try writeWavMono16(path: wavPath, samples: lastAudio, sampleRate: KokoroTTSModel.outputSampleRate)
 
 let result = Result(
     coldWallTimeS: cold,
@@ -122,10 +167,17 @@ def _ensure_cli(work_dir: Path, speech_swift: Path) -> Path:
     return work_dir
 
 
-def _run_cli(package_dir: Path, text: str, voice: str, iterations: int, compute_units: str) -> dict:
+def _run_cli(
+    package_dir: Path,
+    text: str,
+    voice: str,
+    iterations: int,
+    compute_units: str,
+    wav_path: Path,
+) -> dict:
     cmd = [
         "swift", "run", "-c", "release", "SoniqoKokoroBench",
-        text, voice, str(iterations), compute_units,
+        text, voice, str(iterations), compute_units, str(wav_path),
     ]
     proc = subprocess.run(cmd, cwd=package_dir, text=True, capture_output=True)
     if proc.returncode != 0:
@@ -148,11 +200,15 @@ def main() -> None:
     parser.add_argument("--iterations", type=int, default=5)
     parser.add_argument("--input-key", action="append", default=None)
     parser.add_argument("--work-dir", type=Path, default=None)
+    parser.add_argument("--spotcheck-dir", type=Path, default=None)
     args = parser.parse_args()
 
     manifest = load_json(args.manifest)
     validate_manifest(manifest)
     keys = args.input_key or list(manifest["inputs"].keys())
+    spotcheck_dir = args.spotcheck_dir or (
+        DEFAULT_OUTPUT_DIR / "spotcheck_wavs" / f"soniqo_speech_swift_kokoro_{args.machine_id}"
+    )
 
     work_dir = args.work_dir or Path(tempfile.mkdtemp(prefix="soniqo-kokoro-bench-"))
     _ensure_cli(work_dir, args.speech_swift.resolve())
@@ -164,7 +220,15 @@ def main() -> None:
     records = []
     for key in keys:
         item = manifest["inputs"][key]
-        raw = _run_cli(work_dir, item["text"], args.voice, args.iterations, args.compute_units)
+        spotcheck_wav = spotcheck_dir / f"{key}.wav"
+        raw = _run_cli(
+            work_dir,
+            item["text"],
+            args.voice,
+            args.iterations,
+            args.compute_units,
+            spotcheck_wav,
+        )
         records.append(
             result_record(
                 impl="soniqo-speech-swift-kokoro",
@@ -186,6 +250,7 @@ def main() -> None:
                     "sample_rate": raw["sampleRate"],
                     "sample_count": raw["sampleCount"],
                     "available_voice_count": raw["availableVoiceCount"],
+                    "spotcheck_wav": str(spotcheck_wav),
                 },
             )
         )
@@ -194,7 +259,11 @@ def main() -> None:
         impl="soniqo-speech-swift-kokoro",
         machine_id=args.machine_id,
         records=records,
-        provenance={"speech_swift_sha": sha, "compute_units": args.compute_units},
+        provenance={
+            "speech_swift_sha": sha,
+            "compute_units": args.compute_units,
+            "spotcheck_dir": str(spotcheck_dir),
+        },
     )
     validate_result_payload(payload)
     output = args.output or (DEFAULT_OUTPUT_DIR / f"results_soniqo_speech_swift_kokoro_{args.machine_id}.json")

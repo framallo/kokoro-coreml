@@ -75,13 +75,23 @@ class ConfigFBatchRunner:
             if "ERROR" in line:
                 raise RuntimeError(f"kokoro-bench batch returned error status: {line}")
 
-    def run_once(self, input_key: str, seed: int = 42, warmup: bool = False) -> dict[str, Any]:
+    def run_once(
+        self,
+        input_key: str,
+        seed: int = 42,
+        warmup: bool = False,
+        wav_path: Optional[Path] = None,
+    ) -> dict[str, Any]:
         if not self.proc.stdin:
             raise RuntimeError("kokoro-bench stdin pipe is unavailable")
         with tempfile.NamedTemporaryFile(suffix=".json", delete=False) as f:
             out = Path(f.name)
-        with tempfile.NamedTemporaryFile(suffix=".wav", delete=False) as f:
-            wav = Path(f.name)
+        if wav_path is None:
+            with tempfile.NamedTemporaryFile(suffix=".wav", delete=False) as f:
+                wav = Path(f.name)
+        else:
+            wav = wav_path
+            wav.parent.mkdir(parents=True, exist_ok=True)
 
         command = {
             "input_key": input_key,
@@ -98,7 +108,8 @@ class ConfigFBatchRunner:
         if wav.exists():
             data["output_sha256"] = hashlib.sha256(wav.read_bytes()).hexdigest()
         out.unlink(missing_ok=True)
-        wav.unlink(missing_ok=True)
+        if wav_path is None:
+            wav.unlink(missing_ok=True)
         if data.get("status") != "ok":
             raise RuntimeError(f"kokoro-bench batch record failed: {data}")
         return data
@@ -120,6 +131,7 @@ def main() -> None:
     parser.add_argument("--compute-units", default="all")
     parser.add_argument("--iterations", type=int, default=5)
     parser.add_argument("--input-key", action="append", default=None)
+    parser.add_argument("--spotcheck-dir", type=Path, default=None)
     args = parser.parse_args()
 
     if not args.binary.exists():
@@ -130,6 +142,9 @@ def main() -> None:
     keys = args.input_key or list(manifest["inputs"].keys())
 
     records = []
+    spotcheck_dir = args.spotcheck_dir or (
+        DEFAULT_OUTPUT_DIR / "spotcheck_wavs" / f"config_f_reference_{args.machine_id}"
+    )
     runner: Optional[ConfigFBatchRunner] = None
     try:
         runner = ConfigFBatchRunner(
@@ -143,7 +158,10 @@ def main() -> None:
             item = manifest["inputs"][key]
             try:
                 cold_result = runner.run_once(key, warmup=False)
-                warm = [runner.run_once(key, warmup=True) for _ in range(args.iterations)]
+                warm = []
+                for idx in range(args.iterations):
+                    wav_path = spotcheck_dir / f"{key}.wav" if idx == args.iterations - 1 else None
+                    warm.append(runner.run_once(key, warmup=True, wav_path=wav_path))
                 records.append(
                     result_record(
                         impl="config-f-reference",
@@ -167,6 +185,7 @@ def main() -> None:
                             "compute_units": args.compute_units,
                             "batch_mode": True,
                             "bucket_used": warm[-1].get("bucket_used"),
+                            "spotcheck_wav": str(spotcheck_dir / f"{key}.wav"),
                             "raw_last_result": warm[-1],
                         },
                     )
@@ -190,6 +209,7 @@ def main() -> None:
                             "hnsf_weights": str(args.hnsf_weights),
                             "compute_units": args.compute_units,
                             "batch_mode": True,
+                            "spotcheck_dir": str(spotcheck_dir),
                         },
                         error=f"{type(exc).__name__}: {exc}",
                     )
@@ -209,6 +229,7 @@ def main() -> None:
             "hnsf_weights": str(args.hnsf_weights),
             "compute_units": args.compute_units,
             "batch_mode": True,
+            "spotcheck_dir": str(spotcheck_dir),
         },
     )
     validate_result_payload(payload)

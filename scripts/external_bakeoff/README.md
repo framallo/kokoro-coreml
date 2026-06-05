@@ -23,7 +23,8 @@ uv venv /tmp/kokoro-external-bakeoff/mlx-venv
 uv pip install --python /tmp/kokoro-external-bakeoff/mlx-venv/bin/python \
   -r scripts/external_bakeoff/requirements_mlx_audio.txt
 /tmp/kokoro-external-bakeoff/mlx-venv/bin/python \
-  scripts/external_bakeoff/run_mlx_audio.py --machine-id m2-studio
+  scripts/external_bakeoff/run_mlx_audio.py --machine-id m2-studio \
+  --spotcheck-dir outputs/external_bakeoff/spotcheck_wavs/mlx_audio_m2-studio
 ```
 
 ## Soniqo Speech Swift
@@ -33,7 +34,8 @@ Clone and pin `soniqo/speech-swift` outside the repo, then run:
 ```bash
 python scripts/external_bakeoff/run_speech_swift_kokoro.py \
   --machine-id m2-studio \
-  --speech-swift /tmp/kokoro-external-bakeoff/speech-swift
+  --speech-swift /tmp/kokoro-external-bakeoff/speech-swift \
+  --spotcheck-dir outputs/external_bakeoff/spotcheck_wavs/soniqo_speech_swift_kokoro_m2-studio
 ```
 
 ## Config F
@@ -47,6 +49,10 @@ uv run --with-requirements requirements-bakeoff.txt --no-sync \
   python scripts/prepare_swift_bench_inputs.py
 python scripts/external_bakeoff/run_config_f_reference.py --machine-id m2-studio
 ```
+
+By default, each adapter writes the last warm output for each successful input
+to `outputs/external_bakeoff/spotcheck_wavs/<impl>_<machine_id>/<bucket>.wav`.
+Pass `--spotcheck-dir` to use an explicit collection directory.
 
 ## Summarize
 
