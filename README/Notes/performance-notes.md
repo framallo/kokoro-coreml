@@ -307,6 +307,9 @@ Markdown, local HTML, and a fillable
 `external_bakeoff_listening_decisions.csv` under
 `outputs/external_bakeoff/listening/` using only the collected Kokoro TTS WAVs.
 The CSV intentionally leaves `human_decision` blank until the operator listens.
+After filling the CSV, run
+`python scripts/external_bakeoff/validate_listening_decisions.py`; it must pass
+before any latency cell is interpreted as quality parity.
 
 Known caveats:
 

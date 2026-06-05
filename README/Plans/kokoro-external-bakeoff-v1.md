@@ -419,8 +419,10 @@ table cell without quality parity evidence is marked with a caveat. Running
 HTML, and `external_bakeoff_listening_decisions.csv` review artifacts under
 `outputs/external_bakeoff/listening/`. The generated CSV has one row per
 available result cell plus error rows, and `human_decision` remains blank until
-the operator listens. Human listening is still pending, so no speed row is
-interpreted as quality parity.
+the operator listens. After filling the CSV, run
+`python scripts/external_bakeoff/validate_listening_decisions.py`; it must pass
+before this phase can be marked complete. Human listening is still pending, so
+no speed row is interpreted as quality parity.
 
 ---
 

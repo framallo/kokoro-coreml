@@ -93,6 +93,24 @@ This writes:
 
 - `outputs/external_bakeoff/listening/external_bakeoff_listening_review.md`
 - `outputs/external_bakeoff/listening/external_bakeoff_listening_review.html`
+- `outputs/external_bakeoff/listening/external_bakeoff_listening_decisions.csv`
 
 The review uses only collected Kokoro TTS WAVs and waveform-quality reports. It
 does not use Whisper, ASR, VAD, or Soniqo's echo-demo dependency graph.
+
+Fill `human_decision` for every successful audio row in the CSV with one of:
+
+- `pass`: comparable to the same-machine Config F reference.
+- `caveat`: usable only with the caveat documented in `notes`.
+- `fail`: not quality parity.
+
+Then validate the filled decision sheet:
+
+```bash
+python scripts/external_bakeoff/validate_listening_decisions.py
+```
+
+The validator fails while any successful audio row is blank, has an invalid
+decision, has `human_decision=caveat` without notes, or has
+`human_decision=fail`. Use `--allow-failures` only when intentionally publishing
+documented non-parity rows instead of claiming quality parity.
