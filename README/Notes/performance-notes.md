@@ -60,6 +60,13 @@ boundary excludes G2P and feed preparation and times only the seven-stage Core
 ML chain; those numbers are therefore useful as a Core ML chain comparison, but
 not a fully equivalent end-to-end TTS boundary.
 
+The paper-facing comparison is warmed inference. For Config F 30s on m2-air and
+irvine-m1, the original same-window run let Core ML AOT compile/load work leak
+into the recorded 30s calls. Those two warm cells were rerun with three
+discarded preflight calls, `KOKORO_USE_EXACT_DURATION_MODELS=1`, and 20 recorded
+warm calls. The old compile-inclusive cells remain cold-start/operational
+evidence, but they are not used for warmed inference comparison.
+
 ### Machine Provenance
 
 | Machine | Hardware model | Memory | macOS |
@@ -67,6 +74,56 @@ not a fully equivalent end-to-end TTS boundary.
 | m2-studio | Mac14,14 | 64 GiB | 26.5 / 25F71 |
 | m2-air | Mac14,15 | 24 GiB | 15.7.7 / 24G720 |
 | irvine-m1 | Macmini9,1 | 16 GiB | 15.7.7 / 24G720 |
+
+### iPhone Status
+
+The connected iPhone 12 Pro is visible to CoreDevice as `Webcam`
+(`F383FC46-FD64-5346-AEC6-59E3E2F8C9CA`, model `iPhone13,3`) and is available
+and paired. No iPhone result is included in the table because physical-device
+execution is blocked by local signing state: `security find-identity -v -p
+codesigning` reports `0 valid identities found`. The minimal Soniqo Kokoro iOS
+runner remains in `scripts/external_bakeoff/SoniqoKokoroIOSRunner/` for the
+next signed-device pass.
+
+Whisper, ASR, VAD, and echo-demo dependencies are not part of this bakeoff
+boundary. The iOS runner is intentionally Kokoro TTS only.
+
+### Consolidated Warm Median and RTF by Platform
+
+Each cell is `warm median wall time / observed RTF`.
+
+#### m2-studio
+
+Mac14,14, 64 GiB, macOS 26.5 / 25F71.
+
+| Impl | 3s | 7s | 10s | 15s | 30s | Caveats |
+| --- | ---: | ---: | ---: | ---: | ---: | --- |
+| Config F | 131.5 ms / 0.047 | 284.2 ms / 0.042 | 548.2 ms / 0.057 | 632.9 ms / 0.046 | 1191.8 ms / 0.043 | - |
+| MLX | error | 223.9 ms / 0.033 | 288.8 ms / 0.030 | 376.3 ms / 0.027 | 762.7 ms / 0.028 | 3s broadcast-shape failure |
+| Soniqo | 71.7 ms / 0.027 | 69.3 ms / 0.014 | 71.0 ms / 0.014 | 68.1 ms / 0.014 | 69.5 ms / 0.014 | Long buckets emit 5.0s public artifact |
+| laishere | 212.3 ms / 0.077 | 403.3 ms / 0.059 | 626.3 ms / 0.065 | 429.8 ms / 0.031 | 925.1 ms / 0.034 | Excludes G2P/feed prep |
+
+#### m2-air
+
+Mac14,15, 24 GiB, macOS 15.7.7 / 24G720.
+
+| Impl | 3s | 7s | 10s | 15s | 30s | Caveats |
+| --- | ---: | ---: | ---: | ---: | ---: | --- |
+| Config F | 317.4 ms / 0.113 | 808.1 ms / 0.120 | 1373.3 ms / 0.143 | 2052.4 ms / 0.148 | 3944.0 ms / 0.144 | 30s is post-preflight exact-duration N=20 |
+| MLX | error | 685.6 ms / 0.102 | 835.8 ms / 0.087 | 1521.0 ms / 0.109 | 2600.3 ms / 0.095 | 3s broadcast-shape failure |
+| Soniqo | 1097.4 ms / 0.406 | 1135.8 ms / 0.227 | 1123.0 ms / 0.225 | 1125.5 ms / 0.225 | 1123.5 ms / 0.225 | Long buckets emit 5.0s public artifact |
+| laishere | 142.0 ms / 0.051 | 316.9 ms / 0.046 | 450.2 ms / 0.047 | 657.3 ms / 0.047 | 1476.4 ms / 0.054 | Excludes G2P/feed prep |
+
+#### irvine-m1
+
+Macmini9,1, 16 GiB, macOS 15.7.7 / 24G720.
+
+| Impl | 3s | 7s | 10s | 15s | 30s | Caveats |
+| --- | ---: | ---: | ---: | ---: | ---: | --- |
+| Config F | 304.6 ms / 0.109 | 696.1 ms / 0.103 | 1348.5 ms / 0.140 | 1672.7 ms / 0.120 | 2076.1 ms / 0.076 | 30s is post-preflight exact-duration N=20 |
+| MLX | error | 824.0 ms / 0.122 | 1124.3 ms / 0.117 | 1589.5 ms / 0.114 | 3077.9 ms / 0.112 | 3s broadcast-shape failure |
+| Soniqo | 1330.9 ms / 0.493 | 1343.6 ms / 0.269 | 1313.9 ms / 0.263 | 1343.6 ms / 0.269 | 1351.2 ms / 0.270 | Long buckets emit 5.0s public artifact |
+| laishere | 176.3 ms / 0.064 | 394.6 ms / 0.058 | 593.9 ms / 0.062 | 912.0 ms / 0.065 | 2135.1 ms / 0.078 | Excludes G2P/feed prep |
 
 ### Cold Wall Time
 
@@ -93,11 +150,11 @@ not a fully equivalent end-to-end TTS boundary.
 | m2-studio | MLX | error | 223.9 ms | 288.8 ms | 376.3 ms | 762.7 ms |
 | m2-studio | Soniqo | 71.7 ms | 69.3 ms | 71.0 ms | 68.1 ms | 69.5 ms |
 | m2-studio | laishere | 212.3 ms | 403.3 ms | 626.3 ms | 429.8 ms | 925.1 ms |
-| m2-air | Config F | 317.4 ms | 808.1 ms | 1373.3 ms | 2052.4 ms | 9559.1 ms |
+| m2-air | Config F | 317.4 ms | 808.1 ms | 1373.3 ms | 2052.4 ms | 3944.0 ms |
 | m2-air | MLX | error | 685.6 ms | 835.8 ms | 1521.0 ms | 2600.3 ms |
 | m2-air | Soniqo | 1097.4 ms | 1135.8 ms | 1123.0 ms | 1125.5 ms | 1123.5 ms |
 | m2-air | laishere | 142.0 ms | 316.9 ms | 450.2 ms | 657.3 ms | 1476.4 ms |
-| irvine-m1 | Config F | 304.6 ms | 696.1 ms | 1348.5 ms | 1672.7 ms | 16119.6 ms |
+| irvine-m1 | Config F | 304.6 ms | 696.1 ms | 1348.5 ms | 1672.7 ms | 2076.1 ms |
 | irvine-m1 | MLX | error | 824.0 ms | 1124.3 ms | 1589.5 ms | 3077.9 ms |
 | irvine-m1 | Soniqo | 1330.9 ms | 1343.6 ms | 1313.9 ms | 1343.6 ms | 1351.2 ms |
 | irvine-m1 | laishere | 176.3 ms | 394.6 ms | 593.9 ms | 912.0 ms | 2135.1 ms |
@@ -110,11 +167,11 @@ not a fully equivalent end-to-end TTS boundary.
 | m2-studio | MLX | error | 0.033 | 0.030 | 0.027 | 0.028 |
 | m2-studio | Soniqo | 0.027 | 0.014 | 0.014 | 0.014 | 0.014 |
 | m2-studio | laishere | 0.077 | 0.059 | 0.065 | 0.031 | 0.034 |
-| m2-air | Config F | 0.113 | 0.120 | 0.143 | 0.148 | 0.349 |
+| m2-air | Config F | 0.113 | 0.120 | 0.143 | 0.148 | 0.144 |
 | m2-air | MLX | error | 0.102 | 0.087 | 0.109 | 0.095 |
 | m2-air | Soniqo | 0.406 | 0.227 | 0.225 | 0.225 | 0.225 |
 | m2-air | laishere | 0.051 | 0.046 | 0.047 | 0.047 | 0.054 |
-| irvine-m1 | Config F | 0.109 | 0.103 | 0.140 | 0.120 | 0.588 |
+| irvine-m1 | Config F | 0.109 | 0.103 | 0.140 | 0.120 | 0.076 |
 | irvine-m1 | MLX | error | 0.122 | 0.117 | 0.114 | 0.112 |
 | irvine-m1 | Soniqo | 0.493 | 0.269 | 0.263 | 0.269 | 0.270 |
 | irvine-m1 | laishere | 0.064 | 0.058 | 0.062 | 0.065 | 0.078 |
@@ -147,12 +204,12 @@ faster.
 | m2-studio | MLX / Config F | n/a | 0.79x | 0.53x | 0.59x | 0.64x |
 | m2-studio | Soniqo / Config F | 0.55x | 0.24x | 0.13x | 0.11x | 0.06x |
 | m2-studio | laishere / Config F | 1.61x | 1.42x | 1.14x | 0.68x | 0.78x |
-| m2-air | MLX / Config F | n/a | 0.85x | 0.61x | 0.74x | 0.27x |
-| m2-air | Soniqo / Config F | 3.46x | 1.41x | 0.82x | 0.55x | 0.12x |
-| m2-air | laishere / Config F | 0.45x | 0.39x | 0.33x | 0.32x | 0.15x |
-| irvine-m1 | MLX / Config F | n/a | 1.18x | 0.83x | 0.95x | 0.19x |
-| irvine-m1 | Soniqo / Config F | 4.37x | 1.93x | 0.97x | 0.80x | 0.08x |
-| irvine-m1 | laishere / Config F | 0.58x | 0.57x | 0.44x | 0.55x | 0.13x |
+| m2-air | MLX / Config F | n/a | 0.85x | 0.61x | 0.74x | 0.66x |
+| m2-air | Soniqo / Config F | 3.46x | 1.41x | 0.82x | 0.55x | 0.28x |
+| m2-air | laishere / Config F | 0.45x | 0.39x | 0.33x | 0.32x | 0.37x |
+| irvine-m1 | MLX / Config F | n/a | 1.18x | 0.83x | 0.95x | 1.48x |
+| irvine-m1 | Soniqo / Config F | 4.37x | 1.93x | 0.97x | 0.80x | 0.65x |
+| irvine-m1 | laishere / Config F | 0.58x | 0.57x | 0.44x | 0.55x | 1.03x |
 
 ### Hardware Placement Evidence
 

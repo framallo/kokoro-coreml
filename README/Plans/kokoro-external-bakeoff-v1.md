@@ -1,8 +1,10 @@
 # Kokoro External Bakeoff Plan
 
 **Date:** 2026-06-05
-**Status:** External result section written; human listening and privileged
-hardware-placement traces remain before this plan can be marked complete
+**Status:** External result section and consolidated platform table written;
+compile-contaminated 30s Config F cells replaced with warmed-inference reruns;
+human listening, signed iPhone execution, and privileged hardware-placement
+traces remain before this plan can be marked complete
 
 > Internal bakeoff methodology lives in `README/Plans/kokoro-bakeoff-v2.md`.
 > This plan extends that methodology to external Apple Silicon Kokoro
@@ -88,6 +90,8 @@ TTS.cpp/GGML, ONNX-only variants, and non-Kokoro engines.
 - Re-running all internal A/D/E baselines. Only Config F needs same-window
   calibration for the paper table.
 - Benchmarking ONNX, GGML, browser, cloud, or non-Kokoro engines.
+- Benchmarking Whisper, ASR, VAD, or echo-demo dependencies; this bakeoff is
+  Kokoro TTS only.
 - Integrating external implementations into production workers.
 - Objective MOS/PESQ/MCD scoring for this round; listening plus waveform sanity
   metrics are sufficient for the first publication table.
@@ -311,7 +315,12 @@ SHA-256 `1422cb557e87f09008dec461850ffc803fb3c24e4911bb89ef1498fa15aec904`.
 The connected iPhone 12 Pro is visible to CoreDevice and developer mode is
 enabled, but device app execution is gated on local signing setup:
 `DEVELOPMENT_TEAM` is unset and `security find-identity -v -p codesigning`
-reported `0 valid identities found`.
+reported `0 valid identities found`. The live device check on 2026-06-05
+identified the phone as `Webcam`, identifier
+`F383FC46-FD64-5346-AEC6-59E3E2F8C9CA`, model `iPhone13,3`, state
+`available (paired)`. The iOS runner remains deliberately Kokoro-only; Whisper,
+ASR, VAD, and the full Soniqo echo-demo dependency graph are excluded from the
+measurement path.
 
 **Current collection note:** M2 Studio, irvine-m1, and M2 Air now have
 schema-valid JSON for Config F, MLX, Soniqo, and laishere, and every successful
@@ -323,6 +332,10 @@ inputs because the selected public Core ML model repo only publishes
 this public-artifact caveat. laishere is the normalized long-bucket Core ML
 backup for quality-parity evidence. Listening and hardware-placement evidence
 are still pending before the speed table can be interpreted as time-to-parity.
+The original Config F 30s cells on m2-air and irvine-m1 were compile/cache
+contaminated, so the paper-facing warmed-inference tables use corrected 30s
+runs with `KOKORO_USE_EXACT_DURATION_MODELS=1`, three discarded preflight
+calls, and 20 recorded warm calls.
 
 **Tasks:**
 
@@ -393,6 +406,7 @@ listening is still pending, so no speed row is interpreted as quality parity.
 - [x] Include:
       - Competitor selection and excluded repos.
       - Machine and OS provenance.
+      - Consolidated warm median and RTF tables by hardware platform.
       - Cold latency table.
       - Warm median wall-time table.
       - RTF table using observed duration.

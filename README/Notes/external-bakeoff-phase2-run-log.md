@@ -199,6 +199,23 @@ successful cell has a mono 24 kHz spot-check WAV.
 The 30s bucket compiled successfully after the long Core ML AOT window. The
 fanless host stayed thermally nominal during the run.
 
+#### M2 Air Config F Warmed-Inference Correction
+
+The original 30s cell is compile-inclusive and not used for paper-facing warmed
+inference. It used the padded `t512` duration model and showed Core ML AOT
+compile/load work in the recorded window. A corrected run rebuilt the current
+Swift benchmark source on the host, set `KOKORO_USE_EXACT_DURATION_MODELS=1`,
+discarded three preflight calls, then recorded 20 warm calls:
+
+| Input | Status | Post-preflight cold s | Warm median s | Warm N | Observed s | Duration model |
+| --- | --- | ---: | ---: | ---: | ---: | --- |
+| 30s | ok | 4.094875 | 3.943964 | 20 | 27.400 | exact_t476 |
+
+The recorded warm range was `3.656564s` to `4.035546s`, with median observed
+RTF `0.1440715`. The last recorded call spent `0.049253s` in Duration Core ML
+and `3.484556s` in generator Core ML, proving the large original 30s cell was
+compile/cache contamination rather than warmed Duration inference.
+
 ### M2 Air MLX
 
 `Blaizzy/mlx-audio` ran from pinned SHA
@@ -298,6 +315,20 @@ path; this is preserved as observed host behavior.
 | 10s | ok | 1.035011 | 1.348528 | 5 | 9.625 | 10s |
 | 15s | ok | 1.372462 | 1.672729 | 5 | 13.900 | 15s |
 | 30s | ok | 9.114338 | 16.119647 | 5 | 27.400 | 30s |
+
+#### Irvine M1 Config F Warmed-Inference Correction
+
+The original 30s cell is compile-inclusive and not used for paper-facing warmed
+inference. A corrected run set `KOKORO_USE_EXACT_DURATION_MODELS=1`, discarded
+three preflight calls, then recorded 20 warm calls:
+
+| Input | Status | Post-preflight cold s | Warm median s | Warm N | Observed s | Duration model |
+| --- | --- | ---: | ---: | ---: | ---: | --- |
+| 30s | ok | 2.085811 | 2.076132 | 20 | 27.400 | exact_t476 |
+
+The recorded warm range was `2.051301s` to `2.104326s`, with median observed
+RTF `0.07584`. The last recorded call spent `0.118366s` in Duration Core ML and
+`1.72577s` in generator Core ML.
 
 ### Irvine M1 MLX
 

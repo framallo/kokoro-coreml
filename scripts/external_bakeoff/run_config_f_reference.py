@@ -5,6 +5,7 @@ from __future__ import annotations
 import argparse
 import hashlib
 import json
+import os
 import subprocess
 import sys
 import tempfile
@@ -35,7 +36,11 @@ class ConfigFBatchRunner:
         models_dir: Path,
         inputs_dir: Path,
         hnsf_weights: Path,
+        use_exact_duration_models: bool,
     ) -> None:
+        env = os.environ.copy()
+        if use_exact_duration_models:
+            env["KOKORO_USE_EXACT_DURATION_MODELS"] = "1"
         self.proc = subprocess.Popen(
             [
                 str(binary),
@@ -48,6 +53,7 @@ class ConfigFBatchRunner:
             stdin=subprocess.PIPE,
             stdout=subprocess.PIPE,
             text=True,
+            env=env,
         )
         self._read_until("READY")
 
@@ -130,6 +136,17 @@ def main() -> None:
     )
     parser.add_argument("--compute-units", default="all")
     parser.add_argument("--iterations", type=int, default=5)
+    parser.add_argument(
+        "--preflight-runs",
+        type=int,
+        default=0,
+        help="Run and discard this many calls per input before recording cold/warm timings.",
+    )
+    parser.add_argument(
+        "--use-exact-duration-models",
+        action="store_true",
+        help="Set KOKORO_USE_EXACT_DURATION_MODELS=1 for the Swift benchmark subprocess.",
+    )
     parser.add_argument("--input-key", action="append", default=None)
     parser.add_argument("--spotcheck-dir", type=Path, default=None)
     args = parser.parse_args()
@@ -153,10 +170,15 @@ def main() -> None:
             args.models_dir,
             args.inputs_dir,
             args.hnsf_weights,
+            args.use_exact_duration_models,
         )
         for key in keys:
             item = manifest["inputs"][key]
             try:
+                preflight = [
+                    runner.run_once(key, warmup=True)
+                    for _ in range(args.preflight_runs)
+                ]
                 cold_result = runner.run_once(key, warmup=False)
                 warm = []
                 for idx in range(args.iterations):
@@ -184,9 +206,13 @@ def main() -> None:
                             "hnsf_weights": str(args.hnsf_weights),
                             "compute_units": args.compute_units,
                             "batch_mode": True,
+                            "preflight_discarded_runs": args.preflight_runs,
+                            "use_exact_duration_models": args.use_exact_duration_models,
+                            "raw_preflight_results": preflight,
                             "bucket_used": warm[-1].get("bucket_used"),
                             "spotcheck_wav": str(spotcheck_dir / f"{key}.wav"),
                             "raw_last_result": warm[-1],
+                            "raw_warm_results": warm,
                         },
                     )
                 )
@@ -209,6 +235,8 @@ def main() -> None:
                             "hnsf_weights": str(args.hnsf_weights),
                             "compute_units": args.compute_units,
                             "batch_mode": True,
+                            "preflight_discarded_runs": args.preflight_runs,
+                            "use_exact_duration_models": args.use_exact_duration_models,
                             "spotcheck_dir": str(spotcheck_dir),
                         },
                         error=f"{type(exc).__name__}: {exc}",
@@ -229,6 +257,8 @@ def main() -> None:
             "hnsf_weights": str(args.hnsf_weights),
             "compute_units": args.compute_units,
             "batch_mode": True,
+            "preflight_discarded_runs": args.preflight_runs,
+            "use_exact_duration_models": args.use_exact_duration_models,
             "spotcheck_dir": str(spotcheck_dir),
         },
     )
