@@ -26,8 +26,8 @@ These numbers do **not** include:
 ## External Bakeoff: surgical Core ML vs MLX and iOS/Core ML Kokoro
 
 **Collected:** 2026-06-05
-**Status:** Phase 2 collection complete; signed iPhone execution ingested;
-waveform sanity complete; human listening still pending.
+**Status:** Complete; signed iPhone execution ingested, waveform sanity passed,
+human listening decisions recorded, and final completion verifier passed.
 
 This bakeoff compares the current Swift + Core ML Config F reference against
 popular Apple Silicon Kokoro implementations:
@@ -314,20 +314,24 @@ Studio 3s run, with the conversion-validation caveat above.
 Every successful cell wrote a mono 24 kHz spot-check WAV and passed the
 lightweight waveform sanity gate: duration, RMS, active fraction,
 zero-crossing rate, speech-band energy, clipping, sample rate, and channel
-count. Human listening is still required before interpreting any latency cell
-as quality parity. The reproducible listening checklist can be generated with
+count. Human listening is recorded in
+`outputs/external_bakeoff/listening/external_bakeoff_listening_decisions.csv`;
+the operator listened to all successful rows and marked all 57 successful audio
+rows `pass` because the audio was valid. The reproducible listening checklist
+can be generated with
 `python scripts/external_bakeoff/create_listening_review.py`; it writes
 Markdown, local HTML, and a fillable
 `external_bakeoff_listening_decisions.csv` under
 `outputs/external_bakeoff/listening/` using only the collected Kokoro TTS WAVs.
-The CSV intentionally leaves `human_decision` blank until the operator listens.
+The CSV intentionally leaves `human_decision` blank until the operator listens;
+regeneration preserves existing decisions by default.
 After filling the CSV, run
 `python scripts/external_bakeoff/validate_listening_decisions.py`; it must pass
 before any latency cell is interpreted as quality parity.
 The overall plan-completion check is
-`python scripts/external_bakeoff/verify_external_bakeoff_completion.py`. The
-signed iPhone result is now ingested; the remaining final gate is the human
-listening decision CSV.
+`python scripts/external_bakeoff/verify_external_bakeoff_completion.py`; it
+passes with `result_record_count=65`, `ios_preflight_ok=true`, and
+`decisions={'pass': 57}`.
 
 Known caveats:
 
