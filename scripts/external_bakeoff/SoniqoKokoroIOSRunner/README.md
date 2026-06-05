@@ -7,9 +7,10 @@ dependencies that are not part of the Core ML TTS timing boundary.
 ## Generate
 
 Set `SPEECH_SWIFT_PATH` to a pinned `soniqo/speech-swift` clone and generate the
-project:
+runtime manifest source plus the project:
 
 ```bash
+python scripts/external_bakeoff/generate_ios_runner_manifest.py
 cd scripts/external_bakeoff/SoniqoKokoroIOSRunner
 SPEECH_SWIFT_PATH=/tmp/kokoro-external-bakeoff/speech-swift xcodegen generate
 ```
@@ -31,6 +32,9 @@ xcodebuild -project SoniqoKokoroIOSRunner.xcodeproj \
   -allowProvisioningUpdates build
 ```
 
-The app loads `KokoroTTSModel.fromPretrained(computeUnits: .all)`, synthesizes a
-single `af_heart` input, and renders cold/warm wall time plus sample count on
-screen. Phase 2 should replace the fixed text with a manifest-driven loop.
+The app loads `KokoroTTSModel.fromPretrained(computeUnits: .all)`, synthesizes
+the five runtime bucket inputs from
+`outputs/external_bakeoff/runtime_input_manifest.json`, and renders JSON with
+one cold call plus five warm calls per bucket. It remains Kokoro TTS only:
+Whisper, ASR, VAD, playback, and the full Soniqo echo demo are outside the
+measurement path.

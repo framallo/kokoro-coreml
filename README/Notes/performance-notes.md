@@ -84,9 +84,13 @@ The connected iPhone 12 Pro is visible to CoreDevice as `Webcam`
 (`F383FC46-FD64-5346-AEC6-59E3E2F8C9CA`, model `iPhone13,3`) and is available
 and paired. No iPhone result is included in the table because physical-device
 execution is blocked by local signing state: `security find-identity -v -p
-codesigning` reports `0 valid identities found`. The minimal Soniqo Kokoro iOS
-runner remains in `scripts/external_bakeoff/SoniqoKokoroIOSRunner/` for the
-next signed-device pass.
+codesigning` reports `0 valid identities found`, and `xcodebuild` reached the
+target signing step before failing with `requires a development team`. The
+minimal Soniqo Kokoro iOS runner remains in
+`scripts/external_bakeoff/SoniqoKokoroIOSRunner/` for the next signed-device
+pass. It now uses the shared runtime manifest (`3s`, `7s`, `10s`, `15s`,
+`30s`) and emits one cold call plus five warmed inference calls per bucket with
+observed-duration RTF.
 
 Whisper, ASR, VAD, and echo-demo dependencies are not part of this bakeoff
 boundary. The iOS runner is intentionally Kokoro TTS only.

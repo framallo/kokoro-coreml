@@ -325,9 +325,14 @@ enabled, but device app execution is gated on local signing setup:
 reported `0 valid identities found`. The live device check on 2026-06-05
 identified the phone as `Webcam`, identifier
 `F383FC46-FD64-5346-AEC6-59E3E2F8C9CA`, model `iPhone13,3`, state
-`available (paired)`. The iOS runner remains deliberately Kokoro-only; Whisper,
-ASR, VAD, and the full Soniqo echo-demo dependency graph are excluded from the
-measurement path.
+`available (paired)`. The Soniqo iOS runner is now manifest-driven across the
+runtime buckets (`3s`, `7s`, `10s`, `15s`, `30s`) and reports one cold call plus
+five warmed calls per bucket with observed-duration RTF. A physical-device
+`xcodebuild` against that iPhone reached signing and failed because the target
+requires a development team; the local keychain has no valid code-signing
+identity, so no iPhone inference result exists yet. The iOS runner remains
+deliberately Kokoro-only; Whisper, ASR, VAD, and the full Soniqo echo-demo
+dependency graph are excluded from the measurement path.
 
 **Current collection note:** M2 Studio, irvine-m1, and M2 Air now have
 schema-valid JSON for Config F, MLX, Soniqo, and laishere, and every successful
