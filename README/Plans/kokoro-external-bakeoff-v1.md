@@ -379,18 +379,18 @@ it could reproduce the benchmark from the adapter scripts and requirements files
 ### External
 
 - [Blaizzy/mlx-audio](https://github.com/Blaizzy/mlx-audio)
-- [gabrimatic/kokoro-mlx](https://github.com/gabrimatic/kokoro-mlx)
-- [mlalma/kokoro-ios](https://github.com/mlalma/kokoro-ios) (stretch goal)
+- [mlalma/kokoro-ios](https://github.com/mlalma/kokoro-ios)
 
 ## Files to Create
 
 | File | Change Type | Notes |
 | --- | --- | --- |
-| `scripts/external_bakeoff/run_mlx_audio.py` | Create | Blaizzy adapter |
-| `scripts/external_bakeoff/run_kokoro_mlx.py` | Create | gabrimatic adapter |
+| `scripts/external_bakeoff/run_mlx_audio.py` | Create | Blaizzy adapter (Python) |
+| `scripts/external_bakeoff/run_kokoro_ios.py` | Create | mlalma driver (calls Swift CLI) |
+| `scripts/external_bakeoff/KokoroIOSBench/Package.swift` | Create | Swift package wrapping kokoro-ios |
+| `scripts/external_bakeoff/KokoroIOSBench/Sources/main.swift` | Create | Swift timing CLI |
 | `scripts/external_bakeoff/summarize_external.py` | Create | table generator |
-| `scripts/external_bakeoff/requirements_mlx_audio.txt` | Create | pinned deps |
-| `scripts/external_bakeoff/requirements_kokoro_mlx.txt` | Create | pinned deps |
+| `scripts/external_bakeoff/requirements_mlx_audio.txt` | Create | pinned pip deps |
 | `README/Notes/performance-notes.md` | Modify | add external section |
 | `README/Plans/kokoro-external-bakeoff-v1.md` | Create | this plan |
 
