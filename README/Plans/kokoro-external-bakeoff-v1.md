@@ -3,9 +3,9 @@
 **Date:** 2026-06-05
 **Status:** External result section and consolidated platform table written;
 compile-contaminated 30s Config F cells replaced with warmed-inference reruns;
-local Config F, MLX, and Soniqo powermetrics captured; human listening, signed
-iPhone execution, and laishere backup hardware-placement traces remain before
-this plan can be marked complete
+local Config F, MLX, Soniqo, and laishere powermetrics captured; human
+listening and signed iPhone execution remain before this plan can be marked
+complete
 
 > Internal bakeoff methodology lives in `README/Plans/kokoro-bakeoff-v2.md`.
 > This plan extends that methodology to external Apple Silicon Kokoro
@@ -80,7 +80,7 @@ TTS.cpp/GGML, ONNX-only variants, and non-Kokoro engines.
 - [ ] Time the same boundary: immediately before synthesis call / CLI command
       to after full PCM audio is materialized in memory, excluding file writes.
 - [x] Record cold first-call latency separately from warm median latency.
-- [ ] Capture hardware-placement evidence: MLX GPU activity for MLX competitors
+- [x] Capture hardware-placement evidence: MLX GPU activity for MLX competitors
       and Core ML/ANE evidence for Core ML competitors and our Config F.
 - [ ] Spot-check audio quality and voice/prosody parity before interpreting
       speed as time-to-parity.
@@ -347,7 +347,8 @@ exists for a post-prime 3s Config F debug run, and a matching local MLX 7s
 powermetrics capture exists for the pinned `mlx-audio` path. These are placement
 evidence only, not replacement latency cells, and they do not close the
 laishere backup placement requirement. A local Soniqo 3s powermetrics capture
-also exists for the primary iOS/Core ML comparator.
+also exists for the primary iOS/Core ML comparator, and a local laishere 3s
+powermetrics capture exists for the long-bucket backup Core ML chain.
 
 **Tasks:**
 
@@ -381,8 +382,8 @@ successful runtime bucket, provenance, and durable spot-check WAVs.
 Framework/runtime placement is documented. One local Config F privileged
 `powermetrics` capture and one local MLX privileged `powermetrics` capture
 exist. One local Soniqo privileged `powermetrics` capture exists for the primary
-iOS/Core ML comparator. Privileged laishere backup residency traces remain
-pending.
+iOS/Core ML comparator. One local laishere privileged `powermetrics` capture
+exists for the backup Core ML chain.
 
 ---
 
@@ -453,7 +454,7 @@ pending before publication-grade time-to-parity claims.
 - [ ] Each impl x machine x input has cold latency and N=5 warm calls.
 - [ ] Timing boundaries are explicitly equivalent.
 - [x] `af_heart` or documented substitute is used for every implementation.
-- [ ] Hardware placement is documented for every implementation family.
+- [x] Hardware placement is documented for every implementation family.
 - [x] No production worker disruption is observed.
 - [x] Adapter scripts and pinned install docs are checked in.
 - [ ] Quality spot-check is documented before interpreting speedups.

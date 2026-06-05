@@ -27,8 +27,7 @@ These numbers do **not** include:
 
 **Collected:** 2026-06-05
 **Status:** Phase 2 collection complete; waveform sanity complete; human
-listening, signed iPhone execution, and laishere backup placement still
-pending.
+listening and signed iPhone execution still pending.
 
 This bakeoff compares the current Swift + Core ML Config F reference against
 popular Apple Silicon Kokoro implementations:
@@ -221,7 +220,7 @@ faster. Values below `1.0x` mean the comparator was faster.
 
 This bakeoff records framework and compute-unit evidence. Local privileged
 `powermetrics` captures were added after the primary latency collection for
-Config F, MLX, and Soniqo placement context:
+Config F, MLX, Soniqo, and laishere placement context:
 
 - Config F ran the Swift `kokoro-bench` path over Core ML packages with
   `--compute-units all` in the collected external table. The result records
@@ -267,6 +266,19 @@ Config F, MLX, and Soniqo placement context:
   120 samples with min/median/max `31.55/50.465/98.15%`.
 - laishere ran seven `.mlpackage` Core ML models converted from its public repo.
   Its timed boundary is the Core ML chain only.
+- Local M2 Studio laishere placement check: the pinned
+  `laishere/kokoro-coreml` checkout at
+  `484907db6a8347a6afb6e7b86850ea2878c6a3fb` was reconverted under a disposable
+  Python venv. Conversion produced all seven `.mlpackage` files but its own
+  end-to-end validation failed in `KokoroPostAlbert` with a Core ML
+  dynamic-shape BNNS/Espresso error under this newer local stack. The generated
+  packages still ran through the bakeoff adapter on the 3s input, so a placement
+  trace was captured with thirty recorded warm calls while `powermetrics`
+  sampled every 500 ms. The recorded JSON is ignored at
+  `outputs/external_bakeoff/placement/results_laishere_m2-studio_3s_warm_placement.json`.
+  Median warm time was `0.091534s` for a 2.775s output. `ANE Power` had 97
+  samples with min/median/max `0/0/0 mW`, while `GPU HW active residency` had 97
+  samples with min/median/max `38.54/54.23/94.25%`.
 
 The Config F capture is not ANE-residency proof for the paper thesis. It is the
 opposite for the captured local path: Core ML was allowed to use all compute
@@ -276,8 +288,8 @@ runtime keeps the ANE-eligible decoder-pre island separate and deliberately
 keeps the ANE-hostile generator on CPU/GPU. The MLX capture is useful GPU
 evidence for the primary MLX competitor. The Soniqo capture proves the primary
 iOS/Core ML comparator was also not ANE-resident on this M2 Studio run despite
-`.all`. Privileged placement traces are still missing for the laishere backup
-Core ML chain.
+`.all`. The laishere backup trace likewise showed no ANE power on this local M2
+Studio 3s run, with the conversion-validation caveat above.
 
 ### Quality Caveats
 

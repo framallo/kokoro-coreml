@@ -460,10 +460,10 @@ metrics but are 5.0s clips for 7s, 10s, 15s, and 30s manifest inputs.
 ## Local Hardware-Placement Capture
 
 After the warmed 30s correction, local M2 Studio `powermetrics` captures were
-collected for Config F, MLX, and Soniqo placement context. The first attempted
-Config F 30s trace entered a long padded `t512` Core ML compile/load window and
-was stopped before result JSON; it remains compile-window evidence only and is
-not an inference-speed cell.
+collected for Config F, MLX, Soniqo, and laishere placement context. The first
+attempted Config F 30s trace entered a long padded `t512` Core ML compile/load
+window and was stopped before result JSON; it remains compile-window evidence
+only and is not an inference-speed cell.
 
 The usable Config F capture ran the debug `kokoro-bench` binary on the 3s input with
 five discarded preflight calls and forty recorded warm calls, while
@@ -540,6 +540,34 @@ replacement latency cell. On this M2 Studio run, Soniqo used Core ML with
 `computeUnits: .all` but did not show ANE power draw. Fleet health remained
 passing after the Soniqo capture (`claimedFresh=0`, `freshWorkerCount=3`,
 canary passing), though queue depth had risen to 8.
+
+The laishere capture restored the pinned `laishere/kokoro-coreml` checkout at
+`484907db6a8347a6afb6e7b86850ea2878c6a3fb`, installed its Python dependencies
+into the ignored venv, and regenerated the seven `.mlpackage` files locally.
+Conversion produced all packages but its own E2E validation failed in
+`KokoroPostAlbert` with a Core ML dynamic-shape BNNS/Espresso error under the
+newer local stack (`coremltools 9.0`, `torch 2.10.0`). The generated packages
+still ran through `run_laishere_kokoro_coreml.py` for the 3s input, so a
+placement trace was captured with thirty recorded warm calls. Artifacts are
+ignored under `outputs/external_bakeoff/placement/`:
+
+- `results_laishere_m2-studio_3s_warm_placement.json`
+- `laishere_m2-studio_3s_warm_powermetrics.txt`
+
+Summary:
+
+| Signal | N | Min | Median | Max |
+| --- | ---: | ---: | ---: | ---: |
+| Warm wall time | 30 | 0.083475s | 0.091534s | 0.105189s |
+| CPU Power | 97 | 4758 mW | 12886 mW | 30393 mW |
+| GPU Power | 194 | 540 mW | 809 mW | 4836 mW |
+| ANE Power | 97 | 0 mW | 0 mW | 0 mW |
+| GPU HW active residency | 97 | 38.54% | 54.23% | 94.25% |
+
+This is placement evidence for the laishere backup Core ML chain, not a
+replacement latency cell. Fleet health remained passing after the laishere
+capture (`queueDepth=0`, `claimedFresh=5`, `freshWorkerCount=3`, canary
+passing).
 
 ### M2 Studio Quality Probe
 
@@ -622,6 +650,3 @@ canary passing), though queue depth had risen to 8.
 - Decide how the paper table presents Soniqo's high-adoption 5s-only result
   beside laishere's lower-adoption long-bucket Core ML backup.
 - Listen to all `needs_listening` WAVs before making quality-parity claims.
-- Capture hardware-placement evidence for the laishere Core ML backup path.
-- Write the external-competitor result section in
-  `README/Notes/performance-notes.md`.
