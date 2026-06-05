@@ -3,8 +3,8 @@
 **Date:** 2026-06-05
 **Plan:** `README/Plans/kokoro-external-bakeoff-v1.md`
 **Status:** M2 Studio local collection rerun with durable spot-check WAVs;
-long-bucket Core ML backup collected; m2-air Config F and MLX collected;
-fleet-wide Phase 2 remains incomplete.
+long-bucket Core ML backup collected; m2-air Config F, MLX, and Soniqo
+collected; fleet-wide Phase 2 remains incomplete.
 
 ## M2 Studio Precheck
 
@@ -174,13 +174,14 @@ materialized.
 `m2-air` was prepared from a disposable checkout at
 `/tmp/kokoro-coreml-bakeoff-run`, using that host's existing Core ML artifacts
 from `/Users/mattmireles/Documents/GitHub/kokoro-coreml/coreml`. Before the
-run, `pmset -g therm` reported no thermal or performance warning. Config F and
-MLX completed and were copied back to:
+run, `pmset -g therm` reported no thermal or performance warning. Config F,
+MLX, and Soniqo completed and were copied back to:
 
 - `outputs/external_bakeoff/results_config_f_reference_m2-air.json`
 - `outputs/external_bakeoff/results_mlx_audio_m2-air.json`
+- `outputs/external_bakeoff/results_soniqo_speech_swift_kokoro_m2-air.json`
 
-Both files validate against `scripts/external_bakeoff/schema.py`, and every
+All three files validate against `scripts/external_bakeoff/schema.py`, and every
 successful cell has a mono 24 kHz spot-check WAV.
 
 ### M2 Air Config F
@@ -216,8 +217,25 @@ The 3s error matched the M2 Studio failure:
 ValueError: [broadcast_shapes] Shapes (1,67200,1) and (1,67500,9) cannot be broadcast.
 ```
 
-Soniqo and laishere were not started on `m2-air` in this pass because the
-botnet health check later showed active production pressure.
+### M2 Air Soniqo
+
+`soniqo/speech-swift` ran from pinned SHA
+`0d09a2ed5464c7c94cf4545be59043c21f8775ea`. The first retry was required
+because SwiftPM attempted to use the remote keychain credential helper while
+downloading Soniqo's public `SpeechCore.xcframework` artifact; rerunning with
+the Git credential helper disabled forced anonymous access and completed.
+
+| Input | Status | Cold s | Warm median s | Warm N | Observed s | Caveat |
+| --- | --- | ---: | ---: | ---: | ---: | --- |
+| 3s | ok | 1.189790 | 1.097402 | 5 | 2.700 | - |
+| 7s | ok | 1.210679 | 1.135835 | 5 | 5.000 | public 5s artifact |
+| 10s | ok | 1.237192 | 1.122956 | 5 | 5.000 | public 5s artifact |
+| 15s | ok | 1.273711 | 1.125471 | 5 | 5.000 | public 5s artifact |
+| 30s | ok | 1.233093 | 1.123540 | 5 | 5.000 | public 5s artifact |
+
+laishere was not started on `m2-air` in this pass because it requires a heavier
+Core ML conversion/build path, and the no-disruption rule still requires a
+fresh botnet health check before occupying the production host.
 
 ## Irvine M1 Aborted Collection
 
@@ -324,6 +342,11 @@ metrics but are 5.0s clips for 7s, 10s, 15s, and 30s manifest inputs.
 | MLX | 10s | needs_listening | 9.600 | 2346.2 |
 | MLX | 15s | needs_listening | 13.900 | 4788.8 |
 | MLX | 30s | needs_listening | 27.375 | 3114.0 |
+| Soniqo | 3s | needs_listening | 2.700 | 4483.9 |
+| Soniqo | 7s | needs_listening | 5.000 | 5140.1 |
+| Soniqo | 10s | needs_listening | 5.000 | 4244.0 |
+| Soniqo | 15s | needs_listening | 5.000 | 4911.8 |
+| Soniqo | 30s | needs_listening | 5.000 | 5331.4 |
 
 ## Remaining Phase 2 Work
 
@@ -331,8 +354,7 @@ metrics but are 5.0s clips for 7s, 10s, 15s, and 30s manifest inputs.
   requires an alternate, predeclared 3s input.
 - Decide how the paper table presents Soniqo's high-adoption 5s-only result
   beside laishere's lower-adoption long-bucket Core ML backup.
-- Finish Soniqo and laishere collection on `m2-air` after production pressure
-  clears.
+- Finish laishere collection on `m2-air` after production pressure clears.
 - Re-run `irvine-m1` during a lower-traffic window with stdout/stderr redirected
   from the start.
 - Listen to all `needs_listening` WAVs before making quality-parity claims.
