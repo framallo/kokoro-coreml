@@ -4,8 +4,8 @@
 **Plan:** `README/Plans/kokoro-external-bakeoff-v1.md`
 **Status:** M2 Studio, m2-air, and irvine-m1 now have Config F, MLX, Soniqo,
 and laishere JSON plus durable spot-check WAVs for every successful result
-cell; Phase 2 collection is complete, with listening and hardware-placement
-evidence still pending.
+cell; Phase 2 collection is complete, local hardware-placement evidence is
+captured, and human listening evidence is still pending.
 
 ## M2 Studio Precheck
 

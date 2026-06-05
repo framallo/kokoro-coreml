@@ -441,8 +441,8 @@ listening is still pending, so no speed row is interpreted as quality parity.
 
 **Verification:** `performance-notes.md` contains enough information for a
 reader to reproduce the comparison from clean clones and pinned versions. It
-also states that human listening and full privileged placement traces remain
-pending before publication-grade time-to-parity claims.
+also states that human listening and signed iPhone execution remain pending
+before publication-grade time-to-parity claims.
 
 ## Success Criteria
 
