@@ -3,7 +3,7 @@
 **Date:** 2026-06-05
 **Plan:** `README/Plans/kokoro-external-bakeoff-v1.md`
 **Status:** M2 Studio local collection rerun with durable spot-check WAVs;
-long-bucket Core ML backup collected; m2-air Config F, MLX, and Soniqo
+long-bucket Core ML backup collected; m2-air Config F, MLX, Soniqo, and laishere
 collected; fleet-wide Phase 2 remains incomplete.
 
 ## M2 Studio Precheck
@@ -175,13 +175,14 @@ materialized.
 `/tmp/kokoro-coreml-bakeoff-run`, using that host's existing Core ML artifacts
 from `/Users/mattmireles/Documents/GitHub/kokoro-coreml/coreml`. Before the
 run, `pmset -g therm` reported no thermal or performance warning. Config F,
-MLX, and Soniqo completed and were copied back to:
+MLX, Soniqo, and laishere completed and were copied back to:
 
 - `outputs/external_bakeoff/results_config_f_reference_m2-air.json`
 - `outputs/external_bakeoff/results_mlx_audio_m2-air.json`
 - `outputs/external_bakeoff/results_soniqo_speech_swift_kokoro_m2-air.json`
+- `outputs/external_bakeoff/results_laishere_kokoro_coreml_m2-air.json`
 
-All three files validate against `scripts/external_bakeoff/schema.py`, and every
+All four files validate against `scripts/external_bakeoff/schema.py`, and every
 successful cell has a mono 24 kHz spot-check WAV.
 
 ### M2 Air Config F
@@ -233,9 +234,32 @@ the Git credential helper disabled forced anonymous access and completed.
 | 15s | ok | 1.273711 | 1.125471 | 5 | 5.000 | public 5s artifact |
 | 30s | ok | 1.233093 | 1.123540 | 5 | 5.000 | public 5s artifact |
 
-laishere was not started on `m2-air` in this pass because it requires a heavier
-Core ML conversion/build path, and the no-disruption rule still requires a
-fresh botnet health check before occupying the production host.
+### M2 Air laishere
+
+`laishere/kokoro-coreml` ran from pinned SHA
+`484907db6a8347a6afb6e7b86850ea2878c6a3fb`. M2 Air did not have `uv`, so a
+disposable Python 3.12 venv was created under `/tmp/kokoro-external-bakeoff`.
+The repo's editable install failed because setuptools rejected the flat
+top-level `assets` and `iOSDemo` layout, so the declared dependencies were
+installed directly. Conversion used:
+
+```bash
+PYTORCH_ENABLE_MPS_FALLBACK=1 \
+  /tmp/kokoro-external-bakeoff/laishere-venv/bin/python \
+  convert.py --max-frames 2000
+```
+
+The conversion produced all seven packages and reported
+`mel_corr=0.993667`. Non-fatal caveats: coremltools warned that scikit-learn
+`1.9.0` and torch `2.12.0` are newer than its tested range.
+
+| Input | Status | Cold s | Warm median s | Warm N | Observed s | T_a |
+| --- | --- | ---: | ---: | ---: | ---: | ---: |
+| 3s | ok | 0.289868 | 0.142010 | 5 | 2.775 | 111 |
+| 7s | ok | 0.330730 | 0.316934 | 5 | 6.825 | 273 |
+| 10s | ok | 0.710552 | 0.450170 | 5 | 9.650 | 386 |
+| 15s | ok | 0.746766 | 0.657251 | 5 | 13.925 | 557 |
+| 30s | ok | 1.616250 | 1.476442 | 5 | 27.350 | 1094 |
 
 ## Irvine M1 Aborted Collection
 
@@ -347,6 +371,11 @@ metrics but are 5.0s clips for 7s, 10s, 15s, and 30s manifest inputs.
 | Soniqo | 10s | needs_listening | 5.000 | 4244.0 |
 | Soniqo | 15s | needs_listening | 5.000 | 4911.8 |
 | Soniqo | 30s | needs_listening | 5.000 | 5331.4 |
+| laishere | 3s | needs_listening | 2.775 | 4606.1 |
+| laishere | 7s | needs_listening | 6.825 | 3372.6 |
+| laishere | 10s | needs_listening | 9.650 | 3060.5 |
+| laishere | 15s | needs_listening | 13.925 | 4919.3 |
+| laishere | 30s | needs_listening | 27.350 | 3570.8 |
 
 ## Remaining Phase 2 Work
 
@@ -354,7 +383,6 @@ metrics but are 5.0s clips for 7s, 10s, 15s, and 30s manifest inputs.
   requires an alternate, predeclared 3s input.
 - Decide how the paper table presents Soniqo's high-adoption 5s-only result
   beside laishere's lower-adoption long-bucket Core ML backup.
-- Finish laishere collection on `m2-air` after production pressure clears.
 - Re-run `irvine-m1` during a lower-traffic window with stdout/stderr redirected
   from the start.
 - Listen to all `needs_listening` WAVs before making quality-parity claims.
