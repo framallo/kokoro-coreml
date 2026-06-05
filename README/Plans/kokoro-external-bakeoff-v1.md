@@ -12,11 +12,12 @@
 
 Run a latency comparison of our Swift+CoreML pipeline (Config F, RTF ~0.017 on
 M2 Ultra) against the two leading external Kokoro-on-Apple-Silicon
-implementations — **Blaizzy/mlx-audio** and **gabrimatic/kokoro-mlx** — across
-all three botnet fleet machines. Produce a head-to-head RTF table per machine,
-audio quality spot-check, and a performance-notes entry. The external
-implementations use MLX (GPU path), so we expect significantly higher RTF; the
-goal is to establish the exact gap with publication-grade methodology.
+implementations — **Blaizzy/mlx-audio** (7k stars, MLX/GPU) and
+**mlalma/kokoro-ios** (256 stars, Swift/CoreML) — across all three botnet fleet
+machines. Produce a head-to-head RTF table per machine, audio quality
+spot-check, and a performance-notes entry. mlx-audio uses the GPU path so we
+expect significantly higher RTF; kokoro-ios uses CoreML like us and will reveal
+the implementation quality gap within the same hardware path.
 
 ## Problem Statement
 
@@ -30,22 +31,19 @@ goal is to establish the exact gap with publication-grade methodology.
 
 ## Competitor Inventory
 
-| Handle | Repo | Framework | HW Target | Notes |
-| --- | --- | --- | --- | --- |
-| **mlx-audio** | github.com/Blaizzy/mlx-audio | MLX | GPU (Apple Silicon) | Broad TTS library; Kokoro is one of several engines |
-| **kokoro-mlx** | github.com/gabrimatic/kokoro-mlx | MLX | GPU (Apple Silicon) | Kokoro-only; 54 voices; no PyTorch dep |
-| *kokoro-ios* | github.com/mlalma/kokoro-ios | Swift/CoreML | ANE/GPU | Native Swift, similar architecture to ours — stretch goal only |
+| Handle | Repo | Stars | Framework | HW Target | Notes |
+| --- | --- | ---: | --- | --- | --- |
+| **mlx-audio** | github.com/Blaizzy/mlx-audio | 7,186 | MLX | GPU (Apple Silicon) | Broad TTS/STT/STS library; actively maintained; Kokoro is one engine |
+| **kokoro-ios** | github.com/mlalma/kokoro-ios | 256 | Swift/CoreML | ANE/GPU | Native Swift; same hardware path as ours; reveals impl quality gap |
 
-> **Note:** `kokoro-ios` is architecturally close to ours and may not be a fair
-> competitive comparison; include only if time allows. TTS.cpp (GGML) and
-> pykokoro (ONNX) are not Apple Silicon–optimized and are explicitly out of
-> scope.
+**Cut:** gabrimatic/kokoro-mlx (6 stars, 1 fork — not community-relevant).
+**Cut:** TTS.cpp (GGML, 241 stars, stalled Oct 2025), pykokoro (ONNX, 4 stars) — not Apple Silicon–optimized.
 
 ## Goals and Non-Goals
 
 ### Goals
 
-- [ ] Establish median end-to-end RTF for mlx-audio and kokoro-mlx on each of
+- [ ] Establish median end-to-end RTF for mlx-audio and kokoro-ios on each of
       the three fleet machines (m2-studio, irvine-m1, m2-air).
 - [ ] Use identical input texts and voice (af_heart or closest equivalent) as
       our internal bakeoff inputs (3s / 7s / 15s / 30s canonical strings).
@@ -68,8 +66,8 @@ goal is to establish the exact gap with publication-grade methodology.
 
 ## Scope and Constraints
 
-- **Scope:** Three machines × two (or three) external impls × four input
-  lengths × N=5 warm iterations = 120–180 timed synthesis calls.
+- **Scope:** Three machines × two external impls × four input lengths × N=5
+  warm iterations = 120 timed synthesis calls.
 - **Constraints:**
   - Each external impl must live in a **separate, isolated uv virtualenv**
     that does not touch the production `botnet` worker env or our `uv.lock`.
@@ -138,18 +136,22 @@ input_manifest.json
         |
         v
 scripts/external_bakeoff/
-  run_mlx_audio.py        ← Blaizzy/mlx-audio adapter
-  run_kokoro_mlx.py       ← gabrimatic/kokoro-mlx adapter
+  run_mlx_audio.py        ← Blaizzy/mlx-audio adapter (Python)
+  run_kokoro_ios.py       ← mlalma/kokoro-ios driver (calls Swift CLI)
+  KokoroIOSBench/         ← small Swift package wrapping kokoro-ios
   summarize_external.py   ← read JSONs, emit RTF table
         |
         v
 outputs/external_bakeoff/
   results_mlx_audio_<machine_id>.json
-  results_kokoro_mlx_<machine_id>.json
+  results_kokoro_ios_<machine_id>.json
         |
         v
 README/Notes/performance-notes.md   ← new external-competitor section
 ```
+
+> kokoro-ios is a Swift package, not a Python library — it gets a thin Swift
+> CLI wrapper (like our `kokoro-bench`) rather than a Python pip install.
 
 ## Implementation Phases
 
@@ -168,17 +170,21 @@ writing any adapter, so we time the right thing and pick the right voice.
       uv pip install mlx-audio
       python -c "import mlx_audio; help(mlx_audio)"
       ```
-- [ ] Do the same for kokoro-mlx.
+- [ ] Audit mlalma/kokoro-ios: clone the repo, read its Swift API surface
+      (`Sources/`), understand how to invoke synthesis and what it returns.
+      Confirm it compiles on macOS (not iOS-only target). Identify the voice
+      selection mechanism.
       ```bash
-      uv venv .venv-kokoro-mlx && source .venv-kokoro-mlx/bin/activate
-      uv pip install kokoro-mlx
+      git clone https://github.com/mlalma/kokoro-ios /tmp/kokoro-ios
+      ls /tmp/kokoro-ios/Sources/
       ```
 - [ ] Confirm which voice identifier corresponds to `af_heart` in each impl,
       or document the closest substitute.
-- [ ] Confirm that both impls run their compute on GPU (not CPU fallback) on
-      Apple Silicon — check with `powermetrics` or `sudo powermetrics -i 1000
-      --samplers gpu_power | grep GPU` during a synthesis call.
-- [ ] Record the exact library versions installed for provenance.
+- [ ] For mlx-audio: confirm GPU (not CPU fallback) via `sudo powermetrics
+      -i 1000 --samplers gpu_power | grep GPU` during a synthesis call.
+- [ ] For kokoro-ios: confirm ANE/GPU participation via `powermetrics` or
+      Instruments during a test synthesis call.
+- [ ] Record exact versions (pip freeze for mlx-audio; git SHA for kokoro-ios).
 
 **Verification:** Can synthesize one sentence with each impl from the operator
 Mac. Timing boundary is understood. Voice choice is documented.
@@ -202,9 +208,18 @@ we can report. Created in `scripts/external_bakeoff/`.
     per-iteration wall times.
   - Writes `outputs/external_bakeoff/results_mlx_audio_<machine_id>.json`.
 
-- [ ] Create `scripts/external_bakeoff/run_kokoro_mlx.py`:
-  - Same structure as mlx-audio adapter.
-  - Writes `outputs/external_bakeoff/results_kokoro_mlx_<machine_id>.json`.
+- [ ] Create `scripts/external_bakeoff/KokoroIOSBench/` — a minimal Swift
+  package with kokoro-ios as a dependency:
+  - `Package.swift` declaring the kokoro-ios dependency at a pinned git SHA.
+  - `Sources/main.swift`: reads `--input-key` (3s/7s/15s/30s) and text from
+    stdin, runs 1 warmup + 5 timed synthesis calls, prints JSON timing to
+    stdout. Same interface pattern as `swift/Sources/KokoroBenchmark/main.swift`.
+  - Build: `swift build -c release --product KokoroIOSBench`.
+
+- [ ] Create `scripts/external_bakeoff/run_kokoro_ios.py`:
+  - Thin Python driver that invokes the `KokoroIOSBench` binary for each
+    input text, collects stdout JSON, aggregates into the standard result file.
+  - Writes `outputs/external_bakeoff/results_kokoro_ios_<machine_id>.json`.
 
 - [ ] Create `scripts/external_bakeoff/summarize_external.py`:
   - Reads all result JSONs in `outputs/external_bakeoff/`.
@@ -212,8 +227,8 @@ we can report. Created in `scripts/external_bakeoff/`.
   - Include our Config F numbers from bakeoff-results-v2.md as a hardcoded
     reference row (no re-running).
 
-- [ ] Create `scripts/external_bakeoff/requirements_mlx_audio.txt` and
-      `requirements_kokoro_mlx.txt` with pinned versions from Phase 0.
+- [ ] Create `scripts/external_bakeoff/requirements_mlx_audio.txt` with
+      pinned versions from Phase 0.
 
 **Verification:** Run both adapter scripts locally on the operator Mac.
 Both produce valid JSON. Summarizer emits a readable markdown table.
@@ -235,7 +250,8 @@ Both produce valid JSON. Summarizer emits a readable markdown table.
   - Run both adapter scripts with the correct `--machine-id`.
   - `scp` result JSON files back to the operator Mac into
     `outputs/external_bakeoff/`.
-  - Remove the venvs after collection (`rm -rf .venv-mlx-*`).
+  - Remove the venvs and build artifacts after collection
+    (`rm -rf .venv-mlx-audio scripts/external_bakeoff/KokoroIOSBench/.build`).
 
 - [ ] Verify no production worker disruption: check worker freshness after each
       machine's run with `pnpm check:tts-worker-health`.
@@ -247,8 +263,8 @@ sequentially, with a 60s cooldown between runs. Do not run the external
 bakeoff on m2-air while its production Kokoro worker is active.
 
 **Verification:** 6 result JSON files exist in `outputs/external_bakeoff/`
-(2 impls × 3 machines). Each has 5 timing entries per input length. No
-production worker downtime during the window.
+(mlx-audio + kokoro-ios × 3 machines). Each has 5 timing entries per input
+length. No production worker downtime during the window.
 
 ---
 
@@ -268,9 +284,8 @@ so the comparison is fair. We are not running PESQ/MCD — listening is enough.
       phonemes), flag it in the results note — a speed advantage on garbage
       output is not a fair comparison.
 
-**Verification:** Short note written: "mlx-audio voice X sounds comparable to
-af_heart" or "kokoro-mlx voice Y has noticeably different prosody — RTF
-comparison is still valid but quality caveat applies."
+**Verification:** Short note written for each impl confirming voice parity or
+documenting any prosody caveat.
 
 ---
 
@@ -283,7 +298,7 @@ external-competitor comparison, following the existing note style.
 
 - [ ] Run `summarize_external.py` to produce the final markdown table.
 - [ ] Add a section to `performance-notes.md`:
-  - Section title: "External Bakeoff: CoreML vs MLX implementations"
+  - Section title: "External Bakeoff: our CoreML pipeline vs mlx-audio (MLX/GPU) and kokoro-ios (CoreML)"
   - Machine and library provenance
   - End-to-end wall time table (all impls, all machines)
   - RTF table
@@ -334,23 +349,22 @@ it could reproduce the benchmark from the adapter scripts and requirements files
   **Lean:** Option A. Check queue depth before each run; abort and reschedule
   if the worker is active.
 
-- **Q:** Is kokoro-ios (mlalma/kokoro-ios) worth including?
-  **Options:** (A) Include — similar ANE architecture, interesting baseline;
-  (B) Skip — same tech class as ours, adds complexity, dilutes the MLX story.
-  **Lean:** Skip for v1. If Phase 0 shows it's trivial to add, revisit.
+- **Q:** Does kokoro-ios compile cleanly as a macOS target (not iOS-only)?
+  **Options:** (A) Yes, macOS target works out of the box; (B) Needs minor
+  target/manifest tweaks.
+  **Lean:** Resolve in Phase 0 by attempting a local build.
 
 ### Resolved
 
 - **Q:** Should we extend the existing bakeoff_harness.py?
-- **A:** No. External impls have incompatible Python envs and APIs. Standalone
-  adapter scripts are simpler, safer, and non-destructive to the existing
-  harness. A unified harness can be a v2 if the external impls stabilize.
+- **A:** No. External impls have incompatible envs and APIs. Standalone adapter
+  scripts are simpler, safer, and non-destructive to the existing harness.
 
 - **Q:** Which external implementations are in scope?
-- **A:** Blaizzy/mlx-audio and gabrimatic/kokoro-mlx are primary. Both are
-  MLX-based (GPU, not ANE), actively maintained, and community-visible.
-  TTS.cpp (GGML) and pykokoro (ONNX) are out — neither is Apple Silicon
-  optimized. kokoro-ios is deferred (same tech class as ours).
+- **A:** Blaizzy/mlx-audio (7,186 stars, MLX/GPU, actively maintained) and
+  mlalma/kokoro-ios (256 stars, Swift/CoreML, same hardware path as ours).
+  gabrimatic/kokoro-mlx cut (6 stars — not community-relevant).
+  TTS.cpp (GGML) and pykokoro (ONNX) out — not Apple Silicon–optimized.
 
 ## References
 
