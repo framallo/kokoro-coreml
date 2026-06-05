@@ -241,7 +241,10 @@ Every successful cell wrote a mono 24 kHz spot-check WAV and passed the
 lightweight waveform sanity gate: duration, RMS, active fraction,
 zero-crossing rate, speech-band energy, clipping, sample rate, and channel
 count. Human listening is still required before interpreting any latency cell
-as quality parity.
+as quality parity. The reproducible listening checklist can be generated with
+`python scripts/external_bakeoff/create_listening_review.py`; it writes Markdown
+and local HTML review files under `outputs/external_bakeoff/listening/` using
+only the collected Kokoro TTS WAVs.
 
 Known caveats:
 

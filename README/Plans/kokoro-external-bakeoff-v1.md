@@ -380,6 +380,9 @@ audio buffer.
 
 - [x] Save WAV output for each implementation and each runtime bucket on each
       machine.
+- [x] Add a reproducible TTS-only listening review generator that reads the
+      collected WAVs and waveform-quality reports without Whisper, ASR, VAD, or
+      echo-demo dependencies.
 - [ ] Listen against Config F for the same text and voice.
 - [x] Run lightweight waveform sanity checks using `scripts/audio_quality_probe.py`
       where applicable: duration, RMS, clipping, silence, and gross spectral
@@ -388,7 +391,9 @@ audio buffer.
       state that speedups are not direct voice-matched claims.
 
 **Verification:** Each implementation has a short quality note. Any latency
-table cell without quality parity evidence is marked with a caveat. Human
+table cell without quality parity evidence is marked with a caveat. Running
+`python scripts/external_bakeoff/create_listening_review.py` emits Markdown and
+HTML review artifacts under `outputs/external_bakeoff/listening/`. Human
 listening is still pending, so no speed row is interpreted as quality parity.
 
 ---

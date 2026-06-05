@@ -79,3 +79,20 @@ Pass `--spotcheck-dir` to use an explicit collection directory.
 ```bash
 python scripts/external_bakeoff/summarize_external.py
 ```
+
+## Human Listening Review
+
+After result JSONs, spot-check WAVs, and `scripts/audio_quality_probe.py`
+reports exist, generate the TTS-only listening review:
+
+```bash
+python scripts/external_bakeoff/create_listening_review.py
+```
+
+This writes:
+
+- `outputs/external_bakeoff/listening/external_bakeoff_listening_review.md`
+- `outputs/external_bakeoff/listening/external_bakeoff_listening_review.html`
+
+The review uses only collected Kokoro TTS WAVs and waveform-quality reports. It
+does not use Whisper, ASR, VAD, or Soniqo's echo-demo dependency graph.
