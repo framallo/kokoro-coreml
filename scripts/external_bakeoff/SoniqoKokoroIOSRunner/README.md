@@ -17,19 +17,32 @@ SPEECH_SWIFT_PATH=/tmp/kokoro-external-bakeoff/speech-swift xcodegen generate
 
 ## Build For The Connected iPhone
 
+Run the repo-level preflight before starting a long physical-device build:
+
+```bash
+SPEECH_SWIFT_PATH=/tmp/kokoro-external-bakeoff/speech-swift \
+  python scripts/external_bakeoff/preflight_ios_runner.py \
+  --generate-project \
+  --output outputs/external_bakeoff/ios_runner_preflight_latest.json
+```
+
 Preflight requirements:
 
 - The iPhone must appear in `xcrun devicectl list devices`.
+- `SPEECH_SWIFT_PATH` must point to a pinned `soniqo/speech-swift` clone.
 - `DEVELOPMENT_TEAM` must be set to an Apple development team ID.
 - `security find-identity -v -p codesigning` must show a valid Apple
   development signing identity.
 
+Once preflight is green, generate the project and build for the connected
+iPhone:
+
 ```bash
-xcodebuild -project SoniqoKokoroIOSRunner.xcodeproj \
-  -scheme SoniqoKokoroIOSRunner \
-  -destination 'id=00008101-001134561A0A001E' \
-  -derivedDataPath /tmp/kokoro-external-bakeoff/ios-runner-derived \
-  -allowProvisioningUpdates build
+SPEECH_SWIFT_PATH=/tmp/kokoro-external-bakeoff/speech-swift \
+  python scripts/external_bakeoff/preflight_ios_runner.py \
+  --generate-project \
+  --build \
+  --output outputs/external_bakeoff/ios_runner_build_latest.json
 ```
 
 The app loads `KokoroTTSModel.fromPretrained(computeUnits: .all)`, synthesizes

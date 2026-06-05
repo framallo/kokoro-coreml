@@ -38,6 +38,16 @@ python scripts/external_bakeoff/run_speech_swift_kokoro.py \
   --spotcheck-dir outputs/external_bakeoff/spotcheck_wavs/soniqo_speech_swift_kokoro_m2-studio
 ```
 
+For the physical iPhone runner, run the signing/device preflight before any
+build attempt:
+
+```bash
+SPEECH_SWIFT_PATH=/tmp/kokoro-external-bakeoff/speech-swift \
+  python scripts/external_bakeoff/preflight_ios_runner.py \
+  --generate-project \
+  --output outputs/external_bakeoff/ios_runner_preflight_latest.json
+```
+
 ## Laishere Core ML Backup
 
 Clone and convert `laishere/kokoro-coreml` outside the repo. The converter can

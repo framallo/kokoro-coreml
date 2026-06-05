@@ -90,7 +90,11 @@ minimal Soniqo Kokoro iOS runner remains in
 `scripts/external_bakeoff/SoniqoKokoroIOSRunner/` for the next signed-device
 pass. It now uses the shared runtime manifest (`3s`, `7s`, `10s`, `15s`,
 `30s`) and emits one cold call plus five warmed inference calls per bucket with
-observed-duration RTF.
+observed-duration RTF. The signed-device pass should start with
+`SPEECH_SWIFT_PATH=/tmp/kokoro-external-bakeoff/speech-swift python scripts/external_bakeoff/preflight_ios_runner.py --generate-project --output outputs/external_bakeoff/ios_runner_preflight_latest.json`;
+with that environment, preflight
+reports the phone available and project generation succeeds, but still blocks
+on `DEVELOPMENT_TEAM` and a valid local code-signing identity.
 
 Whisper, ASR, VAD, and echo-demo dependencies are not part of this bakeoff
 boundary. The iOS runner is intentionally Kokoro TTS only.

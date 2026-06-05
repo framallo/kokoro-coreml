@@ -331,9 +331,14 @@ runtime buckets (`3s`, `7s`, `10s`, `15s`, `30s`) and reports one cold call plus
 five warmed calls per bucket with observed-duration RTF. A physical-device
 `xcodebuild` against that iPhone reached signing and failed because the target
 requires a development team; the local keychain has no valid code-signing
-identity, so no iPhone inference result exists yet. The iOS runner remains
-deliberately Kokoro-only; Whisper, ASR, VAD, and the full Soniqo echo-demo
-dependency graph are excluded from the measurement path.
+identity, so no iPhone inference result exists yet. Run
+`SPEECH_SWIFT_PATH=/tmp/kokoro-external-bakeoff/speech-swift python scripts/external_bakeoff/preflight_ios_runner.py --generate-project --output outputs/external_bakeoff/ios_runner_preflight_latest.json`
+before the next signed-device attempt. With that environment, the preflight
+proves the device is available and Xcode project generation succeeds; the
+remaining blockers are `DEVELOPMENT_TEAM` and a valid local code-signing
+identity. The iOS runner remains deliberately Kokoro-only; Whisper, ASR, VAD,
+and the full Soniqo echo-demo dependency graph are excluded from the
+measurement path.
 
 **Current collection note:** M2 Studio, irvine-m1, and M2 Air now have
 schema-valid JSON for Config F, MLX, Soniqo, and laishere, and every successful
