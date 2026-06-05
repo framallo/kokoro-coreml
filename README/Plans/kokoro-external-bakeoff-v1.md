@@ -3,8 +3,8 @@
 **Date:** 2026-06-05
 **Status:** External result section and consolidated platform table written;
 compile-contaminated 30s Config F cells replaced with warmed-inference reruns;
-local Config F and MLX powermetrics captured; human listening, signed iPhone
-execution, and full Core ML comparator hardware-placement traces remain before
+local Config F, MLX, and Soniqo powermetrics captured; human listening, signed
+iPhone execution, and laishere backup hardware-placement traces remain before
 this plan can be marked complete
 
 > Internal bakeoff methodology lives in `README/Plans/kokoro-bakeoff-v2.md`.
@@ -346,7 +346,8 @@ calls, and 20 recorded warm calls. A local M2 Studio powermetrics capture now
 exists for a post-prime 3s Config F debug run, and a matching local MLX 7s
 powermetrics capture exists for the pinned `mlx-audio` path. These are placement
 evidence only, not replacement latency cells, and they do not close the
-Soniqo/laishere Core ML comparator placement requirement.
+laishere backup placement requirement. A local Soniqo 3s powermetrics capture
+also exists for the primary iOS/Core ML comparator.
 
 **Tasks:**
 
@@ -379,7 +380,8 @@ laishere across 3 machines. Each result has cold latency, 5 warm iterations per
 successful runtime bucket, provenance, and durable spot-check WAVs.
 Framework/runtime placement is documented. One local Config F privileged
 `powermetrics` capture and one local MLX privileged `powermetrics` capture
-exist, but privileged Soniqo/laishere Core ML comparator residency traces remain
+exist. One local Soniqo privileged `powermetrics` capture exists for the primary
+iOS/Core ML comparator. Privileged laishere backup residency traces remain
 pending.
 
 ---

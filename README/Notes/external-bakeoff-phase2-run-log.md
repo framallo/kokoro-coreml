@@ -460,10 +460,10 @@ metrics but are 5.0s clips for 7s, 10s, 15s, and 30s manifest inputs.
 ## Local Hardware-Placement Capture
 
 After the warmed 30s correction, local M2 Studio `powermetrics` captures were
-collected for Config F and MLX placement context. The first attempted Config F
-30s trace entered a long padded `t512` Core ML compile/load window and was
-stopped before result JSON; it remains compile-window evidence only and is not
-an inference-speed cell.
+collected for Config F, MLX, and Soniqo placement context. The first attempted
+Config F 30s trace entered a long padded `t512` Core ML compile/load window and
+was stopped before result JSON; it remains compile-window evidence only and is
+not an inference-speed cell.
 
 The usable Config F capture ran the debug `kokoro-bench` binary on the 3s input with
 five discarded preflight calls and forty recorded warm calls, while
@@ -515,6 +515,31 @@ Summary:
 This is placement evidence for the primary MLX competitor, not a replacement
 latency cell. Fleet health remained passing after the MLX capture
 (`queueDepth=0`, `claimedFresh=8`, `freshWorkerCount=3`, canary passing).
+
+The Soniqo capture restored the pinned `soniqo/speech-swift` checkout at
+`0d09a2ed5464c7c94cf4545be59043c21f8775ea`, resolved SwiftPM dependencies,
+rebuilt the generated `SoniqoKokoroBench` CLI in an ignored work directory, and
+ran the 3s input with thirty recorded warm calls using `computeUnits: .all`.
+Artifacts are ignored under `outputs/external_bakeoff/placement/`:
+
+- `results_soniqo_m2-studio_3s_warm_placement.json`
+- `soniqo_m2-studio_3s_warm_powermetrics.txt`
+
+Summary:
+
+| Signal | N | Min | Median | Max |
+| --- | ---: | ---: | ---: | ---: |
+| Warm wall time | 30 | 0.067434s | 0.0690795s | 0.073503s |
+| CPU Power | 120 | 8019 mW | 18148.5 mW | 42770 mW |
+| GPU Power | 240 | 552 mW | 751 mW | 49274 mW |
+| ANE Power | 120 | 0 mW | 0 mW | 0 mW |
+| GPU HW active residency | 120 | 31.55% | 50.465% | 98.15% |
+
+This is placement evidence for the primary iOS/Core ML comparator, not a
+replacement latency cell. On this M2 Studio run, Soniqo used Core ML with
+`computeUnits: .all` but did not show ANE power draw. Fleet health remained
+passing after the Soniqo capture (`claimedFresh=0`, `freshWorkerCount=3`,
+canary passing), though queue depth had risen to 8.
 
 ### M2 Studio Quality Probe
 
@@ -597,6 +622,6 @@ latency cell. Fleet health remained passing after the MLX capture
 - Decide how the paper table presents Soniqo's high-adoption 5s-only result
   beside laishere's lower-adoption long-bucket Core ML backup.
 - Listen to all `needs_listening` WAVs before making quality-parity claims.
-- Capture hardware-placement evidence for Soniqo/laishere Core ML paths.
+- Capture hardware-placement evidence for the laishere Core ML backup path.
 - Write the external-competitor result section in
   `README/Notes/performance-notes.md`.

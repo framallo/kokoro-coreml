@@ -27,7 +27,8 @@ These numbers do **not** include:
 
 **Collected:** 2026-06-05
 **Status:** Phase 2 collection complete; waveform sanity complete; human
-listening and full Core ML comparator hardware-placement traces still pending.
+listening, signed iPhone execution, and laishere backup placement still
+pending.
 
 This bakeoff compares the current Swift + Core ML Config F reference against
 popular Apple Silicon Kokoro implementations:
@@ -220,7 +221,7 @@ faster. Values below `1.0x` mean the comparator was faster.
 
 This bakeoff records framework and compute-unit evidence. Local privileged
 `powermetrics` captures were added after the primary latency collection for
-Config F and MLX placement context:
+Config F, MLX, and Soniqo placement context:
 
 - Config F ran the Swift `kokoro-bench` path over Core ML packages with
   `--compute-units all` in the collected external table. The result records
@@ -254,6 +255,16 @@ Config F and MLX placement context:
 - Soniqo ran Swift `KokoroTTSModel.fromPretrained(computeUnits: .all)` and
   loaded Core ML through `MLModel` via the public `speech-swift` KokoroTTS
   surface.
+- Local M2 Studio Soniqo placement check: the generated Swift CLI rebuilt from
+  the pinned `speech-swift` checkout at
+  `0d09a2ed5464c7c94cf4545be59043c21f8775ea`, ran `computeUnits: .all`, and
+  synthesized the 3s input with thirty recorded warm calls while `powermetrics`
+  sampled every 500 ms with `cpu_power,gpu_power,ane_power`. The recorded JSON
+  is ignored at
+  `outputs/external_bakeoff/placement/results_soniqo_m2-studio_3s_warm_placement.json`.
+  Median warm time was `0.0690795s` for a 2.7s output. `ANE Power` had 120
+  samples with min/median/max `0/0/0 mW`, while `GPU HW active residency` had
+  120 samples with min/median/max `31.55/50.465/98.15%`.
 - laishere ran seven `.mlpackage` Core ML models converted from its public repo.
   Its timed boundary is the Core ML chain only.
 
@@ -263,8 +274,10 @@ units, but the measured M2 Studio loop showed no ANE power draw and substantial
 GPU activity. That matches the existing compute-unit ablation note: the staged
 runtime keeps the ANE-eligible decoder-pre island separate and deliberately
 keeps the ANE-hostile generator on CPU/GPU. The MLX capture is useful GPU
-evidence for the primary MLX competitor. Privileged placement traces are still
-missing for Soniqo and laishere in the external collection matrix.
+evidence for the primary MLX competitor. The Soniqo capture proves the primary
+iOS/Core ML comparator was also not ANE-resident on this M2 Studio run despite
+`.all`. Privileged placement traces are still missing for the laishere backup
+Core ML chain.
 
 ### Quality Caveats
 
