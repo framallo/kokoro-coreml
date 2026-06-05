@@ -314,9 +314,9 @@ reported `0 valid identities found`.
 
 **Current M2 Studio collection note:** Local M2 Studio JSON exists for Config F,
 MLX, and Soniqo macOS Core ML and validates against the shared schema. The run
-is recorded in `README/Notes/external-bakeoff-phase2-run-log.md`. Do not mark
-M2 Studio complete yet: the first full run happened before durable spot-check
-WAV support landed, MLX fails deterministically on the shared `3s` input with a
+is recorded in `README/Notes/external-bakeoff-phase2-run-log.md`, and every
+successful result cell has a durable spot-check WAV. Do not mark M2 Studio
+complete yet: MLX fails deterministically on the shared `3s` input with a
 broadcast-shape error, and Soniqo emits 5.0s audio for longer manifest inputs,
 so its speed cells are not quality-parity evidence.
 

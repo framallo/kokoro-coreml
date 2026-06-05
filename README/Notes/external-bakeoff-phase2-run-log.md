@@ -2,8 +2,8 @@
 
 **Date:** 2026-06-05
 **Plan:** `README/Plans/kokoro-external-bakeoff-v1.md`
-**Status:** M2 Studio local collection started; fleet-wide Phase 2 remains
-incomplete.
+**Status:** M2 Studio local collection rerun with durable spot-check WAVs;
+fleet-wide Phase 2 remains incomplete.
 
 ## M2 Studio Precheck
 
@@ -20,13 +20,13 @@ Before local collection, botnet health was green:
 }
 ```
 
-After local collection, botnet health was still green:
+After the spot-check rerun, botnet health was still green:
 
 ```json
 {
   "ok": true,
   "queueDepth": 0,
-  "claimedFresh": 2,
+  "claimedFresh": 0,
   "freshWorkerCount": 3,
   "canaryStatus": "passing",
   "canaryWorkerId": "operator-prove-live"
@@ -51,11 +51,11 @@ Config F used the main checkout Core ML artifacts at
 
 | Input | Status | Cold s | Warm median s | Warm N | Observed s | Bucket |
 | --- | --- | ---: | ---: | ---: | ---: | --- |
-| 3s | ok | 0.135342 | 0.139271 | 5 | 2.800 | 3s |
-| 7s | ok | 0.314786 | 0.332596 | 5 | 6.750 | 7s |
-| 10s | ok | 0.551341 | 0.511796 | 5 | 9.625 | 10s |
-| 15s | ok | 0.733556 | 0.581774 | 5 | 13.900 | 15s |
-| 30s | ok | 1.241910 | 1.195325 | 5 | 27.400 | 30s |
+| 3s | ok | 0.125504 | 0.131485 | 5 | 2.800 | 3s |
+| 7s | ok | 0.309493 | 0.284174 | 5 | 6.750 | 7s |
+| 10s | ok | 0.570868 | 0.548194 | 5 | 9.625 | 10s |
+| 15s | ok | 0.647346 | 0.632877 | 5 | 13.900 | 15s |
+| 30s | ok | 1.389132 | 1.191795 | 5 | 27.400 | 30s |
 
 The 30s first compile spent roughly 20 minutes in Core ML on-device AOT
 compilation before timed synthesis. A sampled stack showed Core ML / Espresso
@@ -71,10 +71,10 @@ silence was compiler work, not a harness deadlock.
 | Input | Status | Cold s | Warm median s | Warm N | Observed s | Caveat |
 | --- | --- | ---: | ---: | ---: | ---: | --- |
 | 3s | error | - | - | 0 | - | deterministic broadcast-shape failure |
-| 7s | ok | 0.202146 | 0.201625 | 5 | 6.750 | - |
-| 10s | ok | 4.587298 | 0.277975 | 5 | 9.600 | - |
-| 15s | ok | 0.568535 | 0.369075 | 5 | 13.900 | - |
-| 30s | ok | 0.888687 | 0.749096 | 5 | 27.375 | - |
+| 7s | ok | 0.195928 | 0.223944 | 5 | 6.750 | - |
+| 10s | ok | 4.737087 | 0.288822 | 5 | 9.600 | - |
+| 15s | ok | 0.438077 | 0.376303 | 5 | 13.900 | - |
+| 30s | ok | 0.930204 | 0.762699 | 5 | 27.375 | - |
 
 The 3s cell failed on the initial run and a one-input retry with:
 
@@ -93,11 +93,11 @@ SHA `0d09a2ed5464c7c94cf4545be59043c21f8775ea` with
 
 | Input | Status | Cold s | Warm median s | Warm N | Observed s | Caveat |
 | --- | --- | ---: | ---: | ---: | ---: | --- |
-| 3s | ok | 0.481583 | 0.069233 | 5 | 2.700 | duration mismatch |
-| 7s | ok | 0.475177 | 0.068821 | 5 | 5.000 | truncated versus manifest |
-| 10s | ok | 0.542702 | 0.073327 | 5 | 5.000 | truncated versus manifest |
-| 15s | ok | 0.495827 | 0.071984 | 5 | 5.000 | truncated versus manifest |
-| 30s | ok | 0.477556 | 0.069727 | 5 | 5.000 | truncated versus manifest |
+| 3s | ok | 0.615211 | 0.071711 | 5 | 2.700 | duration mismatch |
+| 7s | ok | 0.432999 | 0.069311 | 5 | 5.000 | truncated versus manifest |
+| 10s | ok | 0.397993 | 0.071024 | 5 | 5.000 | truncated versus manifest |
+| 15s | ok | 0.411708 | 0.068065 | 5 | 5.000 | truncated versus manifest |
+| 30s | ok | 0.414261 | 0.069504 | 5 | 5.000 | truncated versus manifest |
 
 These Soniqo cells are not quality-parity evidence yet. The timing is useful
 for implementation behavior, but the emitted audio duration must be resolved or
@@ -105,7 +105,7 @@ clearly caveated before using the cells in the paper table.
 
 ## Spot-Check WAV Support
 
-After the first M2 Studio collection, adapters were updated to write durable
+The M2 Studio collection was rerun after adapters were updated to write durable
 spot-check WAV files:
 
 - Config F keeps the last warm `kokoro-bench` WAV per input.
@@ -113,12 +113,12 @@ spot-check WAV files:
 - Soniqo writes the last warm Swift `[Float]` audio as mono 16-bit WAV.
 
 One-input smokes verified valid mono 24 kHz WAV files for Config F, MLX, and
-Soniqo. The M2 Studio full collection should be rerun with this support before
-Phase 3 listening checks.
+Soniqo. The full M2 Studio rerun then produced durable WAVs for every successful
+result cell. MLX has no 3s WAV because that cell errors before audio is
+materialized.
 
 ## Remaining Phase 2 Work
 
-- Rerun M2 Studio full collection with durable spot-check WAV output.
 - Decide whether the MLX 3s public-implementation failure is a paper caveat or
   requires an alternate, predeclared 3s input.
 - Resolve Soniqo duration truncation before treating its speed numbers as

@@ -209,6 +209,7 @@ def main() -> None:
     spotcheck_dir = args.spotcheck_dir or (
         DEFAULT_OUTPUT_DIR / "spotcheck_wavs" / f"soniqo_speech_swift_kokoro_{args.machine_id}"
     )
+    spotcheck_dir = spotcheck_dir.resolve()
 
     work_dir = args.work_dir or Path(tempfile.mkdtemp(prefix="soniqo-kokoro-bench-"))
     _ensure_cli(work_dir, args.speech_swift.resolve())
