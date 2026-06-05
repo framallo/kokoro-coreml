@@ -36,7 +36,7 @@ def test_silent_punctuation_ids_match_kokoro_vocab() -> None:
 
     from kokoro.model import KModel
 
-    model = KModel(repo_id="hexgrad/Kokoro-82M", device="cpu")
+    model = KModel().to("cpu")
     vocab = model.vocab
 
     observed = {vocab[char] for char in CANONICAL_PUNCTUATION_CHARS}
