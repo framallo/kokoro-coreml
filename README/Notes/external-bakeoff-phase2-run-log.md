@@ -2,9 +2,10 @@
 
 **Date:** 2026-06-05
 **Plan:** `README/Plans/kokoro-external-bakeoff-v1.md`
-**Status:** M2 Studio local collection rerun with durable spot-check WAVs;
-long-bucket Core ML backup collected; m2-air Config F, MLX, Soniqo, and laishere
-collected; fleet-wide Phase 2 remains incomplete.
+**Status:** M2 Studio, m2-air, and irvine-m1 now have Config F, MLX, Soniqo,
+and laishere JSON plus durable spot-check WAVs for every successful result
+cell; Phase 2 collection is complete, with listening and hardware-placement
+evidence still pending.
 
 ## M2 Studio Precheck
 
@@ -261,7 +262,95 @@ The conversion produced all seven packages and reported
 | 15s | ok | 0.746766 | 0.657251 | 5 | 13.925 | 557 |
 | 30s | ok | 1.616250 | 1.476442 | 5 | 27.350 | 1094 |
 
-## Irvine M1 Aborted Collection
+## Irvine M1 Completed Collection
+
+`irvine-m1` was rerun in a low-pressure window with stdout/stderr redirected
+from the start. Botnet health stayed clean during the successful Config F, MLX,
+Soniqo, and laishere collection: queue depth `0`, fresh claims `0`, and canary
+passing across the sampled polls. Result files copied back:
+
+- `outputs/external_bakeoff/results_config_f_reference_irvine-m1.json`
+- `outputs/external_bakeoff/results_mlx_audio_irvine-m1.json`
+- `outputs/external_bakeoff/results_soniqo_speech_swift_kokoro_irvine-m1.json`
+- `outputs/external_bakeoff/results_laishere_kokoro_coreml_irvine-m1.json`
+
+All four files validate against `scripts/external_bakeoff/schema.py`, and every
+successful cell has a mono 24 kHz spot-check WAV. No remote bakeoff processes
+were left running after collection.
+
+### Irvine M1 Config F
+
+The redirected Config F run took about 45 minutes wall-clock because Core ML
+compiled several buckets on the host. The 30s bucket alone had a large warm
+median because one of the warm calls entered another long Core ML compile/load
+path; this is preserved as observed host behavior.
+
+| Input | Status | Cold s | Warm median s | Warm N | Observed s | Bucket |
+| --- | --- | ---: | ---: | ---: | ---: | --- |
+| 3s | ok | 0.285956 | 0.304639 | 5 | 2.800 | 3s |
+| 7s | ok | 0.647701 | 0.696148 | 5 | 6.750 | 7s |
+| 10s | ok | 1.035011 | 1.348528 | 5 | 9.625 | 10s |
+| 15s | ok | 1.372462 | 1.672729 | 5 | 13.900 | 15s |
+| 30s | ok | 9.114338 | 16.119647 | 5 | 27.400 | 30s |
+
+### Irvine M1 MLX
+
+`Blaizzy/mlx-audio` ran from pinned SHA
+`862dfbe5338e91df6f74ac986b4df8bede7961a6` in the disposable Python 3.12 venv.
+The 3s cell failed with the same broadcast-shape error seen on M2 Studio and
+M2 Air.
+
+| Input | Status | Cold s | Warm median s | Warm N | Observed s | Caveat |
+| --- | --- | ---: | ---: | ---: | ---: | --- |
+| 3s | error | - | - | 0 | - | deterministic broadcast-shape failure |
+| 7s | ok | 0.807166 | 0.823996 | 5 | 6.750 | - |
+| 10s | ok | 20.027821 | 1.124308 | 5 | 9.600 | model/cache cold start |
+| 15s | ok | 1.662442 | 1.589512 | 5 | 13.900 | - |
+| 30s | ok | 3.293409 | 3.077911 | 5 | 27.375 | - |
+
+### Irvine M1 Soniqo
+
+`soniqo/speech-swift` ran from pinned SHA
+`0d09a2ed5464c7c94cf4545be59043c21f8775ea`. The first launch used the wrong
+adapter flag and exited before running. A second launch hit Xcode's system Git
+credential helper while downloading Soniqo's public `SpeechCore.xcframework`.
+The successful run used `GIT_CONFIG_NOSYSTEM=1` plus an empty credential helper
+to force anonymous artifact download.
+
+| Input | Status | Cold s | Warm median s | Warm N | Observed s | Caveat |
+| --- | --- | ---: | ---: | ---: | ---: | --- |
+| 3s | ok | 1.395284 | 1.330872 | 5 | 2.700 | - |
+| 7s | ok | 1.391859 | 1.343588 | 5 | 5.000 | public 5s artifact |
+| 10s | ok | 1.413150 | 1.313932 | 5 | 5.000 | public 5s artifact |
+| 15s | ok | 1.460957 | 1.343619 | 5 | 5.000 | public 5s artifact |
+| 30s | ok | 1.431827 | 1.351175 | 5 | 5.000 | public 5s artifact |
+
+### Irvine M1 laishere
+
+`laishere/kokoro-coreml` ran from pinned SHA
+`484907db6a8347a6afb6e7b86850ea2878c6a3fb`. A disposable Python 3.12 venv was
+created under `/tmp/kokoro-external-bakeoff`, declared dependencies were
+installed directly, and conversion used:
+
+```bash
+PYTORCH_ENABLE_MPS_FALLBACK=1 \
+  /tmp/kokoro-external-bakeoff/laishere-venv/bin/python \
+  convert.py --max-frames 2000
+```
+
+The conversion produced all seven packages and reported
+`mel_corr=0.993145`. Non-fatal caveats matched M2 Air: coremltools warned that
+scikit-learn `1.9.0` and torch `2.12.0` are newer than its tested range.
+
+| Input | Status | Cold s | Warm median s | Warm N | Observed s | T_a |
+| --- | --- | ---: | ---: | ---: | ---: | ---: |
+| 3s | ok | 1.102515 | 0.176330 | 5 | 2.775 | 111 |
+| 7s | ok | 1.239340 | 0.394566 | 5 | 6.750 | 270 |
+| 10s | ok | 1.877005 | 0.593892 | 5 | 9.625 | 385 |
+| 15s | ok | 1.659649 | 0.912001 | 5 | 13.950 | 558 |
+| 30s | ok | 2.791752 | 2.135142 | 5 | 27.375 | 1095 |
+
+## Irvine M1 Earlier Aborted Collection
 
 `irvine-m1` was prepared from the same disposable checkout and built the current
 `kokoro-bench` successfully. The first Config F attempt reached the 30s bucket,
@@ -323,6 +412,8 @@ Generated, uncommitted reports:
 - `outputs/external_bakeoff/quality/m2-studio/audio_quality_summary.md`
 - `outputs/external_bakeoff/quality/m2-air/audio_quality_report.json`
 - `outputs/external_bakeoff/quality/m2-air/audio_quality_summary.md`
+- `outputs/external_bakeoff/quality/irvine-m1/audio_quality_report.json`
+- `outputs/external_bakeoff/quality/irvine-m1/audio_quality_summary.md`
 
 No collected competitor WAV was rejected by the waveform sanity gate. Every
 candidate requires human listening before quality parity is claimed. Soniqo's
@@ -377,13 +468,37 @@ metrics but are 5.0s clips for 7s, 10s, 15s, and 30s manifest inputs.
 | laishere | 15s | needs_listening | 13.925 | 4919.3 |
 | laishere | 30s | needs_listening | 27.350 | 3570.8 |
 
-## Remaining Phase 2 Work
+### Irvine M1 Quality Probe
+
+| Impl | Input | Decision | Duration s | RMS |
+| --- | --- | --- | ---: | ---: |
+| Config F reference | 3s | reference_pass | 2.800 | 4456.3 |
+| Config F reference | 7s | reference_pass | 6.750 | 4811.3 |
+| Config F reference | 10s | reference_pass | 9.625 | 4252.2 |
+| Config F reference | 15s | reference_pass | 13.900 | 5229.9 |
+| Config F reference | 30s | reference_pass | 27.400 | 4463.0 |
+| MLX | 7s | needs_listening | 6.750 | 3485.3 |
+| MLX | 10s | needs_listening | 9.600 | 2298.6 |
+| MLX | 15s | needs_listening | 13.900 | 4753.2 |
+| MLX | 30s | needs_listening | 27.375 | 3030.6 |
+| Soniqo | 3s | needs_listening | 2.700 | 4483.9 |
+| Soniqo | 7s | needs_listening | 5.000 | 5140.1 |
+| Soniqo | 10s | needs_listening | 5.000 | 4244.0 |
+| Soniqo | 15s | needs_listening | 5.000 | 4911.8 |
+| Soniqo | 30s | needs_listening | 5.000 | 5331.4 |
+| laishere | 3s | needs_listening | 2.775 | 4627.4 |
+| laishere | 7s | needs_listening | 6.750 | 3615.4 |
+| laishere | 10s | needs_listening | 9.625 | 3087.6 |
+| laishere | 15s | needs_listening | 13.950 | 4936.5 |
+| laishere | 30s | needs_listening | 27.375 | 3651.0 |
+
+## Remaining Work
 
 - Decide whether the MLX 3s public-implementation failure is a paper caveat or
   requires an alternate, predeclared 3s input.
 - Decide how the paper table presents Soniqo's high-adoption 5s-only result
   beside laishere's lower-adoption long-bucket Core ML backup.
-- Re-run `irvine-m1` during a lower-traffic window with stdout/stderr redirected
-  from the start.
 - Listen to all `needs_listening` WAVs before making quality-parity claims.
 - Capture hardware-placement evidence for MLX GPU and Core ML / ANE paths.
+- Write the external-competitor result section in
+  `README/Notes/performance-notes.md`.
