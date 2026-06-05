@@ -103,6 +103,18 @@ These Soniqo cells are not quality-parity evidence yet. The timing is useful
 for implementation behavior, but the emitted audio duration must be resolved or
 clearly caveated before using the cells in the paper table.
 
+Source and artifact check:
+
+- `KokoroTTSModel.fromPretrained(...)` downloads `kokoro_5s.mlmodelc/**`.
+- `KokoroNetwork` would load `kokoro_10s` or `kokoro_15s` if present, but the
+  upstream `aufklarer/Kokoro-82M-CoreML` file listing only contains
+  `kokoro_5s.mlmodelc`.
+- Local caches under both Hugging Face and `qwen3-speech` contain only
+  `kokoro_5s.mlmodelc`.
+
+This makes the 5.0s cap public-comparator behavior for the selected Soniqo
+model artifact, not an adapter timing-boundary bug.
+
 ## Spot-Check WAV Support
 
 The M2 Studio collection was rerun after adapters were updated to write durable
@@ -121,7 +133,7 @@ materialized.
 
 - Decide whether the MLX 3s public-implementation failure is a paper caveat or
   requires an alternate, predeclared 3s input.
-- Resolve Soniqo duration truncation before treating its speed numbers as
-  parity-comparable.
+- Treat Soniqo's 5s-only published Core ML artifact as a paper caveat, or pick
+  a backup Core ML comparator for longer-bucket parity.
 - Collect the same matrix on `irvine-m1` and `m2-air`.
 - Capture hardware-placement evidence for MLX GPU and Core ML / ANE paths.

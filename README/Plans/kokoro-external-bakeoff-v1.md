@@ -317,8 +317,11 @@ MLX, and Soniqo macOS Core ML and validates against the shared schema. The run
 is recorded in `README/Notes/external-bakeoff-phase2-run-log.md`, and every
 successful result cell has a durable spot-check WAV. Do not mark M2 Studio
 complete yet: MLX fails deterministically on the shared `3s` input with a
-broadcast-shape error, and Soniqo emits 5.0s audio for longer manifest inputs,
-so its speed cells are not quality-parity evidence.
+broadcast-shape error, and Soniqo emits 5.0s audio for longer manifest inputs
+because the selected public Core ML model repo only publishes
+`kokoro_5s.mlmodelc`. Soniqo's speed cells are implementation-behavior evidence,
+but not longer-bucket quality-parity evidence unless the paper accepts that
+caveat or switches to the backup Core ML comparator.
 
 **Tasks:**
 
