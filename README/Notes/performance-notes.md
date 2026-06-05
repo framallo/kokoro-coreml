@@ -26,8 +26,8 @@ These numbers do **not** include:
 ## External Bakeoff: surgical Core ML vs MLX and iOS/Core ML Kokoro
 
 **Collected:** 2026-06-05
-**Status:** Phase 2 collection complete; waveform sanity complete; human
-listening and signed iPhone execution still pending.
+**Status:** Phase 2 collection complete; signed iPhone execution ingested;
+waveform sanity complete; human listening still pending.
 
 This bakeoff compares the current Swift + Core ML Config F reference against
 popular Apple Silicon Kokoro implementations:
@@ -81,27 +81,33 @@ used for warmed inference comparison.
 ### iPhone Status
 
 The connected iPhone 12 Pro is visible to CoreDevice as `Webcam`
-(`F383FC46-FD64-5346-AEC6-59E3E2F8C9CA`, model `iPhone13,3`) and is available
-and paired. No iPhone result is included in the table because physical-device
-execution is blocked by local signing state: `security find-identity -v -p
-codesigning` reports `0 valid identities found`, and `xcodebuild` reached the
-target signing step before failing with `requires a development team`. The
-minimal Soniqo Kokoro iOS runner remains in
-`scripts/external_bakeoff/SoniqoKokoroIOSRunner/` for the next signed-device
-pass. It now uses the shared runtime manifest (`3s`, `7s`, `10s`, `15s`,
-`30s`) and emits one cold call plus five warmed inference calls per bucket with
-observed-duration RTF. The signed-device pass should start with
-`SPEECH_SWIFT_PATH=/tmp/kokoro-external-bakeoff/speech-swift python scripts/external_bakeoff/preflight_ios_runner.py --generate-project --output outputs/external_bakeoff/ios_runner_preflight_latest.json`;
-with that environment, preflight
-reports the phone available and project generation succeeds, but still blocks
-on `DEVELOPMENT_TEAM` and a valid local code-signing identity. After signed
-execution, paste the copied app JSON into
-`outputs/external_bakeoff/ios_runner_payload_latest.json` and run
-`python scripts/external_bakeoff/ingest_ios_runner_result.py --input outputs/external_bakeoff/ios_runner_payload_latest.json --machine-id iphone-12-pro`
-to normalize the timing records.
+(`F383FC46-FD64-5346-AEC6-59E3E2F8C9CA`, model `iPhone13,3`, UDID
+`00008101-001134561A0A001E`) and is connected, paired, and running with
+Developer Mode enabled. The minimal Soniqo Kokoro iOS runner in
+`scripts/external_bakeoff/SoniqoKokoroIOSRunner/` was built with automatic
+signing, installed, launched, run on device, and ingested into
+`outputs/external_bakeoff/results_soniqo_speech_swift_kokoro_ios_iphone-12-pro.json`.
+The runner uses the shared runtime manifest (`3s`, `7s`, `10s`, `15s`, `30s`)
+and records one cold call plus five warmed inference calls per bucket with
+observed-duration RTF.
 
-Whisper, ASR, VAD, and echo-demo dependencies are not part of this bakeoff
-boundary. The iOS runner is intentionally Kokoro TTS only.
+#### iphone-12-pro
+
+iPhone13,3, iOS 26.5.
+
+| Impl | 3s | 7s | 10s | 15s | 30s | Caveats |
+| --- | ---: | ---: | ---: | ---: | ---: | --- |
+| Soniqo iOS | 832.7 ms / 0.308 | 833.9 ms / 0.167 | 853.6 ms / 0.171 | 864.4 ms / 0.173 | 879.1 ms / 0.176 | Long buckets emit 5.0s public artifact |
+
+The iPhone 3s cold call was `10866.3 ms`, reflecting first-use model setup. The
+7s, 10s, 15s, and 30s cold calls were `867.7 ms`, `891.4 ms`, `883.1 ms`, and
+`925.2 ms` respectively. As on macOS, Soniqo emits `2.7s` for the 3s input and
+`5.0s` for each longer manifest input, so the iPhone long-bucket numbers are
+device execution evidence for the public Soniqo artifact, not full-duration
+7s/10s/15s/30s parity evidence.
+
+Whisper, ASR, VAD, playback, and echo-demo dependencies are not part of this
+bakeoff boundary. The iOS runner is intentionally Kokoro TTS only.
 
 ### Consolidated Warm Median and RTF by Platform
 
@@ -319,9 +325,9 @@ After filling the CSV, run
 `python scripts/external_bakeoff/validate_listening_decisions.py`; it must pass
 before any latency cell is interpreted as quality parity.
 The overall plan-completion check is
-`python scripts/external_bakeoff/verify_external_bakeoff_completion.py`, which
-also requires the signed iPhone result to be ingested before the plan is marked
-complete.
+`python scripts/external_bakeoff/verify_external_bakeoff_completion.py`. The
+signed iPhone result is now ingested; the remaining final gate is the human
+listening decision CSV.
 
 Known caveats:
 
