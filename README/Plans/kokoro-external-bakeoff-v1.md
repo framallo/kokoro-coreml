@@ -327,7 +327,10 @@ is now the normalized long-bucket Core ML backup for quality-parity evidence.
 Do not mark m2-air complete yet: Soniqo and laishere were deferred when botnet
 health showed production pressure. `irvine-m1` Config F was aborted under the
 same no-disruption guardrail after active queue pressure appeared; rerun it in
-a lower-traffic window with stdout/stderr redirected from the start.
+a lower-traffic window with stdout/stderr redirected from the start. A
+2026-06-05 continuation check found no remote bakeoff processes running, but
+kept collection paused because `claimedFresh` stayed at 13-15 across five
+health polls.
 
 **Tasks:**
 

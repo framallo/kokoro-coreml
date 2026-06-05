@@ -248,6 +248,25 @@ before a result JSON was produced. After stopping it, health improved to
 the remote `/tmp` directory are not publication data because there is no
 schema-valid JSON for that host.
 
+## Continuation Gate: Production Pressure
+
+On 2026-06-05, a follow-up attempt checked for a low-traffic window before
+resuming `m2-air` Soniqo/laishere or restarting `irvine-m1`. No remote bakeoff
+processes were running on `irvine-m1` or `m2-air`, but botnet health showed
+active production claims throughout the polling window:
+
+| Time | Queue depth | Claimed fresh | Fresh workers | Canary |
+| --- | ---: | ---: | ---: | --- |
+| 00:14:29 | 1 | 14 | 3 | passing |
+| 00:15:30 | 2 | 13 | 3 | passing |
+| 00:16:31 | 2 | 13 | 3 | passing |
+| 00:17:33 | 0 | 15 | 3 | passing |
+| 00:18:34 | 0 | 15 | 3 | passing |
+
+Because `claimedFresh` stayed high, no additional benchmark runs were started.
+Resume Phase 2 only after both queue depth and active fresh claims are low
+enough that a benchmark host will not compete with production TTS work.
+
 ## Remaining Phase 2 Work
 
 - Decide whether the MLX 3s public-implementation failure is a paper caveat or
