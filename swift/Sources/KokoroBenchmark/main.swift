@@ -28,6 +28,22 @@ import Foundation
 import CoreML
 @_exported import KokoroPipeline
 
+/// Human-readable label for Core ML's single-policy compute unit modes.
+func computeUnitLabel(_ computeUnits: MLComputeUnits) -> String {
+    switch computeUnits {
+    case .all:
+        return "all"
+    case .cpuAndNeuralEngine:
+        return "cpuAndNeuralEngine"
+    case .cpuAndGPU:
+        return "cpuAndGPU"
+    case .cpuOnly:
+        return "cpuOnly"
+    @unknown default:
+        return "unknown"
+    }
+}
+
 // MARK: - JSON Input
 
 struct BenchInput: Decodable {
@@ -67,7 +83,10 @@ struct BatchCommand: Decodable {
 /// scheduler to fall back to CPU.
 class ModelCache: KokoroModelProvider {
     let modelsDir: URL
-    let config: MLModelConfiguration
+    let durationConfig: MLModelConfiguration
+    let f0nConfig: MLModelConfiguration
+    let decoderPreConfig: MLModelConfiguration
+    let generatorConfig: MLModelConfiguration
     private let durationChoices: [DurationModelChoice]
 
     // Layer 1: Compiled URLs (persist forever — compilation is expensive)
@@ -82,13 +101,32 @@ class ModelCache: KokoroModelProvider {
     var decPreModels: [Int: MLModel] = [:]
     var genModels: [Int: MLModel] = [:]
 
-    init(modelsDir: URL, computeUnits: MLComputeUnits = .all) {
+    init(modelsDir: URL, computeUnits: MLComputeUnits = .all, stagedComputeUnits: Bool = false) {
         self.modelsDir = modelsDir
-        self.config = MLModelConfiguration()
-        self.config.computeUnits = computeUnits
+        if stagedComputeUnits {
+            self.durationConfig = Self.makeConfig(.cpuAndGPU)
+            self.f0nConfig = Self.makeConfig(.cpuAndGPU)
+            self.decoderPreConfig = Self.makeConfig(.cpuAndNeuralEngine)
+            self.generatorConfig = Self.makeConfig(.cpuAndGPU)
+        } else {
+            self.durationConfig = Self.makeConfig(computeUnits)
+            self.f0nConfig = Self.makeConfig(computeUnits)
+            self.decoderPreConfig = Self.makeConfig(computeUnits)
+            self.generatorConfig = Self.makeConfig(computeUnits)
+        }
         self.durationChoices = KokoroPipeline.discoverDurationChoices(modelsDirectory: modelsDir)
-        fputs("  Compute units: \(computeUnits == .all ? "all" : computeUnits == .cpuAndNeuralEngine ? "cpuAndNeuralEngine" : computeUnits == .cpuAndGPU ? "cpuAndGPU" : "cpuOnly")\n", stderr)
+        if stagedComputeUnits {
+            fputs("  Compute units: staged (duration/f0n/generator=cpuAndGPU, decoderPre=cpuAndNeuralEngine)\n", stderr)
+        } else {
+            fputs("  Compute units: \(computeUnitLabel(computeUnits))\n", stderr)
+        }
         fputs("  Duration choices: \(durationChoices.map { $0.cacheKey }.joined(separator: ", "))\n", stderr)
+    }
+
+    private static func makeConfig(_ computeUnits: MLComputeUnits) -> MLModelConfiguration {
+        let config = MLModelConfiguration()
+        config.computeUnits = computeUnits
+        return config
     }
 
     // -- Compiled URL helpers (compile once, cache the .mlmodelc path) --
@@ -162,7 +200,7 @@ class ModelCache: KokoroModelProvider {
         if let cached = durationModels[choice.cacheKey] { return cached }
         let compiled = try compiledDurationURL(choice: choice)
         fputs("  Loading duration \(choice.cacheKey)...\n", stderr)
-        let model = try MLModel(contentsOf: compiled, configuration: config)
+        let model = try MLModel(contentsOf: compiled, configuration: durationConfig)
         durationModels[choice.cacheKey] = model
         return model
     }
@@ -171,7 +209,7 @@ class ModelCache: KokoroModelProvider {
         if let cached = f0nModels[tFrames] { return cached }
         let compiled = try compiledF0nURL(tFrames: tFrames)
         fputs("  Loading f0ntrain tFrames=\(tFrames)...\n", stderr)
-        let model = try MLModel(contentsOf: compiled, configuration: config)
+        let model = try MLModel(contentsOf: compiled, configuration: f0nConfig)
         f0nModels[tFrames] = model
         return model
     }
@@ -180,7 +218,7 @@ class ModelCache: KokoroModelProvider {
         if let cached = decPreModels[bucket] { return cached }
         let compiled = try compiledDecPreURL(bucket: bucket)
         fputs("  Loading decoder_pre \(bucket)s...\n", stderr)
-        let model = try MLModel(contentsOf: compiled, configuration: config)
+        let model = try MLModel(contentsOf: compiled, configuration: decoderPreConfig)
         decPreModels[bucket] = model
         return model
     }
@@ -189,7 +227,7 @@ class ModelCache: KokoroModelProvider {
         if let cached = genModels[bucket] { return cached }
         let compiled = try compiledGenURL(bucket: bucket)
         fputs("  Loading generator \(bucket)s...\n", stderr)
-        let model = try MLModel(contentsOf: compiled, configuration: config)
+        let model = try MLModel(contentsOf: compiled, configuration: generatorConfig)
         genModels[bucket] = model
         return model
     }
@@ -381,7 +419,8 @@ func runSingleShot(modelsDir: String, inputsDir: String, hnsfWeightsPath: String
                     inputKey: String, seed: UInt64, outputPath: String?, wavPath: String?,
                     tensorDumpPath: String?,
                     warmupCount: Int,
-                    computeUnits: MLComputeUnits = .all) throws {
+                    computeUnits: MLComputeUnits = .all,
+                    stagedComputeUnits: Bool = false) throws {
     let weightsData = try Data(contentsOf: URL(fileURLWithPath: hnsfWeightsPath))
     let weights = try JSONDecoder().decode(HnsfWeights.self, from: weightsData)
 
@@ -389,7 +428,11 @@ func runSingleShot(modelsDir: String, inputsDir: String, hnsfWeightsPath: String
     let inputData = try Data(contentsOf: inputPath)
     let benchInput = try JSONDecoder().decode(BenchInput.self, from: inputData)
 
-    let cache = ModelCache(modelsDir: URL(fileURLWithPath: modelsDir), computeUnits: computeUnits)
+    let cache = ModelCache(
+        modelsDir: URL(fileURLWithPath: modelsDir),
+        computeUnits: computeUnits,
+        stagedComputeUnits: stagedComputeUnits
+    )
 
     fputs("Loading models...\n", stderr)
     let jsonData = try runPipeline(
@@ -413,11 +456,16 @@ func runSingleShot(modelsDir: String, inputsDir: String, hnsfWeightsPath: String
 
 func runGeneratorInputDump(modelsDir: String, tensorInputDumpPath: String,
                            outputPath: String?, tensorDumpPath: String?,
-                           computeUnits: MLComputeUnits = .all) throws {
+                           computeUnits: MLComputeUnits = .all,
+                           stagedComputeUnits: Bool = false) throws {
     let reader = try TensorDumpReader(directory: URL(fileURLWithPath: tensorInputDumpPath))
     let bucketSec = reader.metadata["bucket_seconds"] as? Int ?? 3
     let trimLen = reader.metadata["trim_len"] as? Int
-    let cache = ModelCache(modelsDir: URL(fileURLWithPath: modelsDir), computeUnits: computeUnits)
+    let cache = ModelCache(
+        modelsDir: URL(fileURLWithPath: modelsDir),
+        computeUnits: computeUnits,
+        stagedComputeUnits: stagedComputeUnits
+    )
     let genModel = try cache.generatorModel(bucket: bucketSec)
 
     let xPre = try reader.readFloatArray(name: "x_pre_padded")
@@ -482,10 +530,15 @@ func runGeneratorInputDump(modelsDir: String, tensorInputDumpPath: String,
 // MARK: - Batch mode
 
 func runBatch(modelsDir: String, inputsDir: String, hnsfWeightsPath: String,
-              computeUnits: MLComputeUnits = .all) throws {
+              computeUnits: MLComputeUnits = .all,
+              stagedComputeUnits: Bool = false) throws {
     let weightsData = try Data(contentsOf: URL(fileURLWithPath: hnsfWeightsPath))
     let weights = try JSONDecoder().decode(HnsfWeights.self, from: weightsData)
-    let cache = ModelCache(modelsDir: URL(fileURLWithPath: modelsDir), computeUnits: computeUnits)
+    let cache = ModelCache(
+        modelsDir: URL(fileURLWithPath: modelsDir),
+        computeUnits: computeUnits,
+        stagedComputeUnits: stagedComputeUnits
+    )
     let inputsDirURL = URL(fileURLWithPath: inputsDir)
 
     fputs("Batch mode ready. Waiting for commands on stdin...\n", stderr)
@@ -611,28 +664,43 @@ func main() throws {
         exit(1)
     }
 
-    // Parse compute units
+    // Parse compute units. `staged` mirrors the production Swift pipeline:
+    // duration/F0/generator stay on CPU+GPU, while decoder-pre uses CPU+ANE.
     let computeUnits: MLComputeUnits
+    let stagedComputeUnits: Bool
     switch computeUnitsStr.lowercased() {
-    case "all": computeUnits = .all
-    case "cpuandneuralengine": computeUnits = .cpuAndNeuralEngine
-    case "cpuandgpu": computeUnits = .cpuAndGPU
-    case "cpuonly": computeUnits = .cpuOnly
+    case "staged", "production":
+        computeUnits = .all
+        stagedComputeUnits = true
+    case "all":
+        computeUnits = .all
+        stagedComputeUnits = false
+    case "cpuandneuralengine":
+        computeUnits = .cpuAndNeuralEngine
+        stagedComputeUnits = false
+    case "cpuandgpu":
+        computeUnits = .cpuAndGPU
+        stagedComputeUnits = false
+    case "cpuonly":
+        computeUnits = .cpuOnly
+        stagedComputeUnits = false
     default:
-        fputs("Unknown compute units: \(computeUnitsStr). Use: all, cpuAndNeuralEngine, cpuAndGPU, cpuOnly\n", stderr)
+        fputs("Unknown compute units: \(computeUnitsStr). Use: staged, all, cpuAndNeuralEngine, cpuAndGPU, cpuOnly\n", stderr)
         exit(1)
     }
 
     if batchMode {
         try runBatch(modelsDir: modelsDir, inputsDir: inputsDir, hnsfWeightsPath: hnsfWeightsPath,
-                     computeUnits: computeUnits)
+                     computeUnits: computeUnits,
+                     stagedComputeUnits: stagedComputeUnits)
     } else if let generatorInputDumpPath {
         try runGeneratorInputDump(
             modelsDir: modelsDir,
             tensorInputDumpPath: generatorInputDumpPath,
             outputPath: outputPath,
             tensorDumpPath: tensorDumpPath,
-            computeUnits: computeUnits
+            computeUnits: computeUnits,
+            stagedComputeUnits: stagedComputeUnits
         )
     } else {
         guard let inputKey = inputKey else {
@@ -643,7 +711,8 @@ func main() throws {
                           inputKey: inputKey, seed: seed, outputPath: outputPath, wavPath: wavPath,
                           tensorDumpPath: tensorDumpPath,
                           warmupCount: warmupCount,
-                          computeUnits: computeUnits)
+                          computeUnits: computeUnits,
+                          stagedComputeUnits: stagedComputeUnits)
     }
 }
 
