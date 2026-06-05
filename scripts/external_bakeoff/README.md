@@ -128,6 +128,9 @@ This writes:
 
 The review uses only collected Kokoro TTS WAVs and waveform-quality reports. It
 does not use Whisper, ASR, VAD, or Soniqo's echo-demo dependency graph.
+Regeneration preserves existing `human_decision` and `notes` values for matching
+rows. Use `--reset-decisions` only when intentionally discarding prior human
+listening work.
 
 Fill `human_decision` for every successful audio row in the CSV with one of:
 

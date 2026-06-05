@@ -1,7 +1,9 @@
+import csv
 import hashlib
 import json
 from pathlib import Path
 
+from scripts.external_bakeoff.create_listening_review import _write_decisions_csv
 from scripts.external_bakeoff.ingest_ios_runner_result import _ingest_records
 from scripts.external_bakeoff.schema import (
     RUNTIME_BUCKETS,
@@ -120,6 +122,80 @@ def test_listening_decision_validator_blocks_blank_success_rows():
     assert summary["ok_rows"] == 1
     assert summary["error_rows"] == 1
     assert errors == ["m2-studio/3s/config-f-reference: missing human_decision"]
+
+
+def test_listening_review_regeneration_preserves_human_decisions(tmp_path):
+    decisions = tmp_path / "decisions.csv"
+    original = [
+        {
+            "machine_id": "m2-studio",
+            "input_key": "3s",
+            "impl": "config-f-reference",
+            "impl_label": "Config F reference",
+            "status": "ok",
+            "wav_path": "old.wav",
+            "duration_s": "2.800",
+            "waveform_decision": "reference_pass",
+            "caveat": "",
+            "human_decision": "pass",
+            "notes": "heard cleanly",
+            "expected_text": "old text",
+        }
+    ]
+    regenerated = [
+        {
+            "machine_id": "m2-studio",
+            "input_key": "3s",
+            "impl": "config-f-reference",
+            "impl_label": "Config F reference",
+            "status": "ok",
+            "wav_path": "new.wav",
+            "duration_s": "2.801",
+            "waveform_decision": "reference_pass",
+            "caveat": "",
+            "human_decision": "",
+            "notes": "",
+            "expected_text": "new text",
+        }
+    ]
+
+    _write_decisions_csv(decisions, original)
+    _write_decisions_csv(decisions, regenerated)
+
+    row = next(csv.DictReader(decisions.open()))
+    assert row["wav_path"] == "new.wav"
+    assert row["duration_s"] == "2.801"
+    assert row["expected_text"] == "new text"
+    assert row["human_decision"] == "pass"
+    assert row["notes"] == "heard cleanly"
+
+
+def test_listening_review_reset_decisions_blanks_human_fields(tmp_path):
+    decisions = tmp_path / "decisions.csv"
+    rows = [
+        {
+            "machine_id": "m2-studio",
+            "input_key": "3s",
+            "impl": "config-f-reference",
+            "impl_label": "Config F reference",
+            "status": "ok",
+            "wav_path": "sample.wav",
+            "duration_s": "2.800",
+            "waveform_decision": "reference_pass",
+            "caveat": "",
+            "human_decision": "pass",
+            "notes": "heard cleanly",
+            "expected_text": "text",
+        }
+    ]
+
+    _write_decisions_csv(decisions, rows)
+    reset_rows = [dict(rows[0], human_decision="", notes="")]
+    _write_decisions_csv(decisions, reset_rows, preserve_existing=False)
+
+    row = next(csv.DictReader(decisions.open()))
+    assert row["human_decision"] == ""
+    assert row["notes"] == ""
 
 
 def test_completion_verifier_allows_mlx_3s_error_but_requires_iphone():

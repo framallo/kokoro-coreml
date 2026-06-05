@@ -29,6 +29,7 @@ IMPL_ORDER = [
     "soniqo-speech-swift-kokoro",
     "laishere-kokoro-coreml",
 ]
+PRESERVED_DECISION_FIELDS = ("human_decision", "notes")
 
 
 def _quality_index(results_dir: Path) -> dict[str, dict[str, Any]]:
@@ -227,7 +228,53 @@ def _markdown(results_dir: Path, records: list[dict[str, Any]], quality: dict[st
     return "\n".join(lines).rstrip() + "\n"
 
 
-def _write_decisions_csv(path: Path, rows: list[dict[str, str]]) -> None:
+def _decision_key(row: dict[str, str]) -> tuple[str, str, str, str]:
+    """Return the stable key used to preserve human listening decisions."""
+    return (
+        row.get("machine_id", ""),
+        row.get("input_key", ""),
+        row.get("impl", ""),
+        row.get("status", ""),
+    )
+
+
+def _existing_decisions(path: Path) -> dict[tuple[str, str, str, str], dict[str, str]]:
+    """Load existing human decision fields from a prior decision sheet."""
+    if not path.exists():
+        return {}
+    with path.open(newline="") as handle:
+        reader = csv.DictReader(handle)
+        decisions: dict[tuple[str, str, str, str], dict[str, str]] = {}
+        for row in reader:
+            preserved = {
+                field: row.get(field, "")
+                for field in PRESERVED_DECISION_FIELDS
+                if row.get(field, "")
+            }
+            if preserved:
+                decisions[_decision_key(row)] = preserved
+        return decisions
+
+
+def _merge_existing_decisions(
+    rows: list[dict[str, str]],
+    existing: dict[tuple[str, str, str, str], dict[str, str]],
+) -> list[dict[str, str]]:
+    """Preserve human decisions while allowing generated metadata to refresh."""
+    merged: list[dict[str, str]] = []
+    for row in rows:
+        item = dict(row)
+        item.update(existing.get(_decision_key(row), {}))
+        merged.append(item)
+    return merged
+
+
+def _write_decisions_csv(
+    path: Path,
+    rows: list[dict[str, str]],
+    *,
+    preserve_existing: bool = True,
+) -> None:
     """Write a fillable human listening decision sheet."""
     fieldnames = [
         "machine_id",
@@ -243,6 +290,8 @@ def _write_decisions_csv(path: Path, rows: list[dict[str, str]]) -> None:
         "notes",
         "expected_text",
     ]
+    if preserve_existing:
+        rows = _merge_existing_decisions(rows, _existing_decisions(path))
     path.parent.mkdir(parents=True, exist_ok=True)
     with path.open("w", newline="") as handle:
         writer = csv.DictWriter(handle, fieldnames=fieldnames)
@@ -320,6 +369,11 @@ def main() -> None:
     )
     parser.add_argument("--no-html", action="store_true")
     parser.add_argument("--no-decisions-csv", action="store_true")
+    parser.add_argument(
+        "--reset-decisions",
+        action="store_true",
+        help="Rewrite the decisions CSV with blank human_decision and notes fields.",
+    )
     args = parser.parse_args()
 
     records = _result_records(args.results_dir)
@@ -331,7 +385,11 @@ def main() -> None:
     args.output.write_text(markdown_text)
     print(f"Wrote {args.output}")
     if not args.no_decisions_csv:
-        _write_decisions_csv(args.decisions_output, rows)
+        _write_decisions_csv(
+            args.decisions_output,
+            rows,
+            preserve_existing=not args.reset_decisions,
+        )
         print(f"Wrote {args.decisions_output}")
     if not args.no_html:
         args.html_output.parent.mkdir(parents=True, exist_ok=True)
