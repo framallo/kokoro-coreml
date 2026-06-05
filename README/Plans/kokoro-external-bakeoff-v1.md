@@ -1,7 +1,7 @@
 # Kokoro External Bakeoff Plan
 
 **Date:** 2026-06-05
-**Status:** Phase 2 gated; fleet health is green, Config F collection path needs a narrower precompile strategy
+**Status:** Phase 2 in progress; Config F batch collection gate resolved, iPhone runner needs signing team setup
 
 > Internal bakeoff methodology lives in `README/Plans/kokoro-bakeoff-v2.md`.
 > This plan extends that methodology to external Apple Silicon Kokoro
@@ -300,11 +300,17 @@ with the full Core ML model set.
 production TTS workers.
 
 **Current gate:** `pnpm check:tts-worker-health --json` was green on 2026-06-05
-with queue depth `0` and `3` fresh Kokoro workers. A local one-input Config F
-smoke against the main checkout's Core ML artifacts was interrupted after more
-than four minutes of silent `kokoro-bench` runtime. Before fleet collection,
-run a narrower Config F precompile/smoke path or reuse a known-good prepared
-benchmark checkout on each host.
+with queue depth `0`, `0` claimed jobs, `3` fresh Kokoro workers, and passing
+canary worker `operator-prove-live`. The local Config F collection gate is
+resolved: `run_config_f_reference.py` now uses persistent `kokoro-bench --batch`
+mode, and a 10s one-input smoke against the main checkout's Core ML artifacts
+emitted schema-valid JSON with `status=ok`, `bucket_used=10s`, cold wall time
+`0.54524s`, warm wall time `0.505431s`, observed duration `9.625s`, and WAV
+SHA-256 `1422cb557e87f09008dec461850ffc803fb3c24e4911bb89ef1498fa15aec904`.
+The connected iPhone 12 Pro is visible to CoreDevice and developer mode is
+enabled, but device app execution is gated on local signing setup:
+`DEVELOPMENT_TEAM` is unset and `security find-identity -v -p codesigning`
+reported `0 valid identities found`.
 
 **Tasks:**
 

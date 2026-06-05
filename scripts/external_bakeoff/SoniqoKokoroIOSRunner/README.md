@@ -16,6 +16,13 @@ SPEECH_SWIFT_PATH=/tmp/kokoro-external-bakeoff/speech-swift xcodegen generate
 
 ## Build For The Connected iPhone
 
+Preflight requirements:
+
+- The iPhone must appear in `xcrun devicectl list devices`.
+- `DEVELOPMENT_TEAM` must be set to an Apple development team ID.
+- `security find-identity -v -p codesigning` must show a valid Apple
+  development signing identity.
+
 ```bash
 xcodebuild -project SoniqoKokoroIOSRunner.xcodeproj \
   -scheme SoniqoKokoroIOSRunner \

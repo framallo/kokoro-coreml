@@ -9,6 +9,7 @@ import subprocess
 import sys
 import tempfile
 from pathlib import Path
+from typing import Any, Optional
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 
@@ -24,41 +25,83 @@ from scripts.external_bakeoff.schema import (  # noqa: E402
 )
 
 
-def _run_once(
-    binary: Path,
-    input_key: str,
-    compute_units: str,
-    models_dir: Path,
-    inputs_dir: Path,
-    hnsf_weights: Path,
-) -> dict:
-    with tempfile.NamedTemporaryFile(suffix=".json", delete=False) as f:
-        out = Path(f.name)
-    with tempfile.NamedTemporaryFile(suffix=".wav", delete=False) as f:
-        wav = Path(f.name)
-    cmd = [
-        str(binary),
-        "--models-dir", str(models_dir),
-        "--inputs-dir", str(inputs_dir),
-        "--hnsf-weights", str(hnsf_weights),
-        "--input-key", input_key,
-        "--compute-units", compute_units,
-        "--output", str(out),
-        "--wav", str(wav),
-    ]
-    proc = subprocess.run(cmd, text=True, capture_output=True)
-    if proc.returncode != 0:
-        raise RuntimeError(
-            "kokoro-bench failed\n"
-            f"stdout:\n{proc.stdout}\n"
-            f"stderr:\n{proc.stderr}"
+class ConfigFBatchRunner:
+    """Persistent kokoro-bench batch subprocess with one cache lifetime."""
+
+    def __init__(
+        self,
+        binary: Path,
+        compute_units: str,
+        models_dir: Path,
+        inputs_dir: Path,
+        hnsf_weights: Path,
+    ) -> None:
+        self.proc = subprocess.Popen(
+            [
+                str(binary),
+                "--models-dir", str(models_dir),
+                "--inputs-dir", str(inputs_dir),
+                "--hnsf-weights", str(hnsf_weights),
+                "--batch",
+                "--compute-units", compute_units,
+            ],
+            stdin=subprocess.PIPE,
+            stdout=subprocess.PIPE,
+            text=True,
         )
-    data = json.loads(out.read_text())
-    if wav.exists():
-        data["output_sha256"] = hashlib.sha256(wav.read_bytes()).hexdigest()
-    out.unlink(missing_ok=True)
-    wav.unlink(missing_ok=True)
-    return data
+        self._read_until("READY")
+
+    def close(self) -> None:
+        if self.proc.stdin:
+            self.proc.stdin.close()
+        return_code = self.proc.wait(timeout=30)
+        if return_code != 0:
+            raise RuntimeError(f"kokoro-bench batch exited with status {return_code}")
+
+    def _read_status_line(self) -> str:
+        if not self.proc.stdout:
+            raise RuntimeError("kokoro-bench stdout pipe is unavailable")
+        line = self.proc.stdout.readline()
+        if not line:
+            return_code = self.proc.poll()
+            raise RuntimeError(f"kokoro-bench batch ended before status line, return={return_code}")
+        return line.strip()
+
+    def _read_until(self, token: str) -> str:
+        while True:
+            line = self._read_status_line()
+            if token in line:
+                return line
+            if "ERROR" in line:
+                raise RuntimeError(f"kokoro-bench batch returned error status: {line}")
+
+    def run_once(self, input_key: str, seed: int = 42, warmup: bool = False) -> dict[str, Any]:
+        if not self.proc.stdin:
+            raise RuntimeError("kokoro-bench stdin pipe is unavailable")
+        with tempfile.NamedTemporaryFile(suffix=".json", delete=False) as f:
+            out = Path(f.name)
+        with tempfile.NamedTemporaryFile(suffix=".wav", delete=False) as f:
+            wav = Path(f.name)
+
+        command = {
+            "input_key": input_key,
+            "seed": seed,
+            "output": str(out),
+            "wav": str(wav),
+            "warmup": warmup,
+        }
+        self.proc.stdin.write(json.dumps(command, separators=(",", ":")) + "\n")
+        self.proc.stdin.flush()
+        self._read_until("DONE")
+
+        data = json.loads(out.read_text())
+        if wav.exists():
+            data["output_sha256"] = hashlib.sha256(wav.read_bytes()).hexdigest()
+        out.unlink(missing_ok=True)
+        wav.unlink(missing_ok=True)
+        if data.get("status") != "ok":
+            raise RuntimeError(f"kokoro-bench batch record failed: {data}")
+        return data
 
 
 def main() -> None:
@@ -87,76 +130,73 @@ def main() -> None:
     keys = args.input_key or list(manifest["inputs"].keys())
 
     records = []
-    for key in keys:
-        item = manifest["inputs"][key]
-        try:
-            cold_result = _run_once(
-                args.binary,
-                key,
-                args.compute_units,
-                args.models_dir,
-                args.inputs_dir,
-                args.hnsf_weights,
-            )
-            warm = [
-                _run_once(
-                    args.binary,
-                    key,
-                    args.compute_units,
-                    args.models_dir,
-                    args.inputs_dir,
-                    args.hnsf_weights,
+    runner: Optional[ConfigFBatchRunner] = None
+    try:
+        runner = ConfigFBatchRunner(
+            args.binary,
+            args.compute_units,
+            args.models_dir,
+            args.inputs_dir,
+            args.hnsf_weights,
+        )
+        for key in keys:
+            item = manifest["inputs"][key]
+            try:
+                cold_result = runner.run_once(key, warmup=False)
+                warm = [runner.run_once(key, warmup=True) for _ in range(args.iterations)]
+                records.append(
+                    result_record(
+                        impl="config-f-reference",
+                        framework="Swift + Core ML",
+                        hardware_target="ANE/Core ML",
+                        version="local",
+                        machine_id=args.machine_id,
+                        input_key=key,
+                        text=item["text"],
+                        voice=item["voice"],
+                        cold_wall_time_s=float(cold_result["wall_time_s"]),
+                        warm_wall_times_s=[float(row["wall_time_s"]) for row in warm],
+                        canonical_audio_duration_s=float(item["canonical_duration_s"]),
+                        observed_audio_duration_s=float(warm[-1]["observed_audio_duration_s"]),
+                        output_sha256=str(warm[-1].get("output_sha256") or ""),
+                        provenance={
+                            "binary": str(args.binary),
+                            "models_dir": str(args.models_dir),
+                            "inputs_dir": str(args.inputs_dir),
+                            "hnsf_weights": str(args.hnsf_weights),
+                            "compute_units": args.compute_units,
+                            "batch_mode": True,
+                            "bucket_used": warm[-1].get("bucket_used"),
+                            "raw_last_result": warm[-1],
+                        },
+                    )
                 )
-                for _ in range(args.iterations)
-            ]
-            records.append(
-                result_record(
-                    impl="config-f-reference",
-                    framework="Swift + Core ML",
-                    hardware_target="ANE/Core ML",
-                    version="local",
-                    machine_id=args.machine_id,
-                    input_key=key,
-                    text=item["text"],
-                    voice=item["voice"],
-                    cold_wall_time_s=float(cold_result["wall_time_s"]),
-                    warm_wall_times_s=[float(row["wall_time_s"]) for row in warm],
-                    canonical_audio_duration_s=float(item["canonical_duration_s"]),
-                    observed_audio_duration_s=float(warm[-1]["observed_audio_duration_s"]),
-                    output_sha256=str(warm[-1].get("output_sha256") or ""),
-                    provenance={
-                        "binary": str(args.binary),
-                        "models_dir": str(args.models_dir),
-                        "inputs_dir": str(args.inputs_dir),
-                        "hnsf_weights": str(args.hnsf_weights),
-                        "compute_units": args.compute_units,
-                        "bucket_used": warm[-1].get("bucket_used"),
-                        "raw_last_result": warm[-1],
-                    },
+            except Exception as exc:
+                records.append(
+                    error_record(
+                        impl="config-f-reference",
+                        framework="Swift + Core ML",
+                        hardware_target="ANE/Core ML",
+                        version="local",
+                        machine_id=args.machine_id,
+                        input_key=key,
+                        text=item["text"],
+                        voice=item["voice"],
+                        canonical_audio_duration_s=float(item["canonical_duration_s"]),
+                        provenance={
+                            "binary": str(args.binary),
+                            "models_dir": str(args.models_dir),
+                            "inputs_dir": str(args.inputs_dir),
+                            "hnsf_weights": str(args.hnsf_weights),
+                            "compute_units": args.compute_units,
+                            "batch_mode": True,
+                        },
+                        error=f"{type(exc).__name__}: {exc}",
+                    )
                 )
-            )
-        except Exception as exc:
-            records.append(
-                error_record(
-                    impl="config-f-reference",
-                    framework="Swift + Core ML",
-                    hardware_target="ANE/Core ML",
-                    version="local",
-                    machine_id=args.machine_id,
-                    input_key=key,
-                    text=item["text"],
-                    voice=item["voice"],
-                    canonical_audio_duration_s=float(item["canonical_duration_s"]),
-                    provenance={
-                        "binary": str(args.binary),
-                        "models_dir": str(args.models_dir),
-                        "inputs_dir": str(args.inputs_dir),
-                        "hnsf_weights": str(args.hnsf_weights),
-                        "compute_units": args.compute_units,
-                    },
-                    error=f"{type(exc).__name__}: {exc}",
-                )
-            )
+    finally:
+        if runner is not None:
+            runner.close()
 
     payload = result_file_payload(
         impl="config-f-reference",
@@ -168,6 +208,7 @@ def main() -> None:
             "inputs_dir": str(args.inputs_dir),
             "hnsf_weights": str(args.hnsf_weights),
             "compute_units": args.compute_units,
+            "batch_mode": True,
         },
     )
     validate_result_payload(payload)

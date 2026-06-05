@@ -19,7 +19,7 @@
 ///                  --hnsf-weights FILE --batch
 ///
 ///     Then send JSON commands on stdin, one per line:
-///       {"input_key":"3s","seed":42,"output":"/tmp/result.json"}
+///       {"input_key":"3s","seed":42,"output":"/tmp/result.json","wav":"/tmp/out.wav"}
 ///     The binary prints "READY\n" to stdout after loading weights,
 ///     and "DONE\n" after each command completes.
 ///     Close stdin (EOF) to exit.
@@ -54,6 +54,7 @@ struct BatchCommand: Decodable {
     let input_key: String
     let seed: UInt64?
     let output: String
+    let wav: String?
     let warmup: Bool?
 }
 
@@ -520,7 +521,8 @@ func runBatch(modelsDir: String, inputsDir: String, hnsfWeightsPath: String,
                 inputKey: cmd.input_key,
                 seed: seed,
                 weights: weights,
-                cache: cache
+                cache: cache,
+                wavOutputPath: cmd.wav
             )
 
             let jsonString = String(data: jsonData, encoding: .utf8)!
