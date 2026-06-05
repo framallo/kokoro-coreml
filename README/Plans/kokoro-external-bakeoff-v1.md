@@ -3,8 +3,8 @@
 **Date:** 2026-06-05
 **Status:** External result section and consolidated platform table written;
 compile-contaminated 30s Config F cells replaced with warmed-inference reruns;
-local Config F, MLX, Soniqo, and laishere powermetrics captured; human
-listening and signed iPhone execution remain before this plan can be marked
+local Config F, MLX, Soniqo, and laishere powermetrics captured; signed iPhone
+execution ingested; human listening remains before this plan can be marked
 complete; a fillable TTS-only listening decision CSV is generated for the
 remaining human review gate
 
@@ -321,27 +321,27 @@ emitted schema-valid JSON with `status=ok`, `bucket_used=10s`, cold wall time
 `0.54524s`, warm wall time `0.505431s`, observed duration `9.625s`, and WAV
 SHA-256 `1422cb557e87f09008dec461850ffc803fb3c24e4911bb89ef1498fa15aec904`.
 The connected iPhone 12 Pro is visible to CoreDevice and developer mode is
-enabled, but device app execution is gated on local signing setup:
-`DEVELOPMENT_TEAM` is unset and `security find-identity -v -p codesigning`
-reported `0 valid identities found`. The live device check on 2026-06-05
-identified the phone as `Webcam`, identifier
-`F383FC46-FD64-5346-AEC6-59E3E2F8C9CA`, model `iPhone13,3`, state
-`available (paired)`. The Soniqo iOS runner is now manifest-driven across the
-runtime buckets (`3s`, `7s`, `10s`, `15s`, `30s`) and reports one cold call plus
-five warmed calls per bucket with observed-duration RTF. A physical-device
-`xcodebuild` against that iPhone reached signing and failed because the target
-requires a development team; the local keychain has no valid code-signing
-identity, so no iPhone inference result exists yet. Run
-`SPEECH_SWIFT_PATH=/tmp/kokoro-external-bakeoff/speech-swift python scripts/external_bakeoff/preflight_ios_runner.py --generate-project --output outputs/external_bakeoff/ios_runner_preflight_latest.json`
-before the next signed-device attempt. With that environment, the preflight
-proves the device is available and Xcode project generation succeeds; the
-remaining blockers are `DEVELOPMENT_TEAM` and a valid local code-signing
-identity. After the signed app runs, paste its copied JSON into
-`outputs/external_bakeoff/ios_runner_payload_latest.json` and run
-`python scripts/external_bakeoff/ingest_ios_runner_result.py --input outputs/external_bakeoff/ios_runner_payload_latest.json --machine-id iphone-12-pro`
-to normalize the on-device timing results. The iOS runner remains deliberately
-Kokoro-only; Whisper, ASR, VAD, and the full Soniqo echo-demo dependency graph
-are excluded from the measurement path.
+enabled. The live device check on 2026-06-05 identified the phone as `Webcam`,
+identifier `F383FC46-FD64-5346-AEC6-59E3E2F8C9CA`, UDID
+`00008101-001134561A0A001E`, model `iPhone13,3`, connected and paired. The
+Soniqo iOS runner is manifest-driven across the runtime buckets (`3s`, `7s`,
+`10s`, `15s`, `30s`) and reports one cold call plus five warmed calls per
+bucket with observed-duration RTF. After Apple Development signing was added,
+`SPEECH_SWIFT_PATH=/tmp/kokoro-external-bakeoff/speech-swift DEVELOPMENT_TEAM=6ETYBAJKY8 python scripts/external_bakeoff/preflight_ios_runner.py --generate-project --build --output outputs/external_bakeoff/ios_runner_build_latest.json`
+completed with `ok: true`, no blockers, and `BUILD SUCCEEDED`. The app was
+installed and launched on the physical phone with
+`xcrun devicectl device process launch`, run on device, copied JSON through the
+clipboard, and was ingested with
+`python scripts/external_bakeoff/ingest_ios_runner_result.py --input outputs/external_bakeoff/ios_runner_payload_latest.json --machine-id iphone-12-pro`.
+The normalized output is
+`outputs/external_bakeoff/results_soniqo_speech_swift_kokoro_ios_iphone-12-pro.json`
+with five signed-device records. Warm medians were `832.7 ms` for 3s,
+`833.9 ms` for 7s, `853.6 ms` for 10s, `864.4 ms` for 15s, and `879.1 ms` for
+30s. As with the macOS Soniqo runs, the longer inputs emit `5.0s` audio from
+the public Soniqo artifact, so those iPhone cells are device execution evidence
+but not full-duration long-bucket parity evidence. The iOS runner remains
+deliberately Kokoro-only; Whisper, ASR, VAD, and the full Soniqo echo-demo
+dependency graph are excluded from the measurement path.
 
 **Current collection note:** M2 Studio, irvine-m1, and M2 Air now have
 schema-valid JSON for Config F, MLX, Soniqo, and laishere, and every successful
@@ -390,9 +390,11 @@ powermetrics capture exists for the long-bucket backup Core ML chain.
 - [x] Re-check fleet health after each host and record the result in the run
       note.
 
-**Verification:** Twelve result JSON files exist: Config F, MLX, Soniqo, and
-laishere across 3 machines. Each result has cold latency, 5 warm iterations per
-successful runtime bucket, provenance, and durable spot-check WAVs.
+**Verification:** Twelve Mac result JSON files exist: Config F, MLX, Soniqo,
+and laishere across 3 machines. One signed iPhone result JSON exists for the
+Soniqo iOS runner. Each result has cold latency, 5 warm iterations per
+successful runtime bucket, and provenance; Mac success cells have durable
+spot-check WAVs, while the minimal iPhone runner exposes timing JSON only.
 Framework/runtime placement is documented. One local Config F privileged
 `powermetrics` capture and one local MLX privileged `powermetrics` capture
 exist. One local Soniqo privileged `powermetrics` capture exists for the primary
@@ -465,11 +467,11 @@ no speed row is interpreted as quality parity.
 
 **Verification:** `performance-notes.md` contains enough information for a
 reader to reproduce the comparison from clean clones and pinned versions. It
-also states that human listening and signed iPhone execution remain pending
-before publication-grade time-to-parity claims. Running
+also states that human listening remains pending before publication-grade
+time-to-parity claims. Running
 `python scripts/external_bakeoff/verify_external_bakeoff_completion.py` is the
 final plan-completion gate; it currently fails until human listening decisions
-are filled and a signed iPhone result is ingested.
+are filled.
 
 ## Success Criteria
 

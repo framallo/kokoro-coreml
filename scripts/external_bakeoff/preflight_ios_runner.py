@@ -45,14 +45,21 @@ def _run(command: list[str], *, cwd: Path | None = None) -> dict[str, Any]:
 
 
 def _device_status(device_id: str) -> dict[str, Any]:
-    result = _run(["xcrun", "devicectl", "list", "devices"])
-    text = result["stdout"] + result["stderr"]
-    line = next((item for item in text.splitlines() if device_id in item), "")
+    list_result = _run(["xcrun", "devicectl", "list", "devices"])
+    list_text = list_result["stdout"] + list_result["stderr"]
+    line = next((item for item in list_text.splitlines() if device_id in item), "")
+    details_result = _run(["xcrun", "devicectl", "device", "info", "details", "--device", device_id])
+    details_text = details_result["stdout"] + details_result["stderr"]
+    is_connected = " connected " in f" {line} " or "tunnelState: connected" in details_text
+    is_paired = "pairingState: paired" in details_text or "paired" in line
     return {
-        "ok": result["returncode"] == 0 and "available" in line and "paired" in line,
+        "ok": list_result["returncode"] == 0 and details_result["returncode"] == 0 and is_connected and is_paired,
         "device_id": device_id,
         "line": line,
-        "command_returncode": result["returncode"],
+        "list_command_returncode": list_result["returncode"],
+        "details_command_returncode": details_result["returncode"],
+        "connected": is_connected,
+        "paired": is_paired,
     }
 
 

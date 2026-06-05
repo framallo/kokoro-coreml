@@ -82,7 +82,7 @@ final class BenchmarkViewModel: ObservableObject {
                             text: input.text,
                             voice: input.voice,
                             language: "en",
-                            speed: input.speed
+                            speed: Float(input.speed)
                         )
                         let cold = CFAbsoluteTimeGetCurrent() - coldStart
 
@@ -94,7 +94,7 @@ final class BenchmarkViewModel: ObservableObject {
                                 text: input.text,
                                 voice: input.voice,
                                 language: "en",
-                                speed: input.speed
+                                speed: Float(input.speed)
                             )
                             warmTimes.append(CFAbsoluteTimeGetCurrent() - warmStart)
                         }
