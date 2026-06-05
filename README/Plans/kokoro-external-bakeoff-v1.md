@@ -1,9 +1,8 @@
 # Kokoro External Bakeoff Plan
 
 **Date:** 2026-06-05
-**Status:** Phase 2 collection complete across M2 Studio, irvine-m1, and
-m2-air; Phase 3 listening, hardware-placement evidence, and Phase 4
-performance-notes writeup remain
+**Status:** External result section written; human listening and privileged
+hardware-placement traces remain before this plan can be marked complete
 
 > Internal bakeoff methodology lives in `README/Plans/kokoro-bakeoff-v2.md`.
 > This plan extends that methodology to external Apple Silicon Kokoro
@@ -72,16 +71,16 @@ TTS.cpp/GGML, ONNX-only variants, and non-Kokoro engines.
 
 - [ ] Establish warm median end-to-end RTF for our Config F, mlx-audio, and the
       selected iOS/Core ML comparator on m2-studio, irvine-m1, and m2-air.
-- [ ] Use identical input texts and voice (`af_heart` or closest equivalent)
+- [x] Use identical input texts and voice (`af_heart` or closest equivalent)
       for the shipped runtime model buckets (`3s`, `7s`, `10s`, `15s`, `30s`).
 - [ ] Time the same boundary: immediately before synthesis call / CLI command
       to after full PCM audio is materialized in memory, excluding file writes.
-- [ ] Record cold first-call latency separately from warm median latency.
+- [x] Record cold first-call latency separately from warm median latency.
 - [ ] Capture hardware-placement evidence: MLX GPU activity for MLX competitors
       and Core ML/ANE evidence for Core ML competitors and our Config F.
 - [ ] Spot-check audio quality and voice/prosody parity before interpreting
       speed as time-to-parity.
-- [ ] Write a reproducible external-competitor section in
+- [x] Write a reproducible external-competitor section in
       `README/Notes/performance-notes.md`.
 
 ### Non-Goals
@@ -327,7 +326,7 @@ are still pending before the speed table can be interpreted as time-to-parity.
 
 **Tasks:**
 
-- [ ] Before each host, check fleet health and queue pressure from the botnet
+- [x] Before each host, check fleet health and queue pressure from the botnet
       repo:
 
       ```bash
@@ -336,7 +335,7 @@ are still pending before the speed table can be interpreted as time-to-parity.
         pnpm check:tts-worker-health
       ```
 
-- [ ] For each machine (`m2-studio`, `irvine-m1`, `m2-air`):
+- [x] For each machine (`m2-studio`, `irvine-m1`, `m2-air`):
       - SSH with the known user for that host.
       - Copy only `scripts/external_bakeoff/`, the manifest, and any required
         Swift package wrapper.
@@ -348,12 +347,14 @@ are still pending before the speed table can be interpreted as time-to-parity.
       - Copy JSON and spot-check WAVs back to
         `outputs/external_bakeoff/`.
       - Remove venvs, cloned external repos, and Swift build products.
-- [ ] Re-check fleet health after each host and record the result in the run
+- [x] Re-check fleet health after each host and record the result in the run
       note.
 
-**Verification:** At least 9 result JSON files exist: Config F, MLX, and Core
-ML comparator across 3 machines. Each primary result has cold latency, 5 warm
-iterations per runtime bucket, provenance, and hardware-placement evidence.
+**Verification:** Twelve result JSON files exist: Config F, MLX, Soniqo, and
+laishere across 3 machines. Each result has cold latency, 5 warm iterations per
+successful runtime bucket, provenance, and durable spot-check WAVs.
+Framework/runtime placement is documented; privileged ANE/GPU residency traces
+remain pending.
 
 ---
 
@@ -364,17 +365,18 @@ audio buffer.
 
 **Tasks:**
 
-- [ ] Save WAV output for each implementation and each runtime bucket on each
+- [x] Save WAV output for each implementation and each runtime bucket on each
       machine.
 - [ ] Listen against Config F for the same text and voice.
-- [ ] Run lightweight waveform sanity checks using `scripts/audio_quality_probe.py`
+- [x] Run lightweight waveform sanity checks using `scripts/audio_quality_probe.py`
       where applicable: duration, RMS, clipping, silence, and gross spectral
       failures.
-- [ ] Document voice/prosody caveats. If a competitor cannot use `af_heart`,
+- [x] Document voice/prosody caveats. If a competitor cannot use `af_heart`,
       state that speedups are not direct voice-matched claims.
 
 **Verification:** Each implementation has a short quality note. Any latency
-table cell without quality parity evidence is marked with a caveat.
+table cell without quality parity evidence is marked with a caveat. Human
+listening is still pending, so no speed row is interpreted as quality parity.
 
 ---
 
@@ -384,11 +386,11 @@ table cell without quality parity evidence is marked with a caveat.
 
 **Tasks:**
 
-- [ ] Run `summarize_external.py` and paste the tables into
+- [x] Run `summarize_external.py` and paste the tables into
       `README/Notes/performance-notes.md`.
-- [ ] Add a section titled:
+- [x] Add a section titled:
       "External Bakeoff: surgical Core ML vs MLX and iOS/Core ML Kokoro".
-- [ ] Include:
+- [x] Include:
       - Competitor selection and excluded repos.
       - Machine and OS provenance.
       - Cold latency table.
@@ -403,7 +405,9 @@ table cell without quality parity evidence is marked with a caveat.
       commit generated JSON or WAV files under `outputs/`.
 
 **Verification:** `performance-notes.md` contains enough information for a
-reader to reproduce the comparison from clean clones and pinned versions.
+reader to reproduce the comparison from clean clones and pinned versions. It
+also states that human listening and privileged placement traces remain pending
+before publication-grade time-to-parity claims.
 
 ## Success Criteria
 
@@ -414,16 +418,16 @@ reader to reproduce the comparison from clean clones and pinned versions.
       model buckets.
 - [ ] Each impl x machine x input has cold latency and N=5 warm calls.
 - [ ] Timing boundaries are explicitly equivalent.
-- [ ] `af_heart` or documented substitute is used for every implementation.
+- [x] `af_heart` or documented substitute is used for every implementation.
 - [ ] Hardware placement is documented for every implementation family.
-- [ ] No production worker disruption is observed.
-- [ ] Adapter scripts and pinned install docs are checked in.
+- [x] No production worker disruption is observed.
+- [x] Adapter scripts and pinned install docs are checked in.
 - [ ] Quality spot-check is documented before interpreting speedups.
 
 ### Definition of Done
 
-- [ ] `README/Notes/performance-notes.md` has the external-competitor section.
-- [ ] Adapter scripts and requirements files are committed.
+- [x] `README/Notes/performance-notes.md` has the external-competitor section.
+- [x] Adapter scripts and requirements files are committed.
 - [ ] This plan is updated to `Status: Complete`.
 
 ## Open Questions

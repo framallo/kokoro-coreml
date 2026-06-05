@@ -23,6 +23,198 @@ These numbers do **not** include:
 - model download
 - application-level audio playback
 
+## External Bakeoff: surgical Core ML vs MLX and iOS/Core ML Kokoro
+
+**Collected:** 2026-06-05
+**Status:** Phase 2 collection complete; waveform sanity complete; human
+listening and privileged hardware-placement traces still pending.
+
+This bakeoff compares the current Swift + Core ML Config F reference against
+popular Apple Silicon Kokoro implementations:
+
+- **MLX:** `Blaizzy/mlx-audio`, pinned clone
+  `862dfbe5338e91df6f74ac986b4df8bede7961a6`, package version
+  `mlx-audio 0.4.3`, model `mlx-community/Kokoro-82M-bf16`.
+- **Primary iOS/Core ML comparator:** `soniqo/speech-swift`, pinned clone
+  `0d09a2ed5464c7c94cf4545be59043c21f8775ea`, using
+  `KokoroTTSModel.fromPretrained(computeUnits: .all)`.
+- **Long-bucket Core ML backup:** `laishere/kokoro-coreml`, pinned clone
+  `484907db6a8347a6afb6e7b86850ea2878c6a3fb`.
+
+`mlalma/kokoro-ios` was excluded from the primary table because its public
+package is MLX Swift, not Core ML. ONNX, GGML, browser, cloud, and non-Kokoro
+engines were out of scope.
+
+### Method
+
+The shared manifest uses the shipped runtime buckets: `3s`, `7s`, `10s`,
+`15s`, and `30s`. All adapters requested voice `af_heart`. Each cell records
+one cold call followed by five warm calls. The warm table reports the median of
+the five warm wall times. RTF uses the observed emitted audio duration, not the
+nominal bucket label.
+
+The intended timing boundary is from immediately before the implementation's
+synthesis call or CLI invocation until full PCM audio is materialized in memory.
+Config F, MLX, and Soniqo follow that boundary. laishere's public benchmark
+boundary excludes G2P and feed preparation and times only the seven-stage Core
+ML chain; those numbers are therefore useful as a Core ML chain comparison, but
+not a fully equivalent end-to-end TTS boundary.
+
+### Machine Provenance
+
+| Machine | Hardware model | Memory | macOS |
+| --- | --- | ---: | --- |
+| m2-studio | Mac14,14 | 64 GiB | 26.5 / 25F71 |
+| m2-air | Mac14,15 | 24 GiB | 15.7.7 / 24G720 |
+| irvine-m1 | Macmini9,1 | 16 GiB | 15.7.7 / 24G720 |
+
+### Cold Wall Time
+
+| Machine | Impl | 3s | 7s | 10s | 15s | 30s |
+| --- | --- | ---: | ---: | ---: | ---: | ---: |
+| m2-studio | Config F | 125.5 ms | 309.5 ms | 570.9 ms | 647.3 ms | 1389.1 ms |
+| m2-studio | MLX | error | 195.9 ms | 4737.1 ms | 438.1 ms | 930.2 ms |
+| m2-studio | Soniqo | 615.2 ms | 433.0 ms | 398.0 ms | 411.7 ms | 414.3 ms |
+| m2-studio | laishere | 237.0 ms | 359.0 ms | 839.7 ms | 676.1 ms | 1955.1 ms |
+| m2-air | Config F | 313.8 ms | 683.1 ms | 1054.0 ms | 2134.6 ms | 9447.1 ms |
+| m2-air | MLX | error | 670.4 ms | 20802.8 ms | 1636.8 ms | 2851.4 ms |
+| m2-air | Soniqo | 1189.8 ms | 1210.7 ms | 1237.2 ms | 1273.7 ms | 1233.1 ms |
+| m2-air | laishere | 289.9 ms | 330.7 ms | 710.6 ms | 746.8 ms | 1616.2 ms |
+| irvine-m1 | Config F | 286.0 ms | 647.7 ms | 1035.0 ms | 1372.5 ms | 9114.3 ms |
+| irvine-m1 | MLX | error | 807.2 ms | 20027.8 ms | 1662.4 ms | 3293.4 ms |
+| irvine-m1 | Soniqo | 1395.3 ms | 1391.9 ms | 1413.1 ms | 1461.0 ms | 1431.8 ms |
+| irvine-m1 | laishere | 1102.5 ms | 1239.3 ms | 1877.0 ms | 1659.6 ms | 2791.8 ms |
+
+### Warm Median Wall Time
+
+| Machine | Impl | 3s | 7s | 10s | 15s | 30s |
+| --- | --- | ---: | ---: | ---: | ---: | ---: |
+| m2-studio | Config F | 131.5 ms | 284.2 ms | 548.2 ms | 632.9 ms | 1191.8 ms |
+| m2-studio | MLX | error | 223.9 ms | 288.8 ms | 376.3 ms | 762.7 ms |
+| m2-studio | Soniqo | 71.7 ms | 69.3 ms | 71.0 ms | 68.1 ms | 69.5 ms |
+| m2-studio | laishere | 212.3 ms | 403.3 ms | 626.3 ms | 429.8 ms | 925.1 ms |
+| m2-air | Config F | 317.4 ms | 808.1 ms | 1373.3 ms | 2052.4 ms | 9559.1 ms |
+| m2-air | MLX | error | 685.6 ms | 835.8 ms | 1521.0 ms | 2600.3 ms |
+| m2-air | Soniqo | 1097.4 ms | 1135.8 ms | 1123.0 ms | 1125.5 ms | 1123.5 ms |
+| m2-air | laishere | 142.0 ms | 316.9 ms | 450.2 ms | 657.3 ms | 1476.4 ms |
+| irvine-m1 | Config F | 304.6 ms | 696.1 ms | 1348.5 ms | 1672.7 ms | 16119.6 ms |
+| irvine-m1 | MLX | error | 824.0 ms | 1124.3 ms | 1589.5 ms | 3077.9 ms |
+| irvine-m1 | Soniqo | 1330.9 ms | 1343.6 ms | 1313.9 ms | 1343.6 ms | 1351.2 ms |
+| irvine-m1 | laishere | 176.3 ms | 394.6 ms | 593.9 ms | 912.0 ms | 2135.1 ms |
+
+### Observed RTF
+
+| Machine | Impl | 3s | 7s | 10s | 15s | 30s |
+| --- | --- | ---: | ---: | ---: | ---: | ---: |
+| m2-studio | Config F | 0.047 | 0.042 | 0.057 | 0.046 | 0.043 |
+| m2-studio | MLX | error | 0.033 | 0.030 | 0.027 | 0.028 |
+| m2-studio | Soniqo | 0.027 | 0.014 | 0.014 | 0.014 | 0.014 |
+| m2-studio | laishere | 0.077 | 0.059 | 0.065 | 0.031 | 0.034 |
+| m2-air | Config F | 0.113 | 0.120 | 0.143 | 0.148 | 0.349 |
+| m2-air | MLX | error | 0.102 | 0.087 | 0.109 | 0.095 |
+| m2-air | Soniqo | 0.406 | 0.227 | 0.225 | 0.225 | 0.225 |
+| m2-air | laishere | 0.051 | 0.046 | 0.047 | 0.047 | 0.054 |
+| irvine-m1 | Config F | 0.109 | 0.103 | 0.140 | 0.120 | 0.588 |
+| irvine-m1 | MLX | error | 0.122 | 0.117 | 0.114 | 0.112 |
+| irvine-m1 | Soniqo | 0.493 | 0.269 | 0.263 | 0.269 | 0.270 |
+| irvine-m1 | laishere | 0.064 | 0.058 | 0.062 | 0.065 | 0.078 |
+
+### Observed Audio Duration
+
+| Machine | Impl | 3s | 7s | 10s | 15s | 30s |
+| --- | --- | ---: | ---: | ---: | ---: | ---: |
+| m2-studio | Config F | 2.800s | 6.750s | 9.625s | 13.900s | 27.400s |
+| m2-studio | MLX | error | 6.750s | 9.600s | 13.900s | 27.375s |
+| m2-studio | Soniqo | 2.700s | 5.000s | 5.000s | 5.000s | 5.000s |
+| m2-studio | laishere | 2.775s | 6.800s | 9.625s | 13.975s | 27.375s |
+| m2-air | Config F | 2.800s | 6.750s | 9.625s | 13.900s | 27.400s |
+| m2-air | MLX | error | 6.750s | 9.600s | 13.900s | 27.375s |
+| m2-air | Soniqo | 2.700s | 5.000s | 5.000s | 5.000s | 5.000s |
+| m2-air | laishere | 2.775s | 6.825s | 9.650s | 13.925s | 27.350s |
+| irvine-m1 | Config F | 2.800s | 6.750s | 9.625s | 13.900s | 27.400s |
+| irvine-m1 | MLX | error | 6.750s | 9.600s | 13.900s | 27.375s |
+| irvine-m1 | Soniqo | 2.700s | 5.000s | 5.000s | 5.000s | 5.000s |
+| irvine-m1 | laishere | 2.775s | 6.750s | 9.625s | 13.950s | 27.375s |
+
+### Config F Speed Ratio
+
+Values are comparator warm median divided by Config F warm median. Values above
+`1.0x` mean Config F was faster. Values below `1.0x` mean the comparator was
+faster.
+
+| Machine | Comparator | 3s | 7s | 10s | 15s | 30s |
+| --- | --- | ---: | ---: | ---: | ---: | ---: |
+| m2-studio | MLX / Config F | n/a | 0.79x | 0.53x | 0.59x | 0.64x |
+| m2-studio | Soniqo / Config F | 0.55x | 0.24x | 0.13x | 0.11x | 0.06x |
+| m2-studio | laishere / Config F | 1.61x | 1.42x | 1.14x | 0.68x | 0.78x |
+| m2-air | MLX / Config F | n/a | 0.85x | 0.61x | 0.74x | 0.27x |
+| m2-air | Soniqo / Config F | 3.46x | 1.41x | 0.82x | 0.55x | 0.12x |
+| m2-air | laishere / Config F | 0.45x | 0.39x | 0.33x | 0.32x | 0.15x |
+| irvine-m1 | MLX / Config F | n/a | 1.18x | 0.83x | 0.95x | 0.19x |
+| irvine-m1 | Soniqo / Config F | 4.37x | 1.93x | 0.97x | 0.80x | 0.08x |
+| irvine-m1 | laishere / Config F | 0.58x | 0.57x | 0.44x | 0.55x | 0.13x |
+
+### Hardware Placement Evidence
+
+This bakeoff records framework and compute-unit evidence, not privileged
+per-run power traces:
+
+- Config F ran the Swift `kokoro-bench` path over Core ML packages with
+  `--compute-units all`. The result records include per-stage Core ML timings
+  for Duration, F0Ntrain, DecoderPre, and generator calls.
+- MLX ran through the `mlx-audio` Python package and MLX model
+  `mlx-community/Kokoro-82M-bf16`; prior host setup recorded MLX default device
+  as `gpu` on M2 Air, and MLX routes array kernels through Metal on Apple
+  Silicon.
+- Soniqo ran Swift `KokoroTTSModel.fromPretrained(computeUnits: .all)` and
+  loaded Core ML through `MLModel` via the public `speech-swift` KokoroTTS
+  surface.
+- laishere ran seven `.mlpackage` Core ML models converted from its public repo.
+  Its timed boundary is the Core ML chain only.
+
+`powermetrics` was available on the local host, but it requires superuser
+privileges in this environment. No Instruments trace or privileged
+`powermetrics` capture was collected during this external bakeoff, so the data
+does not prove ANE residency. It proves the requested framework paths and
+compute-unit settings.
+
+### Quality Caveats
+
+Every successful cell wrote a mono 24 kHz spot-check WAV and passed the
+lightweight waveform sanity gate: duration, RMS, active fraction,
+zero-crossing rate, speech-band energy, clipping, sample rate, and channel
+count. Human listening is still required before interpreting any latency cell
+as quality parity.
+
+Known caveats:
+
+- **MLX 3s:** every machine failed the shared 3s input with
+  `ValueError: [broadcast_shapes] Shapes (1,67200,1) and (1,67500,9) cannot be broadcast.`
+  This is recorded as public-implementation behavior for the current pinned
+  clone and manifest text.
+- **Soniqo long buckets:** the public Soniqo Kokoro artifact emits 5.0s audio
+  for the 7s, 10s, 15s, and 30s inputs because the upstream public Core ML repo
+  only publishes `kokoro_5s.mlmodelc`. These cells are implementation behavior,
+  not long-bucket quality-parity evidence.
+- **laishere boundary:** laishere is the long-bucket Core ML backup, but its
+  numbers exclude G2P and feed preparation.
+
+### Interpretation
+
+The current data does **not** support the broad claim that Config F is faster
+than every popular way to run Kokoro on Apple Silicon. MLX is faster than
+Config F on most successful same-boundary cells, while failing the shared 3s
+input. laishere's Core ML chain is also faster on many cells, but it is not an
+end-to-end TTS boundary because feed preparation is excluded. Soniqo is a
+popular iOS/Core ML comparator, but its public artifact is 5s-only and cannot
+support long-bucket parity as collected.
+
+The defensible paper claim after this bakeoff is narrower: Config F is a
+reproducible Swift + Core ML reference with durable bucketed outputs and strong
+internal-vs-PyTorch performance, but the external Apple Silicon comparison
+requires either a revised hypothesis or additional work that makes the timing
+boundaries and quality parity stricter across MLX and Core ML competitors.
+
 ## Method
 
 - Forced the synthesis path to `decoder_har_post_bucket_impl` only

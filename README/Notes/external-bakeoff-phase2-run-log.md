@@ -278,6 +278,12 @@ All four files validate against `scripts/external_bakeoff/schema.py`, and every
 successful cell has a mono 24 kHz spot-check WAV. No remote bakeoff processes
 were left running after collection.
 
+After copying result artifacts back, disposable bakeoff checkouts, external
+clones, virtualenvs, Swift build products, and temporary logs were removed from
+`irvine-m1`, `m2-air`, and local `/tmp`. The committed evidence lives in this
+note and `README/Notes/performance-notes.md`; generated JSON/WAV artifacts
+remain ignored under `outputs/external_bakeoff/`.
+
 ### Irvine M1 Config F
 
 The redirected Config F run took about 45 minutes wall-clock because Core ML
