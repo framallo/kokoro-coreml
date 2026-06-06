@@ -236,6 +236,17 @@ physical lock state, not by build, signing, install, or model packaging.
 Whisper, ASR, VAD, playback, and echo-demo dependencies are not part of this
 bakeoff boundary. The iOS runner is intentionally Kokoro TTS only.
 
+Plain cos-Snake/iOS17 fused generator extension to the remaining medium buckets
+is rejected as a standalone Irvine candidate. Local M2 Studio probes passed the
+strict waveform gate but were slower than the fused package:
+`outputs/generator_cos_snake/10s_toolchain_ct9_plain_ios17/report_ct9_plain_ios17.json`
+reported fused `72.998 ms`, cos `73.114 ms`, speedup `-0.16%`, corr
+`0.9999949102781406`, SNR `50.47 dB`, max abs `0.00234985`; and
+`outputs/generator_cos_snake/15s_toolchain_ct9_plain_ios17/report_ct9_plain_ios17.json`
+reported fused `105.926 ms`, cos `106.211 ms`, speedup `-0.27%`, corr
+`0.9999959374146906`, SNR `51.43 dB`, max abs `0.00219727`. This closes the
+cheap 10s/15s plain cos-Snake/iOS17 gap without changing the M1 frontier.
+
 ### Consolidated Warm Median and RTF by Platform
 
 Each cell is `warm median wall time / observed RTF`. These are steady-state
