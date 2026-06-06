@@ -136,7 +136,18 @@ Pass `--spotcheck-dir` to use an explicit collection directory.
 
 ```bash
 python scripts/external_bakeoff/summarize_external.py
+python scripts/external_bakeoff/summarize_competitive_frontier.py \
+  --output outputs/external_bakeoff/competitive_frontier.md \
+  --json-output outputs/external_bakeoff/competitive_frontier.json
+python scripts/external_bakeoff/summarize_frontier_freshness.py \
+  --output outputs/external_bakeoff/frontier_freshness.md \
+  --json-output outputs/external_bakeoff/frontier_freshness.json
 ```
+
+`competitive_frontier` is the strict paper-facing fastest table.
+`frontier_freshness` is diagnostic: it compares strict frontier losses against
+newer laishere stage-profile reruns and flags stale or measurement-scale losses
+without replacing paper rows.
 
 ## Completion Gate
 

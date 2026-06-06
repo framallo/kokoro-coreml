@@ -20,6 +20,10 @@ from scripts.external_bakeoff.summarize_competitive_frontier import (
     render_markdown as render_frontier_markdown,
     summarize_frontier,
 )
+from scripts.external_bakeoff.summarize_frontier_freshness import (
+    render_markdown as render_frontier_freshness_markdown,
+    summarize_freshness,
+)
 from scripts.external_bakeoff.summarize_stage_gap_decomposition import (
     render_markdown as render_stage_gap_markdown,
     summarize_config_record,
@@ -593,6 +597,69 @@ def test_competitive_frontier_filters_short_outputs_and_marks_losses(tmp_path):
     assert "Config F needs 4.2%" in markdown
     assert "Excluded Short Outputs" in markdown
     assert "| m2-air | 7s | Soniqo | 70.0 ms | 0.741 |" in markdown
+
+
+def test_frontier_freshness_flags_stage_profile_ties():
+    frontier = {
+        "summary": {
+            "config_f_losses": [
+                {
+                    "machine_id": "m2-air",
+                    "input_key": "3s",
+                    "best_impl_label": "laishere",
+                    "best_warm_median_ms": 142.0,
+                    "config_f_warm_median_ms": 148.0,
+                },
+                {
+                    "machine_id": "irvine-m1",
+                    "input_key": "3s",
+                    "best_impl_label": "laishere",
+                    "best_warm_median_ms": 176.3,
+                    "config_f_warm_median_ms": 233.6,
+                },
+            ]
+        }
+    }
+    config_payloads = {
+        "m2-air": {
+            "records": [
+                {"input_key": "3s", "warm_wall_times_s": [0.148, 0.149, 0.147]},
+            ]
+        },
+        "irvine-m1": {
+            "records": [
+                {"input_key": "3s", "warm_wall_times_s": [0.233, 0.234, 0.235]},
+            ]
+        },
+    }
+    stage_profiles = {
+        "m2-air": {
+            "records": [
+                {"input_key": "3s", "warm_median_s": {"total_s": 0.153}},
+            ]
+        },
+        "irvine-m1": {
+            "records": [
+                {"input_key": "3s", "warm_median_s": {"total_s": 0.195}},
+            ]
+        },
+    }
+
+    summary = summarize_freshness(frontier, config_payloads, stage_profiles, tie_threshold_pct=2.0)
+
+    assert summary["frontier_loss_count"] == 2
+    assert summary["stale_or_tie_loss_count"] == 1
+    assert summary["real_profile_loss_count"] == 1
+    m2_air = summary["loss_rows"][0]
+    irvine = summary["loss_rows"][1]
+    assert m2_air["profile_outcome"] == "profile-config-f-wins"
+    assert m2_air["frontier_loss_looks_stale_or_tie"] is True
+    assert irvine["profile_outcome"] == "profile-config-f-loses"
+    assert irvine["frontier_loss_looks_stale_or_tie"] is False
+
+    markdown = render_frontier_freshness_markdown(summary)
+    assert "frontier loss likely stale" in markdown
+    assert "real remaining loss" in markdown
 
 
 def test_optimization_candidate_summary_separates_quality_from_speed(tmp_path):

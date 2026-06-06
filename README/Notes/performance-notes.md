@@ -434,9 +434,26 @@ Current machine-checkable frontier result:
 | Status | Count / cells | Interpretation |
 | --- | ---: | --- |
 | `absolute_fastest_verified` | `false` | The global objective is not complete. |
-| Config F full-duration Mac losses | `8` | All remaining Mac losses are to laishere, not MLX. |
+| Config F full-duration Mac losses | `8` | Strict paper-facing frontier rows still show laishere losses; freshness report below narrows the real Mac gap. |
 | Config F missing full-duration phone cells | `1` | iPhone 12 Pro has Soniqo iOS `3s`; Config F phone timing is still absent. |
 | No full-duration phone frontier cells | `4` | iPhone long buckets only have short Soniqo public-artifact outputs right now. |
+
+`scripts/external_bakeoff/summarize_frontier_freshness.py` compares the strict
+paper-facing frontier losses against newer laishere stage-profile reruns. The
+stage-profile rows are diagnostic evidence, not automatic replacements for the
+paper table, but they prevent wasting optimization effort on stale or
+measurement-scale cells:
+
+```bash
+uv run --no-sync python scripts/external_bakeoff/summarize_frontier_freshness.py \
+  --output outputs/external_bakeoff/frontier_freshness.md \
+  --json-output outputs/external_bakeoff/frontier_freshness.json
+```
+
+Current freshness result: all four M2 Air frontier losses are stale or
+measurement-scale by the newer stage-profile evidence (`3s` favors Config F;
+`7s`, `10s`, and `15s` are within the `2%` tie threshold). The four real Mac
+losses are Irvine M1 `3s`, `7s`, `10s`, and `15s`.
 
 Remaining full-duration Mac losses from the generated frontier:
 
