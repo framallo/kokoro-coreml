@@ -158,10 +158,30 @@ def _predict_fused_inputs(tensors: dict[str, np.ndarray]) -> dict[str, np.ndarra
     }
 
 
-def _predict_style_inputs(tensors: dict[str, np.ndarray]) -> dict[str, np.ndarray]:
+def _trim_or_pad_last_dim(array: np.ndarray, length: int | None) -> np.ndarray:
+    """Return ``array`` with its last dimension cropped or zero-padded."""
+
+    arr = np.asarray(array, dtype=np.float32)
+    if length is None:
+        return np.ascontiguousarray(arr)
+    if length <= 0:
+        raise ValueError(f"length must be positive, got {length}")
+    current = int(arr.shape[-1])
+    if current == length:
+        return np.ascontiguousarray(arr)
+    if current > length:
+        return np.ascontiguousarray(arr[..., :length])
+    out_shape = list(arr.shape)
+    out_shape[-1] = length
+    out = np.zeros(out_shape, dtype=np.float32)
+    out[..., :current] = arr
+    return out
+
+
+def _predict_style_inputs(tensors: dict[str, np.ndarray], har_time: int | None) -> dict[str, np.ndarray]:
     return {
         "x_pre": tensors["x_pre_padded"].astype(np.float32),
-        "har": tensors["har_padded"].astype(np.float32),
+        "har": _trim_or_pad_last_dim(tensors["har_padded"], har_time),
     }
 
 
@@ -171,6 +191,7 @@ def _export_package(
     precision: str,
     deployment_target: str,
     native_instance_norm_adain: bool,
+    har_time: int | None,
 ) -> dict[str, Any]:
     import coremltools as ct
     import torch
@@ -185,7 +206,8 @@ def _export_package(
     frozen_adain_count = _freeze_adain_modules(gen, style, native_instance_norm_adain)
 
     x_pre_shape = tuple(int(v) for v in tensors["x_pre_padded"].shape)
-    har_shape = tuple(int(v) for v in tensors["har_padded"].shape)
+    har_input = _trim_or_pad_last_dim(tensors["har_padded"], har_time)
+    har_shape = tuple(int(v) for v in har_input.shape)
     x_pre = torch.zeros(x_pre_shape, dtype=torch.float32)
     har = torch.zeros(har_shape, dtype=torch.float32)
 
@@ -218,6 +240,7 @@ def _export_package(
         "deployment_target": deployment_target,
         "native_instance_norm_adain": native_instance_norm_adain,
         "frozen_adain_count": frozen_adain_count,
+        "har_time": har_time,
         "removed_dropouts": removed_dropouts,
         "traced_samples": traced_samples,
         "x_pre_shape": list(x_pre_shape),
@@ -249,7 +272,7 @@ def _benchmark(
         compute_units=_compute_units(ct, args.compute_units),
     )
     fused_inputs = _predict_fused_inputs(tensors)
-    style_inputs = _predict_style_inputs(tensors)
+    style_inputs = _predict_style_inputs(tensors, args.har_time)
 
     fused_first, fused_first_ms = _predict(fused, fused_inputs)
     style_first, style_first_ms = _predict(style_model, style_inputs)
@@ -332,6 +355,7 @@ def run(args: argparse.Namespace) -> dict[str, Any]:
             args.precision,
             args.deployment_target,
             args.native_instance_norm_adain,
+            args.har_time,
         )
 
     benchmark = _benchmark(args, tensors, style_package)
@@ -393,6 +417,12 @@ def main() -> None:
     )
     parser.add_argument("--deployment-target", default="macos13")
     parser.add_argument("--native-instance-norm-adain", action="store_true")
+    parser.add_argument(
+        "--har-time",
+        type=int,
+        default=None,
+        help="Optional static HAR time axis for the style-specialized package.",
+    )
     parser.add_argument("--compute-units", default="cpuAndGPU")
     parser.add_argument("--warmup", type=int, default=3)
     parser.add_argument("--iterations", type=int, default=10)

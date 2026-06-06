@@ -4289,6 +4289,16 @@ strict max-abs gate (`0.01099`), and logs `ANECCompile() FAILED`. Reports:
 `outputs/generator_style_specialization/3s_style_native_in_ios17/report_cpu_gpu.json`
 and
 `outputs/generator_style_specialization/3s_style_native_in_ios17/report_cpu_ne.json`.
+
+Combining native-IN style specialization with the best strict HAR trim is also
+noise-sized, not a frontier candidate. The style-specialization probe now
+accepts `--har-time`; with `--har-time 28561`, iOS17 native-IN, and CPU+GPU,
+local M2 Studio `3s` remains strict but only saves `0.22%`: fused `26.401 ms`,
+candidate `26.342 ms`, corr `0.999984`, SNR `45.32 dB`, max abs `0.00635`.
+This combined single-package path should not be promoted to Irvine without a
+new local material signal. Report:
+`outputs/generator_style_specialization/3s_style_native_in_ios17_har28561/report_cpu_gpu.json`.
+
 Do not carry style-specialization to Irvine unless a different operator rewrite
 produces a material CPU+GPU result first.
 
