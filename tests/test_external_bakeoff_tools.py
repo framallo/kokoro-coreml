@@ -67,6 +67,10 @@ from scripts.external_bakeoff.summarize_lower_end_mac_win_gate import (
     build_summary as build_lower_end_mac_win_gate,
     render_markdown as render_lower_end_mac_win_gate_markdown,
 )
+from scripts.external_bakeoff.summarize_irvine_paper_frontier_path import (
+    build_summary as build_irvine_paper_frontier_path,
+    render_markdown as render_irvine_paper_frontier_path_markdown,
+)
 from scripts.external_bakeoff.summarize_stage_gap_decomposition import (
     render_markdown as render_stage_gap_markdown,
     summarize_config_record,
@@ -1344,6 +1348,50 @@ def test_lower_end_mac_win_gate_tracks_pending_warmed_listening_wins(tmp_path):
     assert "Pending paper-frontier listening wins: `1`." in markdown
     assert "Pending profile-only listening wins: `2`." in markdown
     assert "`7s`" in markdown
+
+
+def test_irvine_paper_frontier_path_combines_source_and_rewrite():
+    lower_end_gate = {
+        "irvine_rows": [
+            {
+                "input_key": "3s",
+                "candidate": "3s_fast",
+                "paper_competitor": "laishere",
+                "paper_competitor_ms": 176.0,
+                "projected_full_ms": 215.0,
+                "paper_margin_ms": -39.0,
+                "corr": 0.81,
+                "snr_db": 5.0,
+            },
+            {
+                "input_key": "10s",
+                "candidate": "10s_fast",
+                "paper_competitor": "laishere",
+                "paper_competitor_ms": 594.0,
+                "projected_full_ms": 609.0,
+                "paper_margin_ms": -15.0,
+                "corr": 0.87,
+                "snr_db": 6.5,
+            },
+        ]
+    }
+    rewrite_impact = {
+        "projection_rows": [
+            {"machine_id": "irvine-m1", "bucket": "3s", "projected_save_ms": 7.0},
+            {"machine_id": "irvine-m1", "bucket": "10s", "projected_save_ms": 18.0},
+        ]
+    }
+
+    summary = build_irvine_paper_frontier_path(lower_end_gate, rewrite_impact)
+    assert summary["paper_rows_closed_by_source_plus_rewrite"] == 1
+    assert summary["paper_rows_remaining_after_source_plus_rewrite"] == 1
+    row_10s = next(row for row in summary["rows"] if row["bucket"] == "10s")
+    assert row_10s["combined_projected_ms"] == 591.0
+    assert row_10s["would_beat_paper_with_rewrite"] is True
+
+    markdown = render_irvine_paper_frontier_path_markdown(summary)
+    assert "Paper rows closed by source+rewrite: `1`." in markdown
+    assert "`10s_fast`" in markdown
 
 
 def test_goal_frontier_status_exposes_blockers_and_next_actions():
