@@ -1014,6 +1014,7 @@ Output index: `outputs/f0_source_listening/README.md`.
 | padded `asr=600`, `F0=1200` | `needs_listening` | corr 0.956701, SNR 10.99 dB, max 0.31872 | `outputs/f0_source_listening/15s_speed_branch/15s_padded_cos_resblock_cos_rsqrt/wav/15s_padded_cos_resblock_cos_rsqrt_candidate.wav` |
 | natural `asr=1095`, `F0=2190` | `needs_listening` | corr 0.794801, SNR 4.78 dB, max 0.51957 | `outputs/f0_source_listening/30s_speed_branch/30s_natural_asr_cos_resblock_natural_asr_cos_rsqrt/wav/30s_natural_asr_cos_resblock_natural_asr_cos_rsqrt_candidate.wav` |
 | padded `asr=1200`, `F0=2400` | `needs_listening` | corr 0.949790, SNR 10.40 dB, max 0.28593 | `outputs/f0_source_listening/30s_speed_branch/30s_padded_cos_resblock_cos_rsqrt/wav/30s_padded_cos_resblock_cos_rsqrt_candidate.wav` |
+| padded native-IN iOS17/spec8 `asr=120`, `F0=240` | `needs_listening` | corr 0.931854, SNR 9.19 dB, max 0.23769 | `outputs/f0_source_listening/native_in_ios17_speed_branch/3s_padded_native_in_ios17_nopal_cos_rsqrt_cos_rsqrt_native_in/wav/3s_padded_native_in_ios17_nopal_cos_rsqrt_cos_rsqrt_native_in_candidate.wav` |
 
 Interpretation: strict tensor parity still rejects both candidates, but the
 machine audio-health gate does not reject them as silence, clipping, or broken
@@ -1023,7 +1024,9 @@ quality-negative pattern in the newly added runtime bucket. The `15s` and `30s`
 local probes complete the `3s`/`7s`/`10s`/`15s`/`30s` runtime bucket sweep and
 strengthen the trend: speedup grows with duration, while the same source quality
 gap remains. The padded source improves objective similarity while preserving
-some of that speed. The exact-shape F0-source path is now a human-listening
+some of that speed. The native-IN iOS17/spec8 row adds the fastest local 3s
+variant from the same branch and remains a listening question rather than a
+machine-health reject. The exact-shape F0-source path is now a human-listening
 question, not an automatic machine reject. It is still not production-approved
 until listening decisions accept the different source character or a
 quality-preserving source formulation closes the metric gap.
