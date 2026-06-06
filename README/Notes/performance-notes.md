@@ -961,6 +961,35 @@ phase as a production path. The fused-source speed path still needs either an
 exactly reproduced Swift Nyquist convention or a representation/model boundary
 that was trained or transformed to avoid raw phase discontinuities.
 
+#### Generator compute-unit ladder
+
+Swift generator-input isolation on local M2 Studio 3s confirms the current
+staged production placement is the right policy for this graph. Command shape:
+
+```bash
+swift/.build/release/kokoro-bench \
+  --models-dir coreml \
+  --inputs-dir outputs/swift_bench_inputs \
+  --hnsf-weights outputs/swift_bench_inputs/hnsf_weights.json \
+  --generator-input-dump outputs/generator_isolation/dumps/3s \
+  --compute-units cpuAndGPU \
+  --warmup 5 --iterations 20 \
+  --output outputs/generator_isolation/compute_units_3s_cpugpu.json
+```
+
+| Generator 3s compute units | Warm median predict |
+| --- | ---: |
+| `.all` | `28.071 ms` |
+| `cpuAndGPU` | `28.289 ms` |
+| `cpuOnly` | `99.673 ms` |
+| `cpuAndNeuralEngine` | `1517.266 ms` |
+
+The CPU+NE run printed
+`MILCompilerForANE error: failed to compile ANE model using ANEF`, then fell
+back to a very slow path. This rejects "just use ANE for the generator" as the
+M2 Air / Irvine M1 short-bucket fix. The remaining generator gap is a graph
+shape/export problem.
+
 #### HAR input-trim probe
 
 `scripts/probe_generator_har_input_trim.py` tests a lower-risk variant of the

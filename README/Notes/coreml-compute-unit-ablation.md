@@ -427,6 +427,13 @@ sudo powermetrics -i 1000 --samplers ane
   mean, `+pi`, and `-pi` substitutes all fail strict waveform parity. At compact
   natural HAR length, even exact dumped HAR remains around corr `0.986-0.988`,
   proving a separate natural-vs-padded geometry loss.
+- **Generator compute-unit switch is not the M2 Air fix:** Swift generator-input
+  isolation on local M2 Studio 3s with five warmups and twenty measured calls
+  gives CPU+GPU `28.289 ms`, `.all` `28.071 ms`, CPU-only `99.673 ms`, and
+  CPU+NE `1517.266 ms`. The CPU+NE run also printed
+  `MILCompilerForANE error: failed to compile ANE model using ANEF`. Keep the
+  staged production policy's generator on CPU+GPU; the remaining short-bucket
+  gap requires graph/package changes, not a compute-unit flag flip.
 - **HAR input-tail trimming is too small:** `scripts/probe_generator_har_input_trim.py`
   keeps the bucketed `x_pre` shape and current Swift HAR source, but exports a
   temporary `GeneratorFromHar` with a shorter static `har` axis. The aggressive
