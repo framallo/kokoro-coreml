@@ -141,6 +141,26 @@ for more than 75 seconds, derived data was only `156K`, and the last build line
 was the initial `clang -v -E -dM ... /dev/null` SDK probe. The build was
 interrupted manually; this reconfirms the local SwiftBuild stall blocker.
 
+Follow-up on the same date narrowed the blocker further. The generated
+`ConfigFIOSRunner.xcodeproj` is inspectable: `xcodebuild -list` completed, and
+`xcodebuild -showBuildSettings -destination
+platform=iOS,id=00008101-001134561A0A001E DEVELOPMENT_TEAM=LCE6SSD8DB`
+resolved the physical iPhone destination and build settings. A fresh physical
+device build with derived data
+`/tmp/kokoro-external-bakeoff/config-f-ios-derived-20260606a` still stalled at
+`CreateBuildDescription` after `GatherProvisioningInputs`; after roughly 80
+seconds, derived data was only `56K`, and `xcodebuild`, `SWBBuildService`, and
+the child clang SDK probe were idle at `0.0%` CPU. A generic unsigned iOS build
+using `-destination generic/platform=iOS CODE_SIGNING_ALLOWED=NO` reproduced
+the same hang, and interrupting it emitted `unexpected service error: The Xcode
+build system has crashed` with failed commands `CreateBuildDescription` and the
+same clang SDK probe. The clang command itself completed immediately when run
+standalone, producing 471 macro lines and returning `0`. This rules out device
+signing, install, Swift source compilation, resource copying, 30s `.mlpackage`
+compile time, and the clang tool as the immediate failure; the blocker is the
+local Xcode/SwiftBuild build-description service path for this generated
+Config F runner.
+
 Whisper, ASR, VAD, playback, and echo-demo dependencies are not part of this
 bakeoff boundary. The iOS runner is intentionally Kokoro TTS only.
 
@@ -156,7 +176,7 @@ Mac14,14, 64 GiB, macOS 26.5 / 25F71.
 
 | Impl | 3s | 7s | 10s | 15s | 30s | Caveats |
 | --- | ---: | ---: | ---: | ---: | ---: | --- |
-| Config F | 60.2 ms / 0.022 | 110.5 ms / 0.016 | 149.6 ms / 0.016 | 222.6 ms / 0.016 | 449.0 ms / 0.016 | staged + exact duration + vDSP HnSF + direct HAR padding; 30s is N=10 rerun |
+| Config F | 55.1 ms / 0.020 | 103.8 ms / 0.015 | 135.2 ms / 0.014 | 202.6 ms / 0.015 | 409.1 ms / 0.015 | staged + exact duration + vDSP HnSF + direct HAR padding + vectorized HnSF noise; current batch rerun |
 | MLX | error | 223.9 ms / 0.033 | 288.8 ms / 0.030 | 376.3 ms / 0.027 | 762.7 ms / 0.028 | 3s broadcast-shape failure |
 | Soniqo | 71.7 ms / 0.027 | 69.3 ms / 0.014 | 71.0 ms / 0.014 | 68.1 ms / 0.014 | 69.5 ms / 0.014 | Long buckets emit 5.0s public artifact |
 | laishere | 212.3 ms / 0.077 | 403.3 ms / 0.059 | 626.3 ms / 0.065 | 429.8 ms / 0.031 | 925.1 ms / 0.034 | Excludes G2P/feed prep |
@@ -167,7 +187,7 @@ Mac14,15, 24 GiB, macOS 15.7.7 / 24G720.
 
 | Impl | 3s | 7s | 10s | 15s | 30s | Caveats |
 | --- | ---: | ---: | ---: | ---: | ---: | --- |
-| Config F | 151.7 ms / 0.054 | 335.0 ms / 0.050 | 474.6 ms / 0.049 | 704.7 ms / 0.051 | 1430.0 ms / 0.052 | staged + exact duration + vDSP HnSF + direct HAR padding; 3s/7s/30s are N=10 reruns |
+| Config F | 148.0 ms / 0.053 | 330.7 ms / 0.049 | 466.0 ms / 0.049 | 693.6 ms / 0.050 | 1404.8 ms / 0.051 | staged + exact duration + vDSP HnSF + direct HAR padding + vectorized HnSF noise; current batch rerun |
 | MLX | error | 685.6 ms / 0.102 | 835.8 ms / 0.087 | 1521.0 ms / 0.109 | 2600.3 ms / 0.095 | 3s broadcast-shape failure |
 | Soniqo | 1097.4 ms / 0.406 | 1135.8 ms / 0.227 | 1123.0 ms / 0.225 | 1125.5 ms / 0.225 | 1123.5 ms / 0.225 | Long buckets emit 5.0s public artifact |
 | laishere | 142.0 ms / 0.051 | 316.9 ms / 0.046 | 450.2 ms / 0.047 | 657.3 ms / 0.047 | 1476.4 ms / 0.054 | Excludes G2P/feed prep |
@@ -178,7 +198,7 @@ Macmini9,1, 16 GiB, macOS 15.7.7 / 24G720.
 
 | Impl | 3s | 7s | 10s | 15s | 30s | Caveats |
 | --- | ---: | ---: | ---: | ---: | ---: | --- |
-| Config F | 239.2 ms / 0.085 | 510.2 ms / 0.076 | 700.7 ms / 0.073 | 1028.9 ms / 0.074 | 1977.7 ms / 0.072 | staged + exact duration + vDSP HnSF + direct HAR padding |
+| Config F | 233.6 ms / 0.083 | 492.7 ms / 0.073 | 685.5 ms / 0.071 | 1014.9 ms / 0.073 | 1959.4 ms / 0.072 | staged + exact duration + vDSP HnSF + direct HAR padding + vectorized HnSF noise; current batch rerun |
 | MLX | error | 824.0 ms / 0.122 | 1124.3 ms / 0.117 | 1589.5 ms / 0.114 | 3077.9 ms / 0.112 | 3s broadcast-shape failure |
 | Soniqo | 1330.9 ms / 0.493 | 1343.6 ms / 0.269 | 1313.9 ms / 0.263 | 1343.6 ms / 0.269 | 1351.2 ms / 0.270 | Long buckets emit 5.0s public artifact |
 | laishere | 176.3 ms / 0.064 | 394.6 ms / 0.058 | 593.9 ms / 0.062 | 912.0 ms / 0.065 | 2135.1 ms / 0.078 | Excludes G2P/feed prep |
@@ -209,15 +229,15 @@ ranking above.
 
 | Machine | Impl | 3s | 7s | 10s | 15s | 30s |
 | --- | --- | ---: | ---: | ---: | ---: | ---: |
-| m2-studio | Config F | 60.2 ms | 110.5 ms | 149.6 ms | 222.6 ms | 449.0 ms |
+| m2-studio | Config F | 55.1 ms | 103.8 ms | 135.2 ms | 202.6 ms | 409.1 ms |
 | m2-studio | MLX | error | 223.9 ms | 288.8 ms | 376.3 ms | 762.7 ms |
 | m2-studio | Soniqo | 71.7 ms | 69.3 ms | 71.0 ms | 68.1 ms | 69.5 ms |
 | m2-studio | laishere | 212.3 ms | 403.3 ms | 626.3 ms | 429.8 ms | 925.1 ms |
-| m2-air | Config F | 151.7 ms | 335.0 ms | 474.6 ms | 704.7 ms | 1430.0 ms |
+| m2-air | Config F | 148.0 ms | 330.7 ms | 466.0 ms | 693.6 ms | 1404.8 ms |
 | m2-air | MLX | error | 685.6 ms | 835.8 ms | 1521.0 ms | 2600.3 ms |
 | m2-air | Soniqo | 1097.4 ms | 1135.8 ms | 1123.0 ms | 1125.5 ms | 1123.5 ms |
 | m2-air | laishere | 142.0 ms | 316.9 ms | 450.2 ms | 657.3 ms | 1476.4 ms |
-| irvine-m1 | Config F | 239.2 ms | 510.2 ms | 700.7 ms | 1028.9 ms | 1977.7 ms |
+| irvine-m1 | Config F | 233.6 ms | 492.7 ms | 685.5 ms | 1014.9 ms | 1959.4 ms |
 | irvine-m1 | MLX | error | 824.0 ms | 1124.3 ms | 1589.5 ms | 3077.9 ms |
 | irvine-m1 | Soniqo | 1330.9 ms | 1343.6 ms | 1313.9 ms | 1343.6 ms | 1351.2 ms |
 | irvine-m1 | laishere | 176.3 ms | 394.6 ms | 593.9 ms | 912.0 ms | 2135.1 ms |
@@ -226,15 +246,15 @@ ranking above.
 
 | Machine | Impl | 3s | 7s | 10s | 15s | 30s |
 | --- | --- | ---: | ---: | ---: | ---: | ---: |
-| m2-studio | Config F | 0.022 | 0.016 | 0.016 | 0.016 | 0.016 |
+| m2-studio | Config F | 0.020 | 0.015 | 0.014 | 0.015 | 0.015 |
 | m2-studio | MLX | error | 0.033 | 0.030 | 0.027 | 0.028 |
 | m2-studio | Soniqo | 0.027 | 0.014 | 0.014 | 0.014 | 0.014 |
 | m2-studio | laishere | 0.077 | 0.059 | 0.065 | 0.031 | 0.034 |
-| m2-air | Config F | 0.054 | 0.050 | 0.049 | 0.051 | 0.052 |
+| m2-air | Config F | 0.053 | 0.049 | 0.049 | 0.050 | 0.051 |
 | m2-air | MLX | error | 0.102 | 0.087 | 0.109 | 0.095 |
 | m2-air | Soniqo | 0.406 | 0.227 | 0.225 | 0.225 | 0.225 |
 | m2-air | laishere | 0.051 | 0.046 | 0.047 | 0.047 | 0.054 |
-| irvine-m1 | Config F | 0.085 | 0.076 | 0.073 | 0.074 | 0.072 |
+| irvine-m1 | Config F | 0.083 | 0.073 | 0.071 | 0.073 | 0.072 |
 | irvine-m1 | MLX | error | 0.122 | 0.117 | 0.114 | 0.112 |
 | irvine-m1 | Soniqo | 0.493 | 0.269 | 0.263 | 0.269 | 0.270 |
 | irvine-m1 | laishere | 0.064 | 0.058 | 0.062 | 0.065 | 0.078 |
@@ -264,15 +284,15 @@ faster. Values below `1.0x` mean the comparator was faster.
 
 | Machine | Comparator | 3s | 7s | 10s | 15s | 30s |
 | --- | --- | ---: | ---: | ---: | ---: | ---: |
-| m2-studio | MLX / Config F | n/a | 2.03x | 1.93x | 1.69x | 1.70x |
-| m2-studio | Soniqo / Config F | 1.19x | 0.63x | 0.47x | 0.31x | 0.15x |
-| m2-studio | laishere / Config F | 3.53x | 3.65x | 4.19x | 1.93x | 2.06x |
-| m2-air | MLX / Config F | n/a | 2.05x | 1.76x | 2.16x | 1.82x |
-| m2-air | Soniqo / Config F | 7.23x | 3.39x | 2.37x | 1.60x | 0.79x |
-| m2-air | laishere / Config F | 0.94x | 0.95x | 0.95x | 0.93x | 1.03x |
-| irvine-m1 | MLX / Config F | n/a | 1.62x | 1.60x | 1.54x | 1.56x |
-| irvine-m1 | Soniqo / Config F | 5.56x | 2.63x | 1.88x | 1.31x | 0.68x |
-| irvine-m1 | laishere / Config F | 0.74x | 0.77x | 0.85x | 0.89x | 1.08x |
+| m2-studio | MLX / Config F | n/a | 2.16x | 2.14x | 1.86x | 1.86x |
+| m2-studio | Soniqo / Config F | 1.30x | 0.67x | 0.53x | 0.34x | 0.17x |
+| m2-studio | laishere / Config F | 3.86x | 3.89x | 4.63x | 2.12x | 2.26x |
+| m2-air | MLX / Config F | n/a | 2.07x | 1.79x | 2.19x | 1.85x |
+| m2-air | Soniqo / Config F | 7.41x | 3.43x | 2.41x | 1.62x | 0.80x |
+| m2-air | laishere / Config F | 0.96x | 0.96x | 0.97x | 0.95x | 1.05x |
+| irvine-m1 | MLX / Config F | n/a | 1.67x | 1.64x | 1.57x | 1.57x |
+| irvine-m1 | Soniqo / Config F | 5.70x | 2.73x | 1.92x | 1.32x | 0.69x |
+| irvine-m1 | laishere / Config F | 0.75x | 0.80x | 0.87x | 0.90x | 1.09x |
 
 ### Config F Fast-Path Correction
 
