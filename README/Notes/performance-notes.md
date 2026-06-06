@@ -111,6 +111,18 @@ The iPhone 3s cold call was `10866.3 ms`, reflecting first-use model setup. The
 device execution evidence for the public Soniqo artifact, not full-duration
 7s/10s/15s/30s parity evidence.
 
+Config F now has a dedicated physical-device runner scaffold at
+`scripts/external_bakeoff/ConfigFIOSRunner/`. It uses the shared
+`KokoroPipeline` Swift package, exact-duration model discovery, staged compute
+units, and the five runtime buckets. `xcodegen generate` succeeds and
+`scripts/prepare_swift_bench_inputs.py` now refreshes the small ignored input
+resources from `runtime_input_manifest.json` without loading the heavy pipeline.
+The first signed iPhone build attempt did not reach Swift compilation or Core ML
+model compilation: `xcodebuild` stalled idle in build-description creation with
+only `SWBBuildService` alive and no compiler/resource subprocesses. Treat this
+as a build-system/project packaging blocker, not an on-device 30s model compile
+timeout. There are still no Config F iPhone warmed inference timings.
+
 Whisper, ASR, VAD, playback, and echo-demo dependencies are not part of this
 bakeoff boundary. The iOS runner is intentionally Kokoro TTS only.
 
