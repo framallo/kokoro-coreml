@@ -411,6 +411,48 @@ the next meaningful speed work remains the source/vocoder path on M1 and the
 small laishere short/medium deficit on M2 Air; MLX no longer explains a
 warmed-inference loss.
 
+#### Optimization candidate frontier
+
+`scripts/summarize_optimization_candidates.py` scans saved
+`outputs/**/report*.json` probe reports and classifies each candidate by
+quality gate and speedup. This is the promotion gate for experimental packages:
+quality-safe but sub-material wins stay in the research ledger, while
+speed-positive quality failures remain blocked until source quality or
+listening acceptance changes.
+
+```bash
+uv run --no-sync python scripts/summarize_optimization_candidates.py \
+  --material-speedup-pct 3.0 \
+  --top 40 \
+  --output outputs/optimization_candidate_frontier.md \
+  --json-output outputs/optimization_candidate_frontier.json
+```
+
+Current scan result across `92` saved probe reports:
+
+| Category | Count | Interpretation |
+| --- | ---: | --- |
+| Quality-safe speed-positive candidates | `9` | All are noise-sized relative to the current frontier. |
+| Quality-safe material candidates (`>=3%`) | `0` | No saved strict-equivalent candidate should be promoted as the next fix. |
+| Speed-positive quality-fail candidates | `25` | The speed lives mostly in F0/source-shape branches that still fail parity. |
+
+Largest quality-safe speed-positive rows:
+
+| Family | Candidate | Speedup | Decision |
+| --- | --- | ---: | --- |
+| generator_cos_snake | `3s_toolchain_ct9_plain_ios17` | 2.14% | Below material threshold; later same-process CT8/CT9 run tied. |
+| generator_cos_snake | `3s` | 1.27% | Below material threshold. |
+| generator_cos_snake | `3s_plain_ios17` | 0.65% | Below material threshold. |
+| generator_har_input_trim | `3s_har28561` on Irvine M1 | 0.43% | Strict quality passes but cannot close the 32.5% M1 3s laishere gap. |
+
+Largest speed-positive rows remain quality failures: F0-source natural/padded
+branches reach `28.9%`, `21.9%`, and `21.7%` in saved reports, but they fail
+strict waveform parity. The current promotion frontier therefore rules out
+mining old saved reports for a ready strict-equivalent win. New work must either
+recover F0/source quality, change the accepted quality criterion through
+listening review, or find a new generator/vocoder formulation with a material
+quality-safe speedup.
+
 #### Corrected Config F stage medians
 
 Each cell is the median per-stage time from the corrected staged + exact

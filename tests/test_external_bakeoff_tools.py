@@ -30,6 +30,11 @@ from scripts.summarize_f0_source_candidates import (
     render_markdown as render_f0_candidate_markdown,
     summarize_report as summarize_f0_candidate_report,
 )
+from scripts.summarize_optimization_candidates import (
+    classify as classify_optimization_candidate,
+    collect_rows as collect_optimization_candidates,
+    render_markdown as render_optimization_candidates_markdown,
+)
 from scripts.validate_f0_source_listening_decisions import validate_rows as validate_f0_rows
 
 
@@ -452,6 +457,65 @@ def test_competitive_frontier_filters_short_outputs_and_marks_losses(tmp_path):
     assert "Config F needs 4.2%" in markdown
     assert "Excluded Short Outputs" in markdown
     assert "| m2-air | 7s | Soniqo | 70.0 ms | 0.741 |" in markdown
+
+
+def test_optimization_candidate_summary_separates_quality_from_speed(tmp_path):
+    safe = tmp_path / "outputs" / "generator_cos_snake" / "safe" / "report.json"
+    safe.parent.mkdir(parents=True)
+    safe.write_text(
+        json.dumps(
+            {
+                "passes": True,
+                "report": "outputs/generator_cos_snake/safe/report.json",
+                "benchmark": {
+                    "warm_predict_median_ms": {
+                        "fused": 100.0,
+                        "candidate": 98.5,
+                    },
+                    "metrics": {
+                        "candidate_vs_fused_trimmed": {
+                            "correlation": 0.99999,
+                            "snr_db": 50.0,
+                            "max_abs_error": 0.001,
+                        }
+                    },
+                },
+            }
+        )
+    )
+    unsafe = tmp_path / "outputs" / "f0_noise_exact_shape" / "fast_fail" / "report.json"
+    unsafe.parent.mkdir(parents=True)
+    unsafe.write_text(
+        json.dumps(
+            {
+                "passes": False,
+                "speedup_vs_baseline_pct": 12.0,
+                "benchmark": {
+                    "warm_predict_median_ms": {
+                        "baseline_total": 100.0,
+                        "candidate_total": 88.0,
+                    },
+                    "metrics": {
+                        "candidate_vs_baseline_trimmed": {
+                            "correlation": 0.80,
+                            "snr_db": 5.0,
+                            "max_abs_error": 0.5,
+                        }
+                    },
+                },
+            }
+        )
+    )
+
+    rows = collect_optimization_candidates([str(tmp_path / "outputs/**/report.json")])
+    assert [row["label"] for row in rows] == ["fast_fail", "safe"]
+    assert classify_optimization_candidate(rows[0], material_speedup_pct=3.0) == "speed-positive quality fail"
+    assert classify_optimization_candidate(rows[1], material_speedup_pct=3.0) == "quality-safe noise-sized speedup"
+
+    markdown = render_optimization_candidates_markdown(rows, material_speedup_pct=3.0, top=10)
+    assert "Quality-safe material candidates: `0`." in markdown
+    assert "speed-positive quality fail" in markdown
+    assert "quality-safe noise-sized speedup" in markdown
 
 
 def test_completion_verifier_allows_mlx_3s_error_but_requires_iphone():
