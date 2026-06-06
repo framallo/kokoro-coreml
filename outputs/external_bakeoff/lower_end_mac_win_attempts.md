@@ -99,6 +99,8 @@ Raw artifacts:
 - `outputs/f0_noise_exact_shape/3s_padded_native_in_ios17_nopal_cos_rsqrt_cos_rsqrt_native_in/report_native_in_ios17_nopal_m2_air.json`
 - `outputs/external_bakeoff/results_config_f_reference_m2-air_rewrite_overlay_diagnostic_3s.json`
 - `outputs/external_bakeoff/f0_source_candidate_summary.md`
+- `outputs/f0_source_listening/m2_air_3s_source_body/README.md`
+- `outputs/f0_source_listening/m2_air_3s_source_body/f0_source_listening_decisions.csv`
 
 Decision:
 
@@ -106,5 +108,7 @@ Decision:
 - Source/body is the first measured lower-end path with enough M2 Air 3s margin.
 - This is not a strict production/paper approval yet: both source/body rows fail
   strict waveform parity and still require no-ASR human listening acceptance.
+- Dedicated no-ASR listening pack exists, but its decision CSV is intentionally
+  blank and currently fails validation until a human decision is recorded.
 - Do not update `competitive_frontier.md` until the host quiet gate and listening
   decision are both satisfied.
