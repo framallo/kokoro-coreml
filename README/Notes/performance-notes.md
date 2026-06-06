@@ -332,6 +332,20 @@ and `waveform_full` with no failing boundary. Final waveform correlation was
 `0.999997` with max abs `0.00274658`; the HnSF boundary tensors were
 correlation `1.0`.
 
+Irvine M1 validation used the synced vectorized Swift sources, exact duration
+models, staged compute units, `--warmup 2`, and `--iterations 5`. HnSF improved
+relative to the older recorded M1 stage medians (`27.3/47.1/57.5/75.7/120.6 ms`
+for `3s`/`7s`/`10s`/`15s`/`30s`), but total wall remains dominated by the
+generator predict call.
+
+| Input | Irvine M1 vector wall | Irvine M1 vector HnSF | Irvine M1 generator |
+| --- | ---: | ---: | ---: |
+| 3s | 229.3 ms | 17.3 ms | 168.6 ms |
+| 7s | 513.7 ms | 35.7 ms | 391.1 ms |
+| 10s | 693.9 ms | 42.2 ms | 545.2 ms |
+| 15s | 1014.1 ms | 55.2 ms | 820.8 ms |
+| 30s | 1969.9 ms | 96.3 ms | 1638.6 ms |
+
 #### Direct HAR padding fast path
 
 Current `main` avoids constructing a temporary HAR `MLMultiArray` before

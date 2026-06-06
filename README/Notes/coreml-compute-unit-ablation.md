@@ -577,7 +577,9 @@ sudo powermetrics -i 1000 --samplers ane
   pre-change tensor dump passed through `waveform_full`; final waveform corr is
   `0.999997`, and HnSF boundary tensors are corr `1.0`. This is production-safe
   host-DSP cleanup, not a model-architecture escape from the generator
-  bottleneck.
+  bottleneck. Irvine M1 validation with synced vectorized sources measured HnSF
+  `17.3/35.7/42.2/55.2/96.3 ms` for `3s`/`7s`/`10s`/`15s`/`30s`, while
+  generator predict still dominated at `168.6/391.1/545.2/820.8/1638.6 ms`.
 
 **2026-05-17**
 
