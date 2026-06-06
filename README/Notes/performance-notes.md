@@ -428,13 +428,13 @@ uv run --no-sync python scripts/summarize_optimization_candidates.py \
   --json-output outputs/optimization_candidate_frontier.json
 ```
 
-Current scan result across `94` saved probe reports:
+Current scan result across `97` saved probe reports:
 
 | Category | Count | Interpretation |
 | --- | ---: | --- |
 | Quality-safe speed-positive candidates | `9` | All are noise-sized relative to the current frontier. |
 | Quality-safe material candidates (`>=3%`) | `0` | No saved strict-equivalent candidate should be promoted as the next fix. |
-| Speed-positive quality-fail candidates | `26` | The speed lives mostly in F0/source-shape branches that still fail parity. |
+| Speed-positive quality-fail candidates | `29` | The speed lives mostly in F0/source-shape branches that still fail parity. |
 
 Largest quality-safe speed-positive rows:
 
@@ -446,11 +446,11 @@ Largest quality-safe speed-positive rows:
 | generator_har_input_trim | `3s_har28561` on Irvine M1 | 0.43% | Strict quality passes but cannot close the 32.5% M1 3s laishere gap. |
 
 Largest speed-positive rows remain quality failures: F0-source natural/padded
-branches reach `28.9%`, `21.9%`, and `21.7%` in saved reports, but they fail
-strict waveform parity. The best padded phase-repair row so far is the local
-`7s_padded_cos_resblock_phase_acos_cos_rsqrt` probe: `6.17%` faster with
-`corr 0.972150`, SNR `13.04 dB`, and max abs `0.24933`, still far outside the
-strict gate. The current promotion frontier therefore rules out
+branches reach `28.9%`, `25.0%`, and `21.9%` in saved reports, but they fail
+strict waveform parity. The `acos` phase-repair sweep improves the padded
+F0-source rows across 7s/10s/15s/30s and keeps material speedups, but its best
+quality row is still only `corr 0.972150`, SNR `13.04 dB`, max abs `0.24933`.
+The current promotion frontier therefore rules out
 mining old saved reports for a ready strict-equivalent win. New work must either
 recover F0/source quality, change the accepted quality criterion through
 listening review, or find a new generator/vocoder formulation with a material
@@ -1058,12 +1058,15 @@ At `7s`, the natural-ASR export uses `x_source_0=[1,256,5400]` and
 | irvine-m1 | padded `asr=280`, `F0=560` | 390.8 ms | 358.9 ms | noise 89.6 ms, body 261.5 ms, tail 7.4 ms | corr 0.962306, SNR 11.52 dB | corr 0.968596, SNR 12.51 dB | faster, quality closer but not parity |
 | m2-studio | natural `asr=384`, `F0=768` | 86.0 ms | 76.4 ms | noise 18.2 ms, body 56.1 ms, tail 2.7 ms | corr 0.866976, SNR 6.55 dB | corr 0.843346, SNR 5.40 dB | faster, reject for quality |
 | m2-studio | padded `asr=400`, `F0=800` | 87.6 ms | 79.0 ms | noise 18.4 ms, body 57.8 ms, tail 2.8 ms | corr 0.955085, SNR 10.86 dB | corr 0.942765, SNR 9.78 dB | faster, quality closer but not parity |
+| m2-studio | padded `asr=400`, `F0=800`, `acos` phase | 81.0 ms | 73.1 ms | noise 16.8 ms, body 53.8 ms, tail 2.6 ms | corr 0.968904, SNR 12.57 dB | recorded in `report_cos_resblock_phase_acos.json` | faster, better quality than padded, still not strict parity |
 | irvine-m1 | natural `asr=384`, `F0=768` | 563.9 ms | 487.1 ms | noise 122.8 ms, body 353.5 ms, tail 10.2 ms | corr 0.867049, SNR 6.55 dB | not rerun | faster, reject for quality |
 | irvine-m1 | padded `asr=400`, `F0=800` | 565.7 ms | 509.0 ms | noise 127.5 ms, body 369.6 ms, tail 11.1 ms | corr 0.955223, SNR 10.87 dB | not rerun | faster, quality closer but not parity |
 | m2-studio | natural `asr=556`, `F0=1112` | 129.9 ms | 101.4 ms | noise 23.8 ms, body 74.5 ms, tail 3.2 ms | corr 0.838603, SNR 5.73 dB | corr 0.818057, SNR 4.78 dB | faster, reject for quality |
 | m2-studio | padded `asr=600`, `F0=1200` | 130.0 ms | 109.2 ms | noise 25.6 ms, body 79.5 ms, tail 3.6 ms | corr 0.956701, SNR 10.99 dB | corr 0.949135, SNR 10.29 dB | faster, quality closer but not parity |
+| m2-studio | padded `asr=600`, `F0=1200`, `acos` phase | 122.7 ms | 102.0 ms | noise 24.0 ms, body 74.9 ms, tail 3.2 ms | corr 0.969391, SNR 12.60 dB | recorded in `report_cos_resblock_phase_acos.json` | faster, better quality than padded, still not strict parity |
 | m2-studio | natural `asr=1095`, `F0=2190` | 268.9 ms | 191.3 ms | noise 46.0 ms, body 139.6 ms, tail 5.6 ms | corr 0.794801, SNR 4.78 dB | corr 0.776711, SNR 3.98 dB | faster, reject for quality |
 | m2-studio | padded `asr=1200`, `F0=2400` | 269.9 ms | 211.4 ms | noise 50.5 ms, body 154.2 ms, tail 5.5 ms | corr 0.949790, SNR 10.40 dB | corr 0.943165, SNR 9.84 dB | faster, quality closer but not parity |
+| m2-studio | padded `asr=1200`, `F0=2400`, `acos` phase | 256.7 ms | 192.6 ms | noise 46.9 ms, body 140.4 ms, tail 5.3 ms | corr 0.964458, SNR 11.99 dB | recorded in `report_cos_resblock_phase_acos.json` | large speed, better than padded, still not strict parity |
 
 This is a useful narrowing result. The first-party candidate reproduces the M1
 and `7s` speed opportunity without relying on external packages, but the PyTorch
@@ -1125,9 +1128,9 @@ uv run --no-sync python scripts/create_f0_source_listening_pack.py \
 ```
 
 Output index:
-`outputs/f0_source_listening/phase_repair_speed_branch/README.md`. The pack
-contains the original 7s padded F0-source candidate and the stronger `acos`
-phase-repair candidate. The validator currently fails closed with two
+`outputs/f0_source_listening/phase_repair_speed_branch/README.md`. The current
+pack contains 3s/7s/10s/15s/30s `acos` phase-repair candidates plus the original
+7s padded F0-source comparator. The validator currently fails closed with six
 `missing human_decision` errors, so this no-ASR pack is evidence for listening
 review only, not approval.
 
