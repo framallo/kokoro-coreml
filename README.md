@@ -77,6 +77,18 @@ Counterbalanced ordering, 5 iterations, warm median. Full data: [bakeoff-results
 
 Five CoreML models chained with native Swift DSP. Text goes in, 24 kHz audio comes out. Zero Python at inference time.
 
+## In-Repo Memory
+
+For current belief before changing runtime, export, or bakeoff behavior, start
+at [README/Wiki/README.md](README/Wiki/README.md). The wiki routes back to
+canonical sources; it does not replace code, scripts, notes, or measured
+outputs. Check it with:
+
+```bash
+node scripts/memory-health.mjs --write-coverage
+node scripts/memory-health.mjs --strict
+```
+
 ```
 Text → Phonemes → Duration (CoreML) → Alignment (Swift) → Matrix ops (Accelerate)
   → F0Ntrain (CoreML) → DecoderPre (CoreML) + hn-nsf (Swift) → GeneratorFromHar (CoreML) → Audio
