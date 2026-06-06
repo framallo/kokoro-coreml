@@ -387,13 +387,17 @@ fed by cropped bucket tensors.
 
 #### Generator split probes
 
-`scripts/probe_generator_split.py` and
-`scripts/probe_generator_noise_split.py` test whether laishere-style package
-boundaries help the current static HAR-post generator. The generated packages
-and reports are ignored under `outputs/generator_split/` and
-`outputs/generator_noise_split/`.
+`scripts/probe_generator_split.py`,
+`scripts/probe_generator_noise_split.py`, and
+`scripts/probe_generator_dual_anchor_split.py` test whether laishere-style
+package boundaries help the current static HAR-post generator. The generated
+packages and reports are ignored under `outputs/generator_split/`,
+`outputs/generator_noise_split/`, and `outputs/generator_dual_anchor_split/`.
 
-Local M2 Studio, N=10 median after three discarded warmups:
+Local M2 Studio. Unless noted, values are N=10 medians after three discarded
+warmups. The audio-anchor CPU+ANE and palettized CPU+ANE rows used N=3 after
+one discarded warmup because they were already unambiguously slower than fused;
+they are rejection probes only.
 
 | Probe | Input | Placement | Fused median | Split median | Split stages | Parity vs fused | Decision |
 | --- | --- | --- | ---: | ---: | --- | --- | --- |
@@ -402,6 +406,12 @@ Local M2 Studio, N=10 median after three discarded warmups:
 | HAR noise split | 3s | noise CPU+GPU, body CPU+GPU | 28.9 ms | 32.5 ms | noise 13.1 ms, body 19.5 ms | exact sample match | reject |
 | HAR noise split | 7s | noise CPU+GPU, body CPU+GPU | 57.6 ms | 63.4 ms | noise 25.8 ms, body 37.7 ms | exact sample match | reject |
 | HAR noise split | 3s | noise CPU+GPU/ALL, body CPU+ANE | 29-30 ms | 249-260 ms | body 237-248 ms | corr 0.999906, SNR 37.65 dB | reject |
+| dual-output mean anchor | 3s | noise CPU+GPU, vocoder CPU+GPU, fp32 tail CPU+GPU | 28.9 ms | 33.0 ms | noise 11.7 ms, vocoder 19.7 ms, tail 1.4 ms | corr 0.999994, SNR 49.54 dB | reject |
+| dual-output mean anchor + cos Snake | 3s | noise CPU+GPU, vocoder CPU+GPU, fp32 tail CPU+GPU | 28.1 ms | 32.0 ms | noise 11.4 ms, vocoder 19.5 ms, tail 1.3 ms | corr 0.999994, SNR 49.54 dB | reject |
+| dual-output mean anchor + cos Snake | 3s | noise ALL, vocoder CPU+ANE, fp32 tail ALL | 29.3 ms | 249.8 ms | noise 11.7 ms, vocoder 236.7 ms, tail 1.8 ms | corr 0.999916, SNR 38.11 dB | reject |
+| dual-output audio anchor + cos Snake | 3s | noise ALL, vocoder CPU+ANE, fp32 tail ALL | 35.7 ms | 242.3 ms | noise 11.8 ms, vocoder 226.4 ms, tail 1.5 ms | corr 0.999916, SNR 38.11 dB | reject |
+| dual-output mean anchor + cos Snake + int8-pal vocoder | 3s | noise ALL, vocoder CPU+ANE, fp32 tail ALL | 32.9 ms | 252.3 ms | noise 11.9 ms, vocoder 238.5 ms, tail 2.0 ms | corr 0.999848, SNR 35.61 dB | reject |
+| dual-output mean anchor + cos Snake + int8-pal vocoder | 3s | noise CPU+GPU, vocoder CPU+GPU, fp32 tail CPU+GPU | 27.9 ms | 32.4 ms | noise 11.2 ms, vocoder 19.9 ms, tail 1.2 ms | corr 0.999933, SNR 39.10 dB | reject |
 
 The final-tail split is too small to matter; the tail costs only about 1-2 ms.
 The HAR-noise split is more informative: it proves the graph can be partitioned
@@ -411,12 +421,16 @@ body reduction. Forcing the noise-split body to CPU+ANE is catastrophic on this
 local M2 Studio run.
 
 The laishere architecture is therefore not "split off the tail" in a generic
-sense. Its own README says tail split alone failed; the working path uses a
-separate fp32 noise stage, a dual-output vocoder with a discarded anchor to keep
-the scheduler committed, a separate fp32 tail, cos-form Snake activations, and
-palettization where the audio output is discarded. The next viable experiment
-is to port that exact scheduler trick or rewrite the body operator surface, not
-to add more naive split boundaries.
+sense. Its own README says tail split alone failed. The follow-up dual-output
+probe now ports the visible scheduler ingredients that were still missing from
+the earlier split tests: mean anchor output matching the public code, an
+audio-anchor variant matching the README prose, fp32 tail, optional cos-form
+Snake, and int8 palettization on the discarded-output vocoder. None of those
+variants recreate a fast CPU+ANE path for the current static HAR-post graph,
+and CPU+GPU remains slower than the fused package because extra package
+dispatch plus noise/tail stages outweigh the smaller vocoder body. The next
+viable performance work is therefore an operator-surface rewrite or a larger
+end-to-end graph reshaping, not more generator package-boundary experiments.
 
 #### HnSF vDSP optimization
 

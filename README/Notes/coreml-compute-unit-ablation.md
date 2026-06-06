@@ -214,6 +214,23 @@ sudo powermetrics -i 1000 --samplers ane
   Snake, and palettization where the audio output is discarded. The next graph
   experiment should port that scheduler trick or rewrite the body operator
   surface; more naive split boundaries are not supported by the data.
+- **Dual-output anchor trick rejected for the current HAR-post graph:** `scripts/probe_generator_dual_anchor_split.py`
+  ports the remaining visible laishere ingredients onto the static Swift dump
+  boundary. On local M2 Studio `3s`, mean-anchor + cos-Snake + fp32 tail on
+  CPU+ANE still spent `236.7 ms` in the vocoder and `249.8 ms` total versus
+  `29.3 ms` fused. The audio-anchor variant was also slow (`242.3 ms` total,
+  N=3 rejection run), and int8 palettizing the vocoder did not help
+  (`252.3 ms` total, N=3 rejection run, with lower parity margin). The CPU+GPU
+  variants passed parity but stayed slower than fused (`32.0-33.0 ms` split
+  versus `28.1-28.9 ms` fused). This closes the "maybe laishere's dual output
+  alone fixes scheduling" hypothesis for our current generator boundary.
+- **Revised decision:** stop adding generator split boundaries unless a new
+  hypothesis changes the operator surface. The remaining path to beat
+  laishere's chain-only M2 Air/M1 short buckets is to reduce generator math or
+  rewrite the GPU/ANE-hostile operators themselves (`conv_transpose`, AdaIN
+  reductions/broadcasts, and Snake lowering), or to evaluate a larger
+  end-to-end graph reshape rather than the already-rejected static HAR-post
+  splits.
 
 **2026-05-17**
 
