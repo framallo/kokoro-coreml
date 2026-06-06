@@ -48,7 +48,7 @@ def _toolchain_report() -> dict[str, str | None]:
     }
 
 
-def _make_har_source_noise_module(generator: Any):
+def _make_har_source_noise_module(generator: Any, phase_mode: str):
     import torch
     import torch.nn as nn
     import torch.nn.functional as F
@@ -89,7 +89,45 @@ def _make_har_source_noise_module(generator: Any):
             real = self.conv_real(x)
             imag = self.conv_imag(x)
             magnitude = torch.sqrt(real**2 + imag**2 + 1e-14)
-            phase = torch.atan2(imag, real)
+            if phase_mode == "atan2":
+                phase = torch.atan2(imag, real)
+            elif phase_mode == "acos":
+                denom = torch.clamp(magnitude, min=1e-12)
+                cos_phase = torch.clamp(real / denom, min=-1.0, max=1.0)
+                abs_phase = torch.acos(cos_phase)
+                sign = torch.where(imag < 0.0, -torch.ones_like(imag), torch.ones_like(imag))
+                phase = abs_phase * sign
+            elif phase_mode in {"atan_manual", "atan_swift"}:
+                eps = torch.full_like(real, 1e-12)
+                safe_real = torch.where(
+                    torch.abs(real) < eps,
+                    torch.where(real < 0.0, -eps, eps),
+                    real,
+                )
+                base = torch.atan(imag / safe_real)
+                phase = torch.where(
+                    real < 0.0,
+                    torch.where(imag >= 0.0, base + torch.pi, base - torch.pi),
+                    base,
+                )
+                phase = torch.where(
+                    torch.abs(real) < eps,
+                    torch.where(
+                        imag > 0.0,
+                        torch.full_like(imag, torch.pi / 2.0),
+                        torch.where(imag < 0.0, torch.full_like(imag, -torch.pi / 2.0), torch.zeros_like(imag)),
+                    ),
+                    phase,
+                )
+                if phase_mode == "atan_swift":
+                    boundary = (real < 0.0) & (torch.abs(imag) < 1e-4)
+                    phase = torch.where(
+                        boundary,
+                        torch.where(imag >= 0.0, torch.full_like(imag, -torch.pi), torch.full_like(imag, torch.pi)),
+                        phase,
+                    )
+            else:
+                raise RuntimeError(f"unsupported phase_mode: {phase_mode}")
             return magnitude, phase
 
     class _HarSourceNoiseModel(nn.Module):
@@ -157,7 +195,7 @@ def _export_packages(
 
     har_source = torch.zeros(har_source_shape, dtype=torch.float32)
     style = torch.zeros(style_shape, dtype=torch.float32)
-    noise = _make_har_source_noise_module(gen)
+    noise = _make_har_source_noise_module(gen, args.phase_mode)
     noise_removed_dropouts = remove_dropout(noise)
     with torch.no_grad():
         traced_noise = torch.jit.trace(noise, (har_source, style), strict=False, check_trace=False)
@@ -247,6 +285,7 @@ def _export_packages(
         "palettize_noise": bool(args.palettize_noise),
         "palettize_body": bool(args.palettize_body),
         "noise_precision": args.noise_precision,
+        "phase_mode": args.phase_mode,
         "body_precision": args.body_precision,
         "tail_precision": args.tail_precision,
         "har_source_shape": list(har_source_shape),
@@ -480,6 +519,7 @@ def main() -> None:
     parser.add_argument("--noise-precision", default="fp16", choices=["fp16", "fp32"])
     parser.add_argument("--body-precision", default="fp16", choices=["fp16", "fp32"])
     parser.add_argument("--tail-precision", default="fp32", choices=["fp16", "fp32"])
+    parser.add_argument("--phase-mode", default="atan2", choices=["atan2", "acos", "atan_manual", "atan_swift"])
     parser.add_argument("--anchor-mode", default="mean", choices=["mean", "sum", "first"])
     parser.add_argument("--decoder-pre-compute-units", default="all")
     parser.add_argument("--fused-compute-units", default="all")

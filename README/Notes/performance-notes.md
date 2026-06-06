@@ -780,6 +780,18 @@ production. The next useful work is phase/STFT parity repair for this compact
 source boundary, or a no-ASR listening review if the paper accepts an
 audio-equivalent rather than tensor-equivalent branch.
 
+Phase/STFT repair probe:
+
+| Variant | Baseline median | Candidate median | Speedup | Parity vs fused | Decision |
+| --- | ---: | ---: | ---: | --- | --- |
+| 3s `atan_manual`, noise fp32 | 32.3 ms | 31.7 ms | +1.7% | corr 0.987931, SNR 16.62 dB | better, still reject |
+| 3s `acos`, noise fp32 | 32.5 ms | 31.8 ms | +2.2% | corr 0.987922, SNR 16.62 dB | better, still reject |
+
+This uses the new `--phase-mode` option in
+`scripts/probe_har_source_noise_split.py`. It confirms the standalone STFT
+semantics finding: fp32 phase formulas reduce the phase-induced waveform error,
+but they do not close the raw generator sensitivity enough for production.
+
 This closes the direct "copy laishere's decoder+vocoder split boundary" path for
 our current Swift dump contract on every tested Mac. The remaining laishere
 advantage on Irvine M1 short/medium rows is not explained by this boundary
