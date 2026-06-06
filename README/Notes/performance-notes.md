@@ -1006,7 +1006,7 @@ includes decoder F0/N conv, decoder encode/decode, and the generator body, then
 a separate fp32 tail. The baseline is the same Swift tensor dump run through the
 checked-in `decoder_pre` package plus the checked-in fused HAR-post generator.
 
-Cross-machine `3s` results:
+Cross-machine and exact losing-bucket results:
 
 | Candidate body units | Baseline median | Candidate median | Stage medians | Parity vs fused | Decision |
 | --- | ---: | ---: | --- | --- | --- |
@@ -1017,6 +1017,8 @@ Cross-machine `3s` results:
 | irvine-m1 CPU+ANE | 176.3 ms | 314.6 ms | noise 75.2 ms, body 235.5 ms, tail 3.9 ms | corr 0.999907, SNR 37.69 dB | reject |
 | irvine-m1 CPU+GPU | 174.6 ms | 199.3 ms | noise 74.9 ms, body 119.8 ms, tail 4.8 ms | corr 0.999991, SNR 47.72 dB | reject |
 | irvine-m1 CPU+GPU, 7s | 396.9 ms | 445.7 ms | noise 173.6 ms, body 264.6 ms, tail 7.7 ms | corr 0.999991, SNR 47.82 dB | reject; exact losing bucket also slows down |
+| m2-studio CPU+GPU, 10s | 81.3 ms | 87.6 ms | noise 30.7 ms, body 54.5 ms, tail 2.6 ms | corr 0.999990, SNR 47.49 dB | reject |
+| irvine-m1 CPU+GPU, 10s | 562.8 ms | 631.6 ms | noise 247.8 ms, body 371.5 ms, tail 11.4 ms | corr 0.999991, SNR 47.86 dB | reject; exact losing bucket also slows down |
 
 Local long-bucket `har_source -> STFT/noise_convs` split results:
 
@@ -1049,7 +1051,7 @@ but they do not close the raw generator sensitivity enough for production.
 
 This closes the direct "copy laishere's decoder+vocoder split boundary" path for
 our current Swift dump contract on every tested Mac, including the exact Irvine
-M1 `7s` losing bucket. The remaining laishere advantage on Irvine M1
+M1 `7s` and `10s` losing buckets. The remaining laishere advantage on Irvine M1
 short/medium rows is not explained by this boundary alone. It must come from
 laishere's full runtime/package details, a hardware-specific Core ML compile
 plan, or work reduction outside the reproduced boundary.
