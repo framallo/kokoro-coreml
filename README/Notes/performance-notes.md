@@ -1001,6 +1001,28 @@ back to a very slow path. This rejects "just use ANE for the generator" as the
 M2 Air / Irvine M1 short-bucket fix. The remaining generator gap is a graph
 shape/export problem.
 
+#### Current laishere stage comparison
+
+The latest local stage comparison narrows what remains to beat on lower-end
+Macs. Against the corrected Config F HAR-direct-pad path:
+
+| Machine | Input | Config F wall | Config F generator | laishere total | laishere noise | laishere vocoder | laishere tail |
+| --- | --- | ---: | ---: | ---: | ---: | ---: | ---: |
+| m2-studio | 3s | 60.2 ms | 28.8 ms | 104.5 ms | 26.2 ms | 60.9 ms | 3.2 ms |
+| m2-studio | 7s | 110.5 ms | 58.3 ms | 192.7 ms | 37.6 ms | 125.7 ms | 4.8 ms |
+| m2-air | 3s | 151.7 ms | 120.6 ms | 153.0 ms | 46.1 ms | 73.8 ms | 3.8 ms |
+| m2-air | 7s | 335.0 ms | 277.6 ms | 334.7 ms | 92.4 ms | 175.9 ms | 10.7 ms |
+| irvine-m1 | 3s | 239.2 ms | 167.6 ms | 195.0 ms | 57.9 ms | 82.8 ms | 4.4 ms |
+| irvine-m1 | 7s | 510.2 ms | 387.6 ms | 444.2 ms | 114.1 ms | 216.5 ms | 9.8 ms |
+
+Interpretation: M2 Air is no longer a clear laishere loss once the corrected
+same-boundary stage profile is used; it is effectively tied at 3s/7s. Irvine M1
+still loses, and the loss is concentrated in the combined source/vocoder region:
+Config F HnSF+generator is `194.9 ms` at 3s and `434.7 ms` at 7s, versus
+laishere noise+vocoder+tail at `145.1 ms` and `340.4 ms`. Future lower-end Mac
+work should target that combined source/vocoder contract, not duration, F0,
+decoder-pre, compute-unit policy, or generic compression.
+
 #### HAR input-trim probe
 
 `scripts/probe_generator_har_input_trim.py` tests a lower-risk variant of the

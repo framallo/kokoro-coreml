@@ -446,6 +446,14 @@ sudo powermetrics -i 1000 --samplers ane
   `MILCompilerForANE error: failed to compile ANE model using ANEF`. Keep the
   staged production policy's generator on CPU+GPU; the remaining short-bucket
   gap requires graph/package changes, not a compute-unit flag flip.
+- **Current lower-end gap is source/vocoder contract, not prefix:** Comparing
+  corrected Config F HAR-direct-pad stage medians with laishere's stage-profile
+  records shows M2 Air is effectively tied at 3s/7s, while Irvine M1 still loses
+  in the combined HnSF/generator region. On M1 3s, Config F HnSF+generator is
+  `194.9 ms`; laishere noise+vocoder+tail is `145.1 ms`. On M1 7s, Config F is
+  `434.7 ms`; laishere is `340.4 ms`. Do not spend more turns on Duration,
+  F0Ntrain, DecoderPre, compute-unit flags, or generic compression unless a new
+  profile contradicts this split.
 - **HAR input-tail trimming is too small:** `scripts/probe_generator_har_input_trim.py`
   keeps the bucketed `x_pre` shape and current Swift HAR source, but exports a
   temporary `GeneratorFromHar` with a shorter static `har` axis. The aggressive
