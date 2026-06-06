@@ -4232,6 +4232,15 @@ vocoder-centered chain. The next viable direction is a narrower strict
 equivalence boundary around the vocoder-like work, not more metadata matching
 on this full decoder+vocoder body.
 
+Changing the exact-HAR decoder+vocoder split to pass `x_source_*` into the body
+as fp16 is also rejected. The hypothesis was that halving the cross-package
+source tensors might reduce transfer/sync overhead without changing the Swift
+HAR contract. Local M2 Studio `3s` CPU+GPU stayed strict (corr `0.999991`, SNR
+`47.76 dB`, max abs `0.00266`) but got much slower: baseline `30.242 ms` versus
+candidate `40.316 ms` (`-33.31%`). Body time rose to `28.895 ms`, so fp16 body
+inputs do not solve the exact split overhead. Report:
+`outputs/decoder_vocoder_split/3s_har_body_fp16_inputs_cos_cos_rsqrt/report_body_fp16_inputs_cpu_gpu.json`.
+
 The narrower generator-only HAR-noise split was rerun with the same
 native-InstanceNorm/iOS17 surface. This keeps decoder/HAR exactly as shipped and
 only splits the current generator into `noise_convs/noise_res` and the main
