@@ -85,7 +85,7 @@ Other Config F cells are N=5 full-sweep medians.
 
 ### iPhone Status
 
-The connected iPhone 12 Pro is visible to CoreDevice as `Webcam`
+The connected iPhone 12 Pro is visible to CoreDevice as `Matt's iPhone`
 (`F383FC46-FD64-5346-AEC6-59E3E2F8C9CA`, model `iPhone13,3`, UDID
 `00008101-001134561A0A001E`) and is connected, paired, and running with
 Developer Mode enabled. The minimal Soniqo Kokoro iOS runner in
