@@ -329,6 +329,40 @@ ANE unlock and will not by itself prove the paper claim, but it is a real
 strict GPU-path optimization and the first local signal large enough to justify
 remote timing.
 
+## Production Exporter Smoke
+
+The upsample rewrite is now available in the production `decoder-har` exporter
+behind `--rewrite-ups-conv-transpose`; defaults are unchanged until Irvine M1
+timing validates the candidate.
+
+```bash
+uv run --no-sync python -m export_synth.main \
+  --output_dir outputs/export_rewrite_smoke \
+  --buckets 3s \
+  --mode decoder-har \
+  --rewrite-ups-conv-transpose
+```
+
+The exported package has the intended production-default graph delta:
+
+| Model | Ops | Conv | ConvT | InstNorm | ReduceMean | Tile | Sin | Cos |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| shipped `kokoro_decoder_har_post_3s` | 2207 | 51 | 4 | 0 | 88 | 96 | 50 | 1 |
+| production rewrite smoke | 2229 | 53 | 2 | 0 | 88 | 96 | 50 | 1 |
+
+On the real 3s generator tensor dump, warmed local M2 Studio CPU+GPU improves
+from `26.377 ms` to `25.122 ms` (`+4.76%`) with corr `0.9999957084781588`,
+SNR `51.10 dB`, and max abs `0.00219727` versus shipped output.
+
+Reports:
+
+- `outputs/export_rewrite_smoke/report_3s_cpu_gpu.json`
+- `outputs/graph_surface/production_rewrite_ups_as_conv_3s.json`
+
+Decision: production integration path is open and opt-in. Next proof must be
+Irvine M1 warmed timing and, if positive, regenerating the actual five shipped
+`coreml/kokoro_decoder_har_post_{3s,7s,10s,15s,30s}.mlpackage` packages.
+
 ## Deep Research Request
 
 A useful external deep-research guide would be narrower than "Core ML

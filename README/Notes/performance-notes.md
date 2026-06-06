@@ -4477,6 +4477,19 @@ M1 timing when the host is quiet enough. Reports:
 and
 `outputs/graph_surface/compute_plan_generator_cos_native_broadcast_fp16_ups_as_conv_3s_cpu_ne.json`.
 
+The same upsample rewrite has been moved into the production `decoder-har`
+exporter behind `--rewrite-ups-conv-transpose`; shipped defaults are unchanged.
+A 3s smoke export to `outputs/export_rewrite_smoke/kokoro_decoder_har_post_3s.mlpackage`
+preserves the production-default surface except for the intended upsample
+lowering (`conv_transpose 4 -> 2`, `conv 51 -> 53`). On the real 3s generator
+tensor dump, warmed local M2 Studio CPU+GPU improves against the shipped
+package from `26.377 ms` to `25.122 ms` (`+4.76%`) with corr
+`0.9999957084781588`, SNR `51.10 dB`, and max abs `0.00219727`. Reports:
+`outputs/export_rewrite_smoke/report_3s_cpu_gpu.json` and
+`outputs/graph_surface/production_rewrite_ups_as_conv_3s.json`. Next action is
+Irvine M1 warmed timing when the host is quiet; only then should the checked-in
+five runtime bucket packages be regenerated.
+
 ---
 
 ## Bakeoff v5: Corrected benchmark (3s-30s) on M2 Ultra

@@ -1,7 +1,7 @@
 import torch
 import torch.nn as nn
 
-from scripts.probe_generator_cos_snake import _make_zero_insert_conv_transpose1d
+from export_synth.wrappers import ZeroInsertConvTranspose1d
 
 
 def test_zero_insert_conv_transpose_rewrite_matches_conv_transpose1d():
@@ -13,7 +13,7 @@ def test_zero_insert_conv_transpose_rewrite_matches_conv_transpose1d():
         stride=10,
         padding=5,
     )
-    rewritten = _make_zero_insert_conv_transpose1d(original)
+    rewritten = ZeroInsertConvTranspose1d(original)
     x = torch.randn(2, 3, 7)
 
     expected = original(x)

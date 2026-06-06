@@ -1,0 +1,66 @@
+{
+  "compute_units": "cpuAndGPU",
+  "first_predict_ms": {
+    "production_rewrite": 84.7234579268843,
+    "shipped": 130.95904199872166
+  },
+  "iterations": 10,
+  "metrics_rewrite_vs_dump_trimmed": {
+    "candidate_samples": 67200,
+    "correlation": 0.9999918943139101,
+    "cosine_similarity": 0.9999926615284004,
+    "max_abs_error": 0.012786865234375,
+    "mean_abs_error": 7.279354132157729e-05,
+    "reference_samples": 67200,
+    "rmse": 0.00020745611895382697,
+    "samples_compared": 67200,
+    "snr_db": 48.33215993530577
+  },
+  "metrics_rewrite_vs_shipped_trimmed": {
+    "candidate_samples": 67200,
+    "correlation": 0.9999957084781588,
+    "cosine_similarity": 0.9999961211246389,
+    "max_abs_error": 0.002197265625,
+    "mean_abs_error": 6.299924194103196e-05,
+    "reference_samples": 67200,
+    "rmse": 0.00015085997197522496,
+    "samples_compared": 67200,
+    "snr_db": 51.09923456175161
+  },
+  "models": {
+    "production_rewrite": "outputs/export_rewrite_smoke/kokoro_decoder_har_post_3s.mlpackage",
+    "shipped": "coreml/kokoro_decoder_har_post_3s.mlpackage"
+  },
+  "speedup_vs_shipped_pct": 4.757177289558821,
+  "warm_predict_median_ms": {
+    "production_rewrite": 25.12243698583916,
+    "shipped": 26.377249509096146
+  },
+  "warm_predict_times_ms": {
+    "production_rewrite": [
+      25.128790992312133,
+      25.129416957497597,
+      25.116082979366183,
+      25.131584028713405,
+      25.097416946664453,
+      25.095790973864496,
+      25.071874959394336,
+      25.095792021602392,
+      25.14195896219462,
+      25.213334010913968
+    ],
+    "shipped": [
+      26.218833052553236,
+      26.33608307223767,
+      26.499666972085834,
+      26.825792039744556,
+      26.486042072065175,
+      26.441666996106505,
+      26.282500009983778,
+      26.322124991565943,
+      26.34208300150931,
+      26.412416016682982
+    ]
+  },
+  "warmup": 3
+}
