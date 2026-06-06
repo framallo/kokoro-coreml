@@ -949,6 +949,7 @@ At `7s`, the natural-ASR export uses `x_source_0=[1,256,5400]` and
 | --- | --- | ---: | ---: | --- | --- | --- | --- |
 | m2-studio | natural `asr=112`, `F0=224` | 33.4 ms | 32.7 ms | noise 7.3 ms, body 23.5 ms, tail 2.1 ms | corr 0.814046, SNR 5.08 dB | corr 0.804153, SNR 4.54 dB | reject for quality; speed tie |
 | m2-studio | padded `asr=120`, `F0=240` | 33.5 ms | 33.7 ms | noise 7.6 ms, body 24.4 ms, tail 1.5 ms | corr 0.931896, SNR 9.19 dB | corr 0.939812, SNR 9.57 dB | reject; quality better but no speed |
+| m2-studio | padded Swift-like source + Swift phase, `asr=120`, `F0=240` | 32.1 ms | 32.0 ms | noise 6.7 ms, body 23.6 ms, tail 1.7 ms | corr 0.186514, SNR 0.32 dB | recorded in `report_swift_like_phase_swift.json` | reject; closes Swift-source/phase recovery corner |
 | irvine-m1 | natural `asr=112`, `F0=224` | 172.0 ms | 153.3 ms | noise 37.1 ms, body 111.4 ms, tail 4.6 ms | corr 0.814046, SNR 5.08 dB | corr 0.804153, SNR 4.54 dB | promising M1 speed, not quality-safe |
 | m2-studio | natural `asr=270`, `F0=540` | 63.1 ms | 56.5 ms | noise 12.8 ms, body 41.5 ms, tail 2.2 ms | corr 0.796791, SNR 4.77 dB | corr 0.795823, SNR 4.33 dB | faster, reject for quality |
 | m2-studio | padded `asr=280`, `F0=560` | 63.0 ms | 58.8 ms | noise 13.5 ms, body 43.0 ms, tail 2.3 ms | corr 0.962251, SNR 11.51 dB | corr 0.968596, SNR 12.51 dB | faster, quality closer but not parity |
