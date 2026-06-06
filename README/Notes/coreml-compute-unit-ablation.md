@@ -492,7 +492,11 @@ sudo powermetrics -i 1000 --samplers ane
   still fails strict quality (`3s` corr `0.931895`, SNR `9.19 dB`; `7s` corr
   `0.962251`, SNR `11.51 dB`). Keep this as the fastest local F0-source
   research branch, but do not integrate it until the source-quality contract is
-  fixed or a human listening gate explicitly approves it.
+  fixed or a human listening gate explicitly approves it. A 3s rerun with
+  `--include-torch-reference` confirms the remaining miss is not primarily Core
+  ML conversion drift: the shipped baseline versus dump is corr `0.999996`, SNR
+  `51.60 dB`, while the PyTorch F0-source candidate itself is only corr
+  `0.939812`, SNR `9.57 dB` against the dump.
 
 **2026-05-17**
 

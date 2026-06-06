@@ -3189,6 +3189,13 @@ current best speed-positive source/vocoder research branch, but it is not
 production-eligible until source quality is recovered or a human listening gate
 accepts the drift.
 
+A 3s rerun with `--include-torch-reference` shows the quality loss is already
+present before Core ML: baseline vs dump is corr `0.999996`, SNR `51.60 dB`,
+while the PyTorch F0-source candidate vs dump is corr `0.939812`, SNR
+`9.57 dB`. The next optimization work should recover the source formulation or
+accept/reject the drift by listening review; more conversion flags are unlikely
+to solve this branch.
+
 ---
 
 ## Bakeoff v5: Corrected benchmark (3s-30s) on M2 Ultra
