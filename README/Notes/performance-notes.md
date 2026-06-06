@@ -874,6 +874,31 @@ closers across all current loss cells. The F0-source branch remains useful
 research evidence, but the saved candidates are not enough to prove a faster
 implementation even if listening accepted the quality drift.
 
+`scripts/inspect_coreml_compute_plan.m` now records `MLComputePlan` placement
+for ML Program packages. It must be compiled as a small Objective-C CLI because
+the Swift-refined Core ML API in the current Xcode exposes structure and cost
+but not the ML Program device-usage selector directly:
+
+```bash
+clang -fobjc-arc -framework Foundation -framework CoreML \
+  scripts/inspect_coreml_compute_plan.m -o /tmp/inspect_coreml_compute_plan
+```
+
+The first useful M1 placement result changes the explanation for laishere's
+Irvine advantage. On Irvine M1, our shipping 3s HAR-post generator loaded with
+`cpuAndGPU` is GPU-preferred for all non-constant estimated cost
+(`gpu=100%`). Loading the same generator with `.all` still does not expose a
+Neural Engine-preferred generator plan. By contrast, laishere's public
+`KokoroVocoder.mlpackage` loaded with `.all` has a mixed plan: estimated cost is
+`56.6%` Neural Engine, `35.3%` GPU, and `4.5%` CPU. Its `conv`, `add`, `mul`,
+and `instance_norm` families are mostly Neural Engine-preferred, while
+`conv_transpose` remains mixed and `cos` falls to CPU/GPU. Forcing laishere's
+vocoder to `cpuAndGPU` removes that NE placement and makes it a GPU-only plan.
+So the current M1 root-cause hypothesis is no longer "MLX is faster" or
+"laishere has lower Python overhead"; it is that laishere's different iOS17
+vocoder boundary/operator surface unlocks partial NE placement on M1, while our
+quality-safe HAR-post generator remains GPU-bound.
+
 This answers the "how is laishere/MLX faster?" question more narrowly. MLX is
 not faster after warmed Config F correction. Laishere is not faster on M2 Studio
 and is effectively tied on M2 Air when the stage-profile boundary is rerun. The
