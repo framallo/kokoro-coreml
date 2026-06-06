@@ -25,6 +25,10 @@ from scripts.external_bakeoff.summarize_frontier_freshness import (
     render_markdown as render_frontier_freshness_markdown,
     summarize_freshness,
 )
+from scripts.external_bakeoff.summarize_goal_frontier_status import (
+    render_markdown as render_goal_frontier_status_markdown,
+    summarize_status as summarize_goal_frontier_status,
+)
 from scripts.external_bakeoff.summarize_irvine_next_targets import (
     render_markdown as render_irvine_next_targets_markdown,
     summarize_targets as summarize_irvine_next_targets,
@@ -1095,6 +1099,81 @@ def test_irvine_next_targets_keeps_only_real_irvine_losses():
     assert "Quality-fail candidates that would beat warmed laishere profile: `1`." in markdown
     assert "source/body primary; upstream/runtime material" in markdown
     assert "Do not promote fresh Irvine timing" in markdown
+
+
+def test_goal_frontier_status_exposes_blockers_and_next_actions():
+    frontier = {
+        "summary": {
+            "absolute_fastest_verified": False,
+            "config_f_losses": [{"machine_id": "irvine-m1"}],
+            "config_f_missing": [{"machine_id": "iphone-12-pro"}],
+            "no_full_duration_result": [{"machine_id": "iphone-12-pro"}],
+        }
+    }
+    freshness = {
+        "stale_or_tie_loss_count": 1,
+        "loss_rows": [
+            {
+                "machine_id": "m2-air",
+                "input_key": "3s",
+                "frontier_loss_looks_stale_or_tie": True,
+                "profile_config_f_ms": 148.0,
+                "profile_laishere_ms": 153.0,
+                "profile_gap_ms": -5.0,
+                "profile_gap_pct": -3.2,
+            },
+            {
+                "machine_id": "irvine-m1",
+                "input_key": "3s",
+                "frontier_loss_looks_stale_or_tie": False,
+                "profile_config_f_ms": 233.6,
+                "profile_laishere_ms": 195.0,
+                "profile_gap_ms": 38.6,
+                "profile_gap_pct": 19.8,
+            },
+        ],
+    }
+    next_targets = {
+        "strict_pass_closers": 0,
+        "quality_fail_closers": 0,
+        "quality_fail_warmed_profile_closers": 1,
+    }
+    listening = {
+        "row_count": 4,
+        "mapped_count": 4,
+        "exact_timing_report_listening_artifact_count": 4,
+    }
+    ios_install = {
+        "install_ok": True,
+        "launch_ok": False,
+        "launch_blocker": "device_locked",
+        "bundle_id": "com.kokoro.externalbakeoff.ConfigFIOSRunnerManual",
+        "device": {"model": "iPhone 12 Pro"},
+    }
+
+    summary = summarize_goal_frontier_status(
+        frontier,
+        freshness,
+        next_targets,
+        listening,
+        ios_install,
+        {"blank": 4},
+        irvine_load_note="Irvine M1 load is noisy",
+    )
+
+    assert summary["absolute_fastest_verified"] is False
+    assert summary["real_irvine_loss_count"] == 1
+    assert summary["strict_pass_closers"] == 0
+    assert summary["listening_targets"]["decision_counts"] == {"blank": 4}
+    assert summary["iphone"]["launch_blocker"] == "device_locked"
+    assert "no saved strict-pass candidate closes a real Irvine loss" in summary["blockers"]
+    assert "4 Irvine no-ASR listening decisions are blank" in summary["blockers"]
+    assert "Irvine M1 load is noisy" in summary["blockers"]
+
+    markdown = render_goal_frontier_status_markdown(summary)
+    assert "Absolute fastest verified: `false`." in markdown
+    assert "| `3s` | 233.6 ms | 195.0 ms | 38.6 ms / 19.80% |" in markdown
+    assert "Retry iPhone Config F runner only after the physical device is unlocked." in markdown
 
 
 def test_irvine_listening_targets_marks_same_label_local_artifact():

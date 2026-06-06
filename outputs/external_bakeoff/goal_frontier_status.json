@@ -1,0 +1,75 @@
+{
+  "absolute_fastest_verified": false,
+  "blockers": [
+    "absolute_fastest_verified is false",
+    "no saved strict-pass candidate closes a real Irvine loss",
+    "4 Irvine no-ASR listening decisions are blank",
+    "iPhone Config F launch blocker: device_locked",
+    "Irvine M1 is not quiet enough for publishable timing: load averages 5.19/4.03/3.24 with mediaanalysisd 61.0%, system_profiler 46.3%, and mds_stores 39.4%."
+  ],
+  "config_f_loss_cells": 8,
+  "config_f_missing_cells": 1,
+  "iphone": {
+    "bundle_id": "com.kokoro.externalbakeoff.ConfigFIOSRunnerManual",
+    "device": {
+      "coredevice_identifier": "F383FC46-FD64-5346-AEC6-59E3E2F8C9CA",
+      "model": "iPhone 12 Pro (iPhone13,3)",
+      "os_version": "26.5",
+      "state": "available (paired)",
+      "udid": "00008101-001134561A0A001E"
+    },
+    "install_ok": true,
+    "launch_blocker": "device_locked",
+    "launch_ok": false
+  },
+  "listening_targets": {
+    "decision_counts": {
+      "blank": 4
+    },
+    "exact_timing_report_artifacts": 4,
+    "mapped": 4,
+    "rows": 4
+  },
+  "next_actions": [
+    "Collect no-ASR human decisions for Irvine F0/source speed candidates.",
+    "Retry iPhone Config F runner only after the physical device is unlocked.",
+    "Run publishable Irvine timings only after mediaanalysisd/Spotlight load is idle.",
+    "Create a new strict single-package or source/body formulation; existing strict probes do not close losses."
+  ],
+  "no_full_duration_result_cells": 4,
+  "quality_fail_closers": 0,
+  "quality_fail_warmed_profile_closers": 3,
+  "real_irvine_loss_count": 4,
+  "real_irvine_losses": [
+    {
+      "bucket": "3s",
+      "config_f_ms": 233.55,
+      "gap_ms": 38.524,
+      "gap_pct": 19.753263667408447,
+      "laishere_ms": 195.026
+    },
+    {
+      "bucket": "7s",
+      "config_f_ms": 492.656,
+      "gap_ms": 48.43900000000002,
+      "gap_pct": 10.904355303826739,
+      "laishere_ms": 444.217
+    },
+    {
+      "bucket": "10s",
+      "config_f_ms": 685.45,
+      "gap_ms": 40.577,
+      "gap_pct": 6.292246690433619,
+      "laishere_ms": 644.873
+    },
+    {
+      "bucket": "15s",
+      "config_f_ms": 1014.936,
+      "gap_ms": 24.326000000000022,
+      "gap_pct": 2.455658634578696,
+      "laishere_ms": 990.61
+    }
+  ],
+  "stale_or_tie_loss_count": 4,
+  "strict_pass_closers": 0
+}
