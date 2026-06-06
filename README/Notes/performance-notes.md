@@ -613,6 +613,16 @@ local M2 Studio batch preserved the same output SHA-256 for every bucket and
 moved HnSF medians to `6.2/14.7/20.4/30.7/64.4 ms` for
 `3s/7s/10s/15s/30s`.
 
+Rejected follow-up: specializing the remaining `align_corners=false`
+interpolation for the fixed `N -> N*300` phase geometry was not promoted.
+Unit tests proved exact equality to the generic helper, and a 30s-only warmed
+probe looked positive (`379.3 -> 375.3 ms` wall, `64.4 -> 61.1 ms` HnSF), but
+the official all-bucket run shape did not hold the win consistently:
+`50.6/96.1/126.2/185.6/379.3 ms` became
+`50.4/94.4/124.6/185.4/379.7 ms`, with 30s HnSF at `65.6 ms`. Keep the generic
+interpolator until the long-bucket row is speed-positive in the same warmed
+all-bucket harness used for paper-facing results.
+
 #### Direct HAR padding fast path
 
 Current `main` avoids constructing a temporary HAR `MLMultiArray` before
