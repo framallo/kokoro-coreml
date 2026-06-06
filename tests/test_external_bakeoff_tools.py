@@ -63,6 +63,10 @@ from scripts.external_bakeoff.summarize_irvine_3s_placement_target import (
     render_markdown as render_irvine_3s_placement_target_markdown,
     summarize_placement_target as summarize_irvine_3s_placement_target,
 )
+from scripts.external_bakeoff.summarize_lower_end_mac_win_gate import (
+    build_summary as build_lower_end_mac_win_gate,
+    render_markdown as render_lower_end_mac_win_gate_markdown,
+)
 from scripts.external_bakeoff.summarize_stage_gap_decomposition import (
     render_markdown as render_stage_gap_markdown,
     summarize_config_record,
@@ -1215,6 +1219,112 @@ def test_irvine_next_targets_keeps_only_real_irvine_losses():
     assert "Quality-fail candidates that would beat warmed laishere profile: `1`." in markdown
     assert "source/body primary; upstream/runtime material" in markdown
     assert "Do not promote fresh Irvine timing" in markdown
+
+
+def test_lower_end_mac_win_gate_tracks_pending_warmed_listening_wins(tmp_path):
+    m2_report = tmp_path / "outputs/f0_noise_exact_shape/3s_fast/report.json"
+    m2_report.parent.mkdir(parents=True)
+    m2_report.write_text(
+        json.dumps(
+            {
+                "report": str(m2_report),
+                "benchmark": {
+                    "warm_predict_median_ms": {
+                        "baseline_total": 124.0,
+                        "candidate_total": 112.0,
+                    },
+                    "metrics": {
+                        "candidate_vs_baseline_trimmed": {
+                            "correlation": 0.93,
+                            "snr_db": 9.2,
+                        }
+                    },
+                },
+            }
+        )
+    )
+    frontier = {
+        "summary": {
+            "cells": [
+                {
+                    "machine_id": "m2-air",
+                    "input_key": "3s",
+                    "config_f_warm_median_ms": 148.0,
+                    "best_warm_median_ms": 142.0,
+                    "best_impl_label": "laishere",
+                }
+            ]
+        }
+    }
+    freshness = {
+        "loss_rows": [
+            {
+                "machine_id": "m2-air",
+                "input_key": "3s",
+                "frontier_loss_looks_stale_or_tie": True,
+            }
+        ]
+    }
+    irvine_targets = {
+        "rows": [
+            {
+                "machine_id": "irvine-m1",
+                "input_key": "3s",
+                "config_f_ms": 233.6,
+                "laishere_ms": 195.0,
+                "best_quality_fail_signal": {
+                    "label": "3s_fast_fail",
+                    "corr": 0.81,
+                    "snr_db": 5.1,
+                },
+                "quality_fail_vs_warmed_profile": {
+                    "projected_config_f_ms": 214.8,
+                    "profile_margin_ms": -19.8,
+                    "would_beat_warmed_laishere_profile": False,
+                },
+                "source_body_gap_ms": 22.0,
+                "upstream_runtime_gap_ms": 12.9,
+            },
+            {
+                "machine_id": "irvine-m1",
+                "input_key": "7s",
+                "config_f_ms": 492.7,
+                "laishere_ms": 444.2,
+                "best_quality_fail_signal": {
+                    "label": "7s_fast_fail",
+                    "corr": 0.80,
+                    "snr_db": 4.8,
+                },
+                "quality_fail_vs_warmed_profile": {
+                    "projected_config_f_ms": 444.1,
+                    "profile_margin_ms": 0.1,
+                    "would_beat_warmed_laishere_profile": True,
+                },
+                "source_body_gap_ms": 43.3,
+                "upstream_runtime_gap_ms": 3.6,
+            },
+        ]
+    }
+
+    summary = build_lower_end_mac_win_gate(
+        frontier,
+        freshness,
+        irvine_targets,
+        irvine_decisions={"7s_fast_fail": ""},
+        m2_decisions={"3s_fast": ""},
+        m2_reports=[m2_report],
+    )
+
+    assert summary["pending_listening_win_count"] == 2
+    assert summary["blocked_row_count"] == 1
+    assert summary["m2_air_rows"][0]["projected_full_ms"] == 136.0
+    assert summary["m2_air_rows"][0]["would_win_if_accepted"] is True
+    assert summary["irvine_rows"][0]["gate"] == "implementation-gap"
+
+    markdown = render_lower_end_mac_win_gate_markdown(summary)
+    assert "Warmed inference only" in markdown
+    assert "Pending listening wins: `2`." in markdown
+    assert "`7s`" in markdown
 
 
 def test_goal_frontier_status_exposes_blockers_and_next_actions():
