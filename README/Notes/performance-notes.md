@@ -365,6 +365,52 @@ Current ratio table, competitor median divided by Config F median; values above
 | irvine-m1 | laishere | 0.75x | 0.80x | 0.87x | 0.90x | 1.09x |
 | irvine-m1 | Soniqo | 5.70x | 2.73x | 1.92x | 1.32x | 0.69x |
 
+#### Competitive frontier gate
+
+`scripts/external_bakeoff/summarize_competitive_frontier.py` turns the current
+paper-facing result JSONs into a fastest-implementation frontier. It defaults
+to the corrected Config F `*_vector_noise_batch.json` files plus the current
+MLX, Soniqo, laishere, and Soniqo iPhone payloads, so it does not accidentally
+mix older compile/cache-polluted Config F rows into the ranking. A row is
+eligible for fastest ranking only when
+`observed_audio_duration_s / canonical_audio_duration_s >= 0.95`; this excludes
+Soniqo's short public-artifact outputs from long-bucket wins.
+
+```bash
+uv run --no-sync python scripts/external_bakeoff/summarize_competitive_frontier.py \
+  --output outputs/external_bakeoff/competitive_frontier.md \
+  --json-output outputs/external_bakeoff/competitive_frontier.json
+```
+
+Current machine-checkable frontier result:
+
+| Status | Count / cells | Interpretation |
+| --- | ---: | --- |
+| `absolute_fastest_verified` | `false` | The global objective is not complete. |
+| Config F full-duration Mac losses | `8` | All remaining Mac losses are to laishere, not MLX. |
+| Config F missing full-duration phone cells | `1` | iPhone 12 Pro has Soniqo iOS `3s`; Config F phone timing is still absent. |
+| No full-duration phone frontier cells | `4` | iPhone long buckets only have short Soniqo public-artifact outputs right now. |
+
+Remaining full-duration Mac losses from the generated frontier:
+
+| Machine | Bucket | Fastest impl | Fastest median | Config F median | Required Config F reduction |
+| --- | --- | --- | ---: | ---: | ---: |
+| irvine-m1 | 3s | laishere | 176.3 ms | 233.6 ms | 32.5% |
+| irvine-m1 | 7s | laishere | 394.6 ms | 492.7 ms | 24.9% |
+| irvine-m1 | 10s | laishere | 593.9 ms | 685.5 ms | 15.4% |
+| irvine-m1 | 15s | laishere | 912.0 ms | 1014.9 ms | 11.3% |
+| m2-air | 3s | laishere | 142.0 ms | 148.0 ms | 4.2% |
+| m2-air | 7s | laishere | 316.9 ms | 330.7 ms | 4.3% |
+| m2-air | 10s | laishere | 450.2 ms | 466.0 ms | 3.5% |
+| m2-air | 15s | laishere | 657.3 ms | 693.6 ms | 5.5% |
+
+This is now the explicit ship gate for the "absolute fastest" claim: the
+script must report `absolute_fastest_verified=true`, with no Config F losses
+and no missing Config F device cells, before the broad claim is proven. Today
+the next meaningful speed work remains the source/vocoder path on M1 and the
+small laishere short/medium deficit on M2 Air; MLX no longer explains a
+warmed-inference loss.
+
 #### Corrected Config F stage medians
 
 Each cell is the median per-stage time from the corrected staged + exact

@@ -11,6 +11,11 @@ from scripts.external_bakeoff.schema import (
     result_record,
     validate_result_payload,
 )
+from scripts.external_bakeoff.summarize_competitive_frontier import (
+    load_records as load_frontier_records,
+    render_markdown as render_frontier_markdown,
+    summarize_frontier,
+)
 from scripts.external_bakeoff.validate_listening_decisions import validate_rows
 from scripts.external_bakeoff.verify_external_bakeoff_completion import (
     _check_iphone,
@@ -365,6 +370,88 @@ def test_f0_source_candidate_summary_ranks_warm_speedups_and_decisions(tmp_path)
     markdown = render_f0_candidate_markdown(rows)
     assert "| 1 | m2-studio | 3s | `3s_candidate` | 25.0% |" in markdown
     assert "Strict waveform failures are not production approvals" in markdown
+
+
+def test_competitive_frontier_filters_short_outputs_and_marks_losses(tmp_path):
+    results = tmp_path / "results.json"
+    payload = {
+        "created_utc": "2026-06-06T00:00:00Z",
+        "impl": "mixed",
+        "machine_id": "mixed",
+        "machine": {"machine_id": "mixed"},
+        "records": [
+            {
+                "impl": "config-f-reference",
+                "machine_id": "m2-air",
+                "input_key": "3s",
+                "status": "ok",
+                "warm_wall_times_s": [0.150, 0.148, 0.149],
+                "canonical_audio_duration_s": 2.8,
+                "observed_audio_duration_s": 2.8,
+            },
+            {
+                "impl": "laishere-kokoro-coreml",
+                "machine_id": "m2-air",
+                "input_key": "3s",
+                "status": "ok",
+                "warm_wall_times_s": [0.142, 0.144, 0.143],
+                "canonical_audio_duration_s": 2.8,
+                "observed_audio_duration_s": 2.775,
+            },
+            {
+                "impl": "soniqo-speech-swift-kokoro",
+                "machine_id": "m2-air",
+                "input_key": "7s",
+                "status": "ok",
+                "warm_wall_times_s": [0.070, 0.071, 0.069],
+                "canonical_audio_duration_s": 6.75,
+                "observed_audio_duration_s": 5.0,
+            },
+            {
+                "impl": "soniqo-speech-swift-kokoro-ios",
+                "machine_id": "iphone-12-pro",
+                "input_key": "3s",
+                "status": "ok",
+                "warm_wall_times_s": [0.830, 0.831, 0.829],
+                "canonical_audio_duration_s": 2.8,
+                "observed_audio_duration_s": 2.7,
+            },
+        ],
+        "provenance": {},
+    }
+    results.write_text(json.dumps(payload))
+
+    rows = load_frontier_records([results], min_duration_ratio=0.95)
+    summary = summarize_frontier(rows)
+    m2_air_3s = next(
+        cell
+        for cell in summary["cells"]
+        if cell["machine_id"] == "m2-air" and cell["input_key"] == "3s"
+    )
+    m2_air_7s = next(
+        cell
+        for cell in summary["cells"]
+        if cell["machine_id"] == "m2-air" and cell["input_key"] == "7s"
+    )
+    iphone_3s = next(
+        cell
+        for cell in summary["cells"]
+        if cell["machine_id"] == "iphone-12-pro" and cell["input_key"] == "3s"
+    )
+
+    assert m2_air_3s["outcome"] == "config-f-loses"
+    assert m2_air_3s["best_impl"] == "laishere-kokoro-coreml"
+    assert round(m2_air_3s["gap_pct"], 1) == 4.2
+    assert m2_air_7s["outcome"] == "no-full-duration-result"
+    assert m2_air_7s["best_impl"] is None
+    assert iphone_3s["outcome"] == "config-f-missing"
+    assert iphone_3s["best_impl"] == "soniqo-speech-swift-kokoro-ios"
+    assert summary["absolute_fastest_verified"] is False
+
+    markdown = render_frontier_markdown(summary, rows, min_duration_ratio=0.95)
+    assert "Config F needs 4.2%" in markdown
+    assert "Excluded Short Outputs" in markdown
+    assert "| m2-air | 7s | Soniqo | 70.0 ms | 0.741 |" in markdown
 
 
 def test_completion_verifier_allows_mlx_3s_error_but_requires_iphone():
