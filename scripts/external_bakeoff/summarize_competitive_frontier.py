@@ -24,6 +24,7 @@ DEFAULT_RESULT_FILES = (
     "results_config_f_reference_m2-studio-local_vector_noise_batch.json",
     "results_config_f_reference_m2-air_vector_noise_batch.json",
     "results_config_f_reference_irvine-m1_vector_noise_batch.json",
+    "results_config_f_reference_ios_iphone-12-pro.json",
     "results_mlx_audio_m2-studio.json",
     "results_mlx_audio_m2-air.json",
     "results_mlx_audio_irvine-m1.json",
@@ -36,6 +37,7 @@ DEFAULT_RESULT_FILES = (
     "results_laishere_kokoro_coreml_irvine-m1.json",
 )
 DEFAULT_OUTPUT = Path("outputs/external_bakeoff/competitive_frontier.md")
+CONFIG_F_IMPLS = {"config-f-reference", "config-f-reference-ios"}
 
 
 def _median(values: list[float]) -> float | None:
@@ -45,6 +47,7 @@ def _median(values: list[float]) -> float | None:
 def _impl_label(impl: str) -> str:
     labels = {
         "config-f-reference": "Config F",
+        "config-f-reference-ios": "Config F iOS",
         "mlx-audio": "MLX",
         "soniqo-speech-swift-kokoro": "Soniqo",
         "soniqo-speech-swift-kokoro-ios": "Soniqo iOS",
@@ -134,7 +137,7 @@ def summarize_frontier(rows: list[dict[str, Any]]) -> dict[str, Any]:
                 and row["warm_median_s"] is not None
             ]
             candidates.sort(key=lambda row: float(row["warm_median_s"]))
-            config = next((row for row in candidates if row["impl"] == "config-f-reference"), None)
+            config = next((row for row in candidates if row["impl"] in CONFIG_F_IMPLS), None)
             best = candidates[0] if candidates else None
             next_best = candidates[1] if len(candidates) > 1 else None
             if not best:
@@ -143,7 +146,7 @@ def summarize_frontier(rows: list[dict[str, Any]]) -> dict[str, Any]:
             elif not config:
                 outcome = "config-f-missing"
                 gap_pct = None
-            elif best["impl"] == "config-f-reference":
+            elif best["impl"] in CONFIG_F_IMPLS:
                 outcome = "config-f-wins"
                 gap_pct = None
                 if next_best:

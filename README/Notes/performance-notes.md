@@ -200,6 +200,19 @@ enabled and launch capability present. Launching the already installed
 not, or could not be, unlocked`. The host can see and talk to the phone; the
 only current Config F iPhone execution blocker is the physical lock state.
 
+Follow-up on the same pass rejected the likely host-side launch bypasses.
+`devicectl device process launch` still routes a remote app-bundle path through
+SpringBoard, so `--console --no-activate` failed with the same locked-device
+denial. Passing the app executable path directly failed because this `devicectl`
+subcommand requires an application bundle, and `--start-stopped --no-activate`
+also failed before app startup with `RequestDenied ... Locked`. The installed
+manual runner was updated to auto-start on first view appearance, copy the JSON
+to the clipboard, and save `Documents/config_f_ios_result.json`; once the phone
+is physically unlocked, `scripts/external_bakeoff/pull_config_f_ios_result.sh`
+can copy that file from the app data container, ingest it as
+`results_config_f_reference_ios_iphone-12-pro.json`, and regenerate the
+competitive frontier.
+
 Whisper, ASR, VAD, playback, and echo-demo dependencies are not part of this
 bakeoff boundary. The iOS runner is intentionally Kokoro TTS only.
 

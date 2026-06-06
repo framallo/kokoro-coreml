@@ -117,6 +117,39 @@ def _ios_payload(manifest: dict) -> dict:
     }
 
 
+def _config_f_ios_payload(manifest: dict) -> dict:
+    records = []
+    for key in RUNTIME_BUCKETS:
+        item = manifest["inputs"][key]
+        duration = item["canonical_duration_s"]
+        warm = [0.09, 0.10, 0.11, 0.12, 0.13]
+        records.append(
+            {
+                "input_key": key,
+                "text_sha256": item["text_sha256"],
+                "voice": item["voice"],
+                "canonical_audio_duration_s": duration,
+                "expected_bucket_s": item["expected_bucket_s"],
+                "post_preflight_cold_wall_time_s": 0.2,
+                "warm_wall_times_s": warm,
+                "sample_count": int(duration * 24000),
+                "observed_audio_duration_s": duration,
+                "bucket_used": key,
+                "duration_model": f"exact_t{item['expected_bucket_s']}",
+                "stage_medians_s": {"generator_coreml": 0.05},
+                "raw_warm_stage_timings_s": [{"generator_coreml": 0.05}],
+            }
+        )
+    return {
+        "impl": "config-f-reference-ios",
+        "framework": "Swift + Core ML",
+        "hardware_target": "ANE/Core ML",
+        "compute_units": "staged(duration/f0n/generator=cpuAndGPU,decoderPre=cpuAndNeuralEngine)",
+        "warm_iterations": 5,
+        "records": records,
+    }
+
+
 def test_laishere_compute_unit_policy_defaults_and_aliases():
     assert LAISHERE_DEFAULT_COMPUTE_UNITS == {
         "albert": "cpuAndNeuralEngine",
@@ -153,6 +186,35 @@ def test_ingest_ios_runner_result_validates_manifest_and_schema():
         {
             "created_utc": "2026-06-05T00:00:00Z",
             "impl": "soniqo-speech-swift-kokoro-ios",
+            "machine_id": "iphone-12-pro",
+            "machine": {"machine_id": "iphone-12-pro"},
+            "records": records,
+            "provenance": {},
+        }
+    )
+
+
+def test_ingest_ios_runner_result_accepts_config_f_payload_shape():
+    manifest = _manifest()
+    records = _ingest_records(
+        payload=_config_f_ios_payload(manifest),
+        manifest=manifest,
+        machine_id="iphone-12-pro",
+        version="test",
+        source_path=Path("config-f-ios.json"),
+    )
+
+    assert [record["input_key"] for record in records] == list(RUNTIME_BUCKETS)
+    assert {record["impl"] for record in records} == {"config-f-reference-ios"}
+    assert all(record["cold_wall_time_s"] == 0.2 for record in records)
+    assert records[0]["provenance"]["duration_model"] == "exact_t3"
+    assert records[0]["provenance"]["bucket_used"] == "3s"
+    assert records[0]["provenance"]["stage_medians_s"] == {"generator_coreml": 0.05}
+
+    validate_result_payload(
+        {
+            "created_utc": "2026-06-05T00:00:00Z",
+            "impl": "config-f-reference-ios",
             "machine_id": "iphone-12-pro",
             "machine": {"machine_id": "iphone-12-pro"},
             "records": records,
@@ -470,6 +532,24 @@ def test_competitive_frontier_filters_short_outputs_and_marks_losses(tmp_path):
                 "canonical_audio_duration_s": 2.8,
                 "observed_audio_duration_s": 2.7,
             },
+            {
+                "impl": "config-f-reference-ios",
+                "machine_id": "iphone-12-pro",
+                "input_key": "7s",
+                "status": "ok",
+                "warm_wall_times_s": [0.700, 0.701, 0.699],
+                "canonical_audio_duration_s": 6.75,
+                "observed_audio_duration_s": 6.75,
+            },
+            {
+                "impl": "soniqo-speech-swift-kokoro-ios",
+                "machine_id": "iphone-12-pro",
+                "input_key": "7s",
+                "status": "ok",
+                "warm_wall_times_s": [0.830, 0.831, 0.829],
+                "canonical_audio_duration_s": 6.75,
+                "observed_audio_duration_s": 5.0,
+            },
         ],
         "provenance": {},
     }
@@ -492,6 +572,11 @@ def test_competitive_frontier_filters_short_outputs_and_marks_losses(tmp_path):
         for cell in summary["cells"]
         if cell["machine_id"] == "iphone-12-pro" and cell["input_key"] == "3s"
     )
+    iphone_7s = next(
+        cell
+        for cell in summary["cells"]
+        if cell["machine_id"] == "iphone-12-pro" and cell["input_key"] == "7s"
+    )
 
     assert m2_air_3s["outcome"] == "config-f-loses"
     assert m2_air_3s["best_impl"] == "laishere-kokoro-coreml"
@@ -500,6 +585,8 @@ def test_competitive_frontier_filters_short_outputs_and_marks_losses(tmp_path):
     assert m2_air_7s["best_impl"] is None
     assert iphone_3s["outcome"] == "config-f-missing"
     assert iphone_3s["best_impl"] == "soniqo-speech-swift-kokoro-ios"
+    assert iphone_7s["outcome"] == "config-f-wins"
+    assert iphone_7s["best_impl"] == "config-f-reference-ios"
     assert summary["absolute_fastest_verified"] is False
 
     markdown = render_frontier_markdown(summary, rows, min_duration_ratio=0.95)

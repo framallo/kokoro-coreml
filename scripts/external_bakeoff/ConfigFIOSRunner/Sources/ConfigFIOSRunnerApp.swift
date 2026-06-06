@@ -181,8 +181,9 @@ final class BenchmarkViewModel: ObservableObject {
                 let data = try encoder.encode(payload)
                 let rendered = String(data: data, encoding: .utf8) ?? ""
                 result = rendered
+                try writeResultFile(data: data)
                 UIPasteboard.general.string = rendered
-                status = "Done; JSON copied"
+                status = "Done; JSON copied and saved"
             } catch {
                 status = "Failed"
                 result = String(describing: error)
@@ -190,10 +191,21 @@ final class BenchmarkViewModel: ObservableObject {
             }
         }
     }
+
+    private func writeResultFile(data: Data) throws {
+        let documents = try FileManager.default.url(
+            for: .documentDirectory,
+            in: .userDomainMask,
+            appropriateFor: nil,
+            create: true
+        )
+        try data.write(to: documents.appendingPathComponent("config_f_ios_result.json"), options: .atomic)
+    }
 }
 
 struct BenchmarkView: View {
     @StateObject private var model = BenchmarkViewModel()
+    @State private var hasAutoStarted = false
 
     var body: some View {
         VStack(alignment: .leading, spacing: 16) {
@@ -224,6 +236,11 @@ struct BenchmarkView: View {
             }
         }
         .padding()
+        .onAppear {
+            guard !hasAutoStarted else { return }
+            hasAutoStarted = true
+            model.run()
+        }
     }
 }
 

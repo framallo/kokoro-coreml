@@ -57,6 +57,28 @@ python scripts/external_bakeoff/ingest_ios_runner_result.py \
   --machine-id iphone-12-pro
 ```
 
+The Config F iOS runner is built by the manual Swift compiler path because the
+generated Xcode project currently hits a local SwiftBuild build-description
+stall. It auto-starts on first view appearance, copies JSON to the clipboard,
+and writes `Documents/config_f_ios_result.json` inside its app data container.
+
+```bash
+scripts/external_bakeoff/build_install_config_f_ios_manual.sh
+```
+
+After unlocking the phone and launching
+`com.kokoro.externalbakeoff.ConfigFIOSRunnerManual`, pull and ingest the saved
+Config F result:
+
+```bash
+scripts/external_bakeoff/pull_config_f_ios_result.sh
+```
+
+That helper copies `Documents/config_f_ios_result.json` from the app data
+container, writes
+`outputs/external_bakeoff/results_config_f_reference_ios_iphone-12-pro.json`,
+and regenerates the competitive frontier.
+
 ## Laishere Core ML Backup
 
 Clone and convert `laishere/kokoro-coreml` outside the repo. The converter can
