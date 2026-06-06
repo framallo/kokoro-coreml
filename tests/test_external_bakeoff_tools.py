@@ -28,6 +28,10 @@ from scripts.external_bakeoff.summarize_irvine_next_targets import (
     render_markdown as render_irvine_next_targets_markdown,
     summarize_targets as summarize_irvine_next_targets,
 )
+from scripts.external_bakeoff.summarize_irvine_listening_targets import (
+    render_markdown as render_irvine_listening_targets_markdown,
+    summarize_listening_targets as summarize_irvine_listening_targets,
+)
 from scripts.external_bakeoff.summarize_stage_gap_decomposition import (
     render_markdown as render_stage_gap_markdown,
     summarize_config_record,
@@ -1046,6 +1050,57 @@ def test_irvine_next_targets_keeps_only_real_irvine_losses():
     assert "Real Irvine loss rows: `2`." in markdown
     assert "source/body primary; upstream/runtime material" in markdown
     assert "Do not promote fresh Irvine timing" in markdown
+
+
+def test_irvine_listening_targets_marks_same_label_local_artifact():
+    next_targets = {
+        "rows": [
+            {
+                "input_key": "3s",
+                "best_quality_fail_signal": {"label": "3s_fast_source"},
+            }
+        ]
+    }
+    candidate_summary = {
+        "rows": [
+            {
+                "machine": "irvine-m1",
+                "bucket": "3s",
+                "label": "3s_fast_source",
+                "speedup_pct": 10.0,
+                "baseline_ms": 170.0,
+                "candidate_ms": 153.0,
+                "corr": 0.93,
+                "snr_db": 9.2,
+                "report": "outputs/f0_noise_exact_shape/remote_reports/report_3s_irvine.json",
+            }
+        ]
+    }
+    provenance = {
+        ("3s", "3s_fast_source"): {
+            "source_report": "outputs/f0_noise_exact_shape/3s_fast_source/report_local.json",
+            "wavs": {"candidate": "outputs/f0_source_listening/3s_fast_source/candidate.wav"},
+            "review": "outputs/f0_source_listening/3s_fast_source/listening_review.md",
+            "waveform_gate_decision": "needs_listening",
+        }
+    }
+    decisions = {
+        ("3s_fast_source", "outputs/f0_noise_exact_shape/3s_fast_source/report_local.json"): {
+            "human_decision": "caveat",
+            "notes": "acceptable",
+        }
+    }
+
+    summary = summarize_irvine_listening_targets(next_targets, candidate_summary, provenance, decisions)
+    row = summary["rows"][0]
+    assert row["status"] == "mapped"
+    assert row["exact_timing_report_has_listening_artifact"] is False
+    assert row["human_decision"] == "caveat"
+    assert summary["exact_timing_report_listening_artifact_count"] == 0
+
+    markdown = render_irvine_listening_targets_markdown(summary)
+    assert "same-label local WAV" in markdown
+    assert "No ASR/Whisper gate is used" in markdown
 
 
 def test_coreml_metadata_summary_normalizes_ios_op_names():
