@@ -181,10 +181,18 @@ sudo powermetrics -i 1000 --samplers ane
 
 - **Decision:** Do not spend more time trying to make the existing generator
   package faster by changing `MLComputeUnits`. The path to beating laishere on
-  M2 Air/M1 short and medium rows is generator graph work: exact geometry
-  packages, splitting the graph into noise/vocoder/tail stages, or rewriting
-  the ANE-hostile operator surface (`conv_transpose`, long harmonic temporal
-  axes, and Snake activations lowered to `sin`).
+  M2 Air/M1 short and medium rows is generator graph work: splitting the graph
+  into noise/vocoder/tail stages, or rewriting the ANE-hostile operator surface
+  (`conv_transpose`, long harmonic temporal axes, and Snake activations lowered
+  to `sin`).
+- **Exact-generator-only geometry rejected:** `scripts/probe_generator_exact_geometry.py`
+  exported exact 2.8s and 6.75s `GeneratorFromHar` packages from the dumped
+  Swift tensor boundary. They ran, but failed parity against the current
+  trimmed bucket reference: 2.8s corr `0.927`, SNR `8.87 dB`, max abs `0.240`,
+  median `27.1 ms`; 6.75s corr `0.952`, SNR `10.73 dB`, max abs `0.389`,
+  median `55.7 ms`. A shorter HAR-post package fed by cropped bucket tensors is
+  not a production-safe optimization. If exact-duration generator packages are
+  revisited, they need an end-to-end exact graph plus listening/quality gates.
 
 **2026-05-17**
 

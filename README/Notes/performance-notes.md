@@ -357,9 +357,33 @@ to upstream Swift orchestration or to an incorrect compute-unit policy. On the
 two machines where Config F still loses to laishere's chain-only short/medium
 rows, `.all` is slower than explicit `cpuAndGPU`; on M2 Studio, `.all` merely
 ties `cpuAndGPU`. Forcing CPU+ANE is catastrophic even at 3s. The next
-performance work must reduce or restructure generator graph work: exact
-geometry packages, a laishere-style noise/vocoder/tail split, or an operator
-rewrite that removes the GPU-preferred generator surface.
+performance work must reduce or restructure generator graph work: a
+laishere-style noise/vocoder/tail split, or an operator rewrite that removes
+the GPU-preferred generator surface.
+
+#### Exact generator geometry probe
+
+`scripts/probe_generator_exact_geometry.py` tests a tempting shortcut: export
+`GeneratorFromHar` at the observed trimmed audio length instead of the padded
+bucket length, then run it against cropped tensors from the current Swift
+generator dumps. The generated packages and reports are ignored under
+`outputs/generator_exact_geometry/`.
+
+Local M2 Studio results, `cpuAndGPU`, N=10 median after three discarded
+warmups:
+
+| Source dump | Exact output | `x_pre` time | HAR time | Warm generator median | Corr vs current trimmed | SNR | Max abs | Decision |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | --- |
+| 3s | 2.800s / 67,200 samples | 224 | 26,881 | 27.1 ms | 0.927 | 8.87 dB | 0.240 | reject |
+| 7s | 6.750s / 162,000 samples | 540 | 64,801 | 55.7 ms | 0.952 | 10.73 dB | 0.389 | reject |
+
+The speed signal is not enough to matter, and the sample-level parity failure
+is large. A generator-only exact-geometry crop is therefore not a safe
+production optimization. The current bucketed generator uses tail context from
+the padded package before trimming; removing that context changes the emitted
+prefix. If exact-duration packages are revisited, they need an end-to-end
+exact graph and a listening/quality gate, not just a shorter HAR-post package
+fed by cropped bucket tensors.
 
 #### HnSF vDSP optimization
 
