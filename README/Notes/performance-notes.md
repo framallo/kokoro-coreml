@@ -761,18 +761,21 @@ At `7s`, the natural-ASR export uses `x_source_0=[1,256,5400]` and
 | irvine-m1 | padded `asr=400`, `F0=800` | 565.7 ms | 509.0 ms | noise 127.5 ms, body 369.6 ms, tail 11.1 ms | corr 0.955223, SNR 10.87 dB | not rerun | faster, quality closer but not parity |
 | m2-studio | natural `asr=556`, `F0=1112` | 129.9 ms | 101.4 ms | noise 23.8 ms, body 74.5 ms, tail 3.2 ms | corr 0.838603, SNR 5.73 dB | corr 0.818057, SNR 4.78 dB | faster, reject for quality |
 | m2-studio | padded `asr=600`, `F0=1200` | 130.0 ms | 109.2 ms | noise 25.6 ms, body 79.5 ms, tail 3.6 ms | corr 0.956701, SNR 10.99 dB | corr 0.949135, SNR 10.29 dB | faster, quality closer but not parity |
+| m2-studio | natural `asr=1095`, `F0=2190` | 268.9 ms | 191.3 ms | noise 46.0 ms, body 139.6 ms, tail 5.6 ms | corr 0.794801, SNR 4.78 dB | corr 0.776711, SNR 3.98 dB | faster, reject for quality |
+| m2-studio | padded `asr=1200`, `F0=2400` | 269.9 ms | 211.4 ms | noise 50.5 ms, body 154.2 ms, tail 5.5 ms | corr 0.949790, SNR 10.40 dB | corr 0.943165, SNR 9.84 dB | faster, quality closer but not parity |
 
 This is a useful narrowing result. The first-party candidate reproduces the M1
 and `7s` speed opportunity without relying on external packages, but the PyTorch
-candidate itself diverges from the current HAR output. The added `10s` bucket
-keeps the same pattern: the F0-source path is faster, especially at natural
-shape, on both local M2 Studio and Irvine M1. The local PyTorch reference is
-already too far from the current dump, so the quality failure is inherent to the
-F0-noise/source formulation being tested, not a Core ML conversion bug. A
-shippable optimization must either make the F0-noise path match the current
-Swift HnSF/HAR source closely enough, or prove through listening review that the
-different source is acceptable. Until then, this is a research target rather
-than a production replacement.
+candidate itself diverges from the current HAR output. The `10s`, `15s`, and
+`30s` buckets keep the same pattern and complete the runtime bucket sweep:
+the F0-source path is faster, especially at natural shape, and the speedup grows
+with duration on local M2 Studio. The local PyTorch reference is already too far
+from the current dump, so the quality failure is inherent to the F0-noise/source
+formulation being tested, not a Core ML conversion bug. A shippable optimization
+must either make the F0-noise path match the current Swift HnSF/HAR source
+closely enough, or prove through listening review that the different source is
+acceptable. Until then, this is a research target rather than a production
+replacement.
 
 #### F0-source listening pack
 
@@ -807,19 +810,21 @@ Output index: `outputs/f0_source_listening/README.md`.
 | padded `asr=400`, `F0=800` | `needs_listening` | corr 0.955085, SNR 10.86 dB, max 0.27082 | `outputs/f0_source_listening/10s_speed_branch/10s_padded_cos_resblock_cos_rsqrt/wav/10s_padded_cos_resblock_cos_rsqrt_candidate.wav` |
 | natural `asr=556`, `F0=1112` | `needs_listening` | corr 0.838603, SNR 5.73 dB, max 0.34679 | `outputs/f0_source_listening/15s_speed_branch/15s_natural_asr_cos_resblock_natural_asr_cos_rsqrt/wav/15s_natural_asr_cos_resblock_natural_asr_cos_rsqrt_candidate.wav` |
 | padded `asr=600`, `F0=1200` | `needs_listening` | corr 0.956701, SNR 10.99 dB, max 0.31872 | `outputs/f0_source_listening/15s_speed_branch/15s_padded_cos_resblock_cos_rsqrt/wav/15s_padded_cos_resblock_cos_rsqrt_candidate.wav` |
+| natural `asr=1095`, `F0=2190` | `needs_listening` | corr 0.794801, SNR 4.78 dB, max 0.51957 | `outputs/f0_source_listening/30s_speed_branch/30s_natural_asr_cos_resblock_natural_asr_cos_rsqrt/wav/30s_natural_asr_cos_resblock_natural_asr_cos_rsqrt_candidate.wav` |
+| padded `asr=1200`, `F0=2400` | `needs_listening` | corr 0.949790, SNR 10.40 dB, max 0.28593 | `outputs/f0_source_listening/30s_speed_branch/30s_padded_cos_resblock_cos_rsqrt/wav/30s_padded_cos_resblock_cos_rsqrt_candidate.wav` |
 
 Interpretation: strict tensor parity still rejects both candidates, but the
 machine audio-health gate does not reject them as silence, clipping, or broken
 spectral content. The `7s` data keeps the speed-positive signal on both local
 M2 Studio and Irvine M1, and the `10s` data shows the same speed-positive,
-quality-negative pattern in the newly added runtime bucket. The `15s` local
-probe strengthens the trend: speedup grows with duration, while the same source
-quality gap remains. The padded source improves objective similarity while
-preserving some of that speed. The
-exact-shape F0-source path is now a human-listening question, not an automatic
-machine reject. It is still not production-approved until listening decisions
-accept the different source character or a quality-preserving source formulation
-closes the metric gap.
+quality-negative pattern in the newly added runtime bucket. The `15s` and `30s`
+local probes complete the `3s`/`7s`/`10s`/`15s`/`30s` runtime bucket sweep and
+strengthen the trend: speedup grows with duration, while the same source quality
+gap remains. The padded source improves objective similarity while preserving
+some of that speed. The exact-shape F0-source path is now a human-listening
+question, not an automatic machine reject. It is still not production-approved
+until listening decisions accept the different source character or a
+quality-preserving source formulation closes the metric gap.
 
 #### F0/HAR source variant probes
 

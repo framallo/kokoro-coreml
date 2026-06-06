@@ -555,6 +555,18 @@ sudo powermetrics -i 1000 --samplers ane
   `0.818057` natural), so this remains the same source-formulation/listening
   gate. Rendered the no-ASR 15s listening pack at
   `outputs/f0_source_listening/15s_speed_branch/README.md`.
+- **30s F0-source completes the runtime-bucket sweep:** Captured a fresh `30s`
+  Swift tensor dump with `exact_t476` and reran the same cos/residual F0-source
+  probe locally. Padded shape (`asr=1200`, `F0=2400`) is faster (`211.43 ms`
+  candidate vs `269.86 ms` baseline, `+21.7%`) but still fails strict quality
+  (`corr 0.949790`, SNR `10.40 dB`). Natural shape (`asr=1095`, `F0=2190`) is
+  faster again (`191.31 ms` vs `268.94 ms`, `+28.9%`) and worse on metrics
+  (`corr 0.794801`, SNR `4.78 dB`). The local PyTorch reference is already
+  divergent (`corr 0.943165` padded, `0.776711` natural), so the completed
+  `3s`/`7s`/`10s`/`15s`/`30s` sweep keeps pointing at source
+  formulation/listening acceptance rather than Core ML conversion drift.
+  Rendered the no-ASR 30s listening pack at
+  `outputs/f0_source_listening/30s_speed_branch/README.md`.
 
 **2026-05-17**
 
