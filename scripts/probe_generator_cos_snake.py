@@ -1,14 +1,16 @@
 #!/usr/bin/env python3
-"""Probe cos-form Snake inside the fused HAR-post generator package.
+"""Probe operator rewrites inside the fused HAR-post generator package.
 
 The public laishere exporter rewrites Snake as:
 
 ``sin^2(alpha * x) == (1 - cos(2 * alpha * x)) / 2``
 
-This script tests that rewrite without changing package boundaries. It exports
-a temporary ``GeneratorFromHar`` package using the current Swift tensor dump
-shape, benchmarks it against the checked-in fused HAR-post package, and records
-parity against both the Swift dump and the shipping fused output.
+This script tests that rewrite, and optionally tests removing explicit AdaIN
+``expand`` calls so Core ML can broadcast ``gamma``/``beta`` from ``(B, C, 1)``
+instead of materializing tiled ``(B, C, T)`` tensors. It exports a temporary
+``GeneratorFromHar`` package using the current Swift tensor dump shape,
+benchmarks it against the checked-in fused HAR-post package, and records parity
+against both the Swift dump and the shipping fused output.
 """
 
 from __future__ import annotations
@@ -34,6 +36,27 @@ from probe_generator_exact_geometry import _compute_units, _load_kmodel, _metric
 from probe_generator_split import _duration_label_from_dump, _precision_arg, _remove_existing_package  # noqa: E402
 
 
+def _patch_broadcast_adain() -> None:
+    """Patch AdaIN1d to rely on broadcast instead of explicit expand/tile."""
+
+    import torch
+
+    from kokoro.istftnet import AdaIN1d
+
+    def _broadcast_forward(self: Any, x: torch.Tensor, s: torch.Tensor) -> torch.Tensor:
+        B, C, _ = x.shape
+        mean = x.mean(dim=2, keepdim=True)
+        var = x.var(dim=2, unbiased=False, keepdim=True)
+        x_norm = (x - mean) / torch.sqrt(var + self.eps)
+
+        assert C == self.num_features, f"AdaIN1d channel mismatch: got {C}, expected {self.num_features}"
+        h = self.fc(s).view(B, 2 * self.num_features, 1)
+        gamma, beta = torch.chunk(h, chunks=2, dim=1)
+        return (1.0 + gamma) * x_norm + beta
+
+    AdaIN1d.forward = _broadcast_forward
+
+
 def _predict_inputs(tensors: dict[str, np.ndarray]) -> dict[str, np.ndarray]:
     return {
         "x_pre": tensors["x_pre_padded"].astype(np.float32),
@@ -46,13 +69,18 @@ def _export_package(
     package: Path,
     tensors: dict[str, np.ndarray],
     precision: str,
+    cos_snake: bool,
+    broadcast_adain: bool,
 ) -> dict[str, Any]:
     import coremltools as ct
     import torch
 
     from export_synth.wrappers import GeneratorFromHar, remove_dropout
 
-    _patch_cos_snake()
+    if cos_snake:
+        _patch_cos_snake()
+    if broadcast_adain:
+        _patch_broadcast_adain()
 
     ref_s_shape = tuple(int(v) for v in tensors["ref_s"].shape)
     x_pre_shape = tuple(int(v) for v in tensors["x_pre_padded"].shape)
@@ -94,7 +122,8 @@ def _export_package(
     return {
         "package": str(package),
         "precision": precision,
-        "cos_snake": True,
+        "cos_snake": bool(cos_snake),
+        "broadcast_adain": bool(broadcast_adain),
         "removed_dropouts": removed_dropouts,
         "traced_samples": traced_samples,
         "x_pre_shape": list(x_pre_shape),
@@ -191,6 +220,10 @@ def run(args: argparse.Namespace) -> dict[str, Any]:
         raise SystemExit(f"tensor dump missing required tensors: {missing}")
 
     label = args.label or _duration_label_from_dump(args.tensor_dump, manifest)
+    if not args.cos_snake:
+        label = f"{label}_plain"
+    if args.broadcast_adain:
+        label = f"{label}_broadcast_adain"
     work_dir = args.output_dir / label
     cos_package = work_dir / f"kokoro_generator_cos_snake_{label}.mlpackage"
     report_name = Path(args.report_name)
@@ -203,7 +236,13 @@ def run(args: argparse.Namespace) -> dict[str, Any]:
         if not cos_package.is_dir():
             raise SystemExit(f"--skip-export requested but package is missing: {cos_package}")
     else:
-        export_report = _export_package(cos_package, tensors, args.precision)
+        export_report = _export_package(
+            cos_package,
+            tensors,
+            args.precision,
+            args.cos_snake,
+            args.broadcast_adain,
+        )
 
     benchmark = _benchmark(args, tensors, cos_package)
     metrics = benchmark["metrics"]["cos_vs_fused_trimmed"]
@@ -220,6 +259,8 @@ def run(args: argparse.Namespace) -> dict[str, Any]:
         "cos_package": str(cos_package),
         "report": str(report_path),
         "manifest_metadata": manifest.get("metadata", {}),
+        "cos_snake": bool(args.cos_snake),
+        "broadcast_adain": bool(args.broadcast_adain),
         "export": export_report,
         "benchmark": benchmark,
         "thresholds": {
@@ -256,6 +297,9 @@ def main() -> None:
     )
     parser.add_argument("--label", default=None)
     parser.add_argument("--report-name", default="report.json")
+    parser.add_argument("--no-cos-snake", dest="cos_snake", action="store_false")
+    parser.set_defaults(cos_snake=True)
+    parser.add_argument("--broadcast-adain", action="store_true")
     parser.add_argument(
         "--precision",
         default="fp16",

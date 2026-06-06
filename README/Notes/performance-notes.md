@@ -474,23 +474,33 @@ operator count and memory movement directly.
 
 #### Fused cos-Snake probe
 
-`scripts/probe_generator_cos_snake.py` tests the one laishere operator rewrite
-that can be applied without changing package boundaries. It exports a fused
-`GeneratorFromHar` package where Snake uses the algebraic identity
-`sin^2(alpha * x) == (1 - cos(2 * alpha * x)) / 2`, then compares the temporary
-package to the shipping fused HAR-post package on the same Swift tensor dump.
+`scripts/probe_generator_cos_snake.py` tests generator operator rewrites that
+can be applied without changing package boundaries. It exports a fused
+`GeneratorFromHar` package, then compares the temporary package to the shipping
+fused HAR-post package on the same Swift tensor dump.
 
 Local M2 Studio, CPU+GPU, N=10 median after three discarded warmups:
 
-| Input | Fused median | cos-Snake median | Speedup vs fused | Parity vs fused | Decision |
-| --- | ---: | ---: | ---: | --- | --- |
-| 3s | 28.3 ms | 27.9 ms | +1.27% | exact sample match, SNR 142.94 dB | reject as noise-sized |
-| 7s | 57.2 ms | 57.7 ms | -0.74% | exact sample match, SNR 147.04 dB | reject |
+| Probe | Input | Fused median | Candidate median | Speedup vs fused | Parity vs fused | Decision |
+| --- | --- | ---: | ---: | ---: | --- | --- |
+| cos-Snake | 3s | 28.3 ms | 27.9 ms | +1.27% | exact sample match, SNR 142.94 dB | reject as noise-sized |
+| cos-Snake | 7s | 57.2 ms | 57.7 ms | -0.74% | exact sample match, SNR 147.04 dB | reject |
+| broadcast AdaIN | 3s | 30.6 ms | 31.3 ms | -2.36% | exact sample match, SNR 142.94 dB | reject |
+| broadcast AdaIN | 7s | 62.4 ms | 62.3 ms | +0.24% | exact sample match, SNR 147.04 dB | reject as noise-sized |
+| cos-Snake + broadcast AdaIN | 3s | 31.5 ms | 31.3 ms | +0.46% | exact sample match, SNR 142.94 dB | reject as noise-sized |
 
 The rewrite is numerically safe for the dumped 3s and 7s generator boundaries,
 but the speed signal is not consistent or large enough to justify changing the
 production exporter. Keep the fused package on the current Snake lowering until
 a broader operator rewrite has stronger evidence.
+
+The broadcast-AdaIN probe removes explicit source-level
+`gamma.expand(B, C, T)` / `beta.expand(B, C, T)` and relies on `(B, C, 1)`
+broadcasts. Core ML converted the temporary package to the same operation
+histogram as the shipping 3s fused package: `2207` MIL ops with `96` `tile`
+ops. In other words, the converter re-materializes the broadcast surface even
+when PyTorch source avoids `expand`. This source-level cleanup is not a
+production speed path.
 
 #### HnSF vDSP optimization
 

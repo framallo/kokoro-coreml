@@ -238,6 +238,14 @@ sudo powermetrics -i 1000 --samplers ane
   while `7s` moved from `57.2 ms` to `57.7 ms` (-`0.74%`). Cos-Snake may still
   be useful inside a larger operator rewrite, but by itself it is not a
   measured win.
+- **Broadcast AdaIN rejected as a source-level cleanup:** `scripts/probe_generator_cos_snake.py`
+  can now patch `AdaIN1d.forward` to use `(B, C, 1)` gamma/beta broadcasts
+  instead of explicit `expand(B, C, T)`. Parity was exact on local M2 Studio,
+  but latency was neutral-to-worse: `3s` fused `30.6 ms` vs broadcast `31.3 ms`,
+  and `7s` fused `62.4 ms` vs broadcast `62.3 ms`. MIL op counts were identical
+  to the shipping 3s fused package (`2207` total ops and `96` `tile` ops), so
+  Core ML re-materializes the broadcast surface. This does not remove the
+  AdaIN memory movement problem.
 - **Per-stage generator split rejected as a production split and useful as a
   profiler:** `scripts/probe_generator_stage_split.py` splits the current
   static HAR-post generator into noise, first upsample/resblock stage, and
