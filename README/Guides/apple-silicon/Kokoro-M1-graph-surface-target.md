@@ -196,6 +196,37 @@ warmed runtime and reduces quality margin. The remaining win is not explained
 by surface counts alone; it likely depends on placement, layout, external
 runtime scheduling, or a boundary effect outside this fused package.
 
+## Latest Placement Check
+
+`MLComputePlan` confirms that the visible graph-surface match still does not
+produce laishere-like ANE residency. Under `cpuAndNeuralEngine`, laishere's
+vocoder has `597` Neural-Engine-preferred ops and about `0.56` NE cost weight.
+The first-party near-surface fused generator has the same order of operations
+(`1533` vs laishere `1534`) and hundreds of NE-supported ops, but Core ML still
+prefers `0` ops on the Neural Engine and assigns `0` NE cost weight:
+
+| Package | Units | Ops | Preferred CPU | Preferred GPU | Preferred NE | Unknown | CPU cost | GPU cost | NE cost |
+| --- | --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| laishere vocoder | CPU+NE | 1534 | 58 | 0 | 597 | 879 | 0.409 | 0 | 0.560 |
+| first-party HAR-post baseline | CPU+NE | 2207 | 1038 | 0 | 0 | 1169 | 0 | 0 | 0 |
+| first-party native-IN+broadcast+fp16 | CPU+NE | 1533 | 677 | 0 | 0 | 856 | 0 | 0 | 0 |
+| first-party native-IN+broadcast+fp16+pal8 | CPU+NE | 1533 | 677 | 0 | 0 | 856 | 0 | 0 | 0 |
+| first-party native-IN+broadcast+fp16 | CPU+GPU | 1533 | 0 | 678 | 0 | 855 | 0 | 1.000 | 0 |
+
+Reports:
+
+- `outputs/graph_surface/compute_plan_laishere_vocoder_cpu_ne.json`
+- `outputs/external_bakeoff/compute_plan/ours_har_post_3s_cpu_ne.json`
+- `outputs/graph_surface/compute_plan_generator_native_broadcast_fp16_3s_cpu_ne.json`
+- `outputs/graph_surface/compute_plan_generator_native_broadcast_fp16_pal8_3s_cpu_ne.json`
+- `outputs/graph_surface/compute_plan_generator_native_broadcast_fp16_3s_cpu_gpu.json`
+
+Decision: do not keep optimizing by only matching op counts, AdaIN lowering, or
+palettization. The current first-party fused package is GPU-friendly but not
+ANE-preferred on M1. The next useful target is whatever changes Core ML's
+placement decision: tensor layout, operation dialect, package boundary,
+conversion target/toolchain, or a narrower laishere-style vocoder contract.
+
 ## Deep Research Request
 
 A useful external deep-research guide would be narrower than "Core ML

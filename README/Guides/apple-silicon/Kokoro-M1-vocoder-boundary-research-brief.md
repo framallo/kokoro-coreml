@@ -244,6 +244,11 @@ Do not prioritize these unless new evidence changes the premises:
 - Fused native-IN plus broadcast AdaIN plus fp16 inputs plus 8-bit
   palettization. It adds the laishere-like LUT surface but regresses local `3s`
   by `2.83%` and thins quality margin.
+- More graph-surface-only chasing. `MLComputePlan` shows the
+  native-IN+broadcast+fp16 fused package has `1533` ops, but still receives
+  `0` Neural-Engine-preferred ops and `0` NE cost weight under CPU+NE. Laishere's
+  `1534`-op vocoder gets `597` NE-preferred ops and about `0.56` NE cost
+  weight. The missing win is placement/layout/boundary, not just surface count.
 - More broad generator noise/stage splits. The extra Core ML call boundary is
   currently more expensive than the saved graph work.
 

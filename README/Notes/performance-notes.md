@@ -4406,6 +4406,30 @@ new local material signal. Report:
 Do not carry style-specialization to Irvine unless a different operator rewrite
 produces a material CPU+GPU result first.
 
+The latest fused `GeneratorFromHar` graph-surface probes were also inspected
+with `MLComputePlan` to separate "looks like laishere" from actual ANE
+placement. This explains why the laishere-style surface still did not win:
+
+| Package | Units | Ops | Preferred CPU | Preferred GPU | Preferred NE | Unknown | CPU cost | GPU cost | NE cost |
+| --- | --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| laishere vocoder | CPU+NE | 1534 | 58 | 0 | 597 | 879 | 0.409 | 0 | 0.560 |
+| first-party HAR-post baseline | CPU+NE | 2207 | 1038 | 0 | 0 | 1169 | 0 | 0 | 0 |
+| first-party native-IN+broadcast+fp16 | CPU+NE | 1533 | 677 | 0 | 0 | 856 | 0 | 0 | 0 |
+| first-party native-IN+broadcast+fp16+pal8 | CPU+NE | 1533 | 677 | 0 | 0 | 856 | 0 | 0 | 0 |
+| first-party native-IN+broadcast+fp16 | CPU+GPU | 1533 | 0 | 678 | 0 | 855 | 0 | 1.000 | 0 |
+
+The important point is not just that the first-party graph remains slower. The
+near-surface fused package has roughly the same op count as laishere and exposes
+hundreds of NE-supported ops, but under CPU+NE Core ML still prefers none of
+them on the Neural Engine. Under CPU+GPU the same package is fully GPU-preferred
+for weighted work, which matches the observed "CPU+GPU is the usable path"
+behavior. This closes graph-surface parity as a standalone explanation for the
+remaining Irvine M1 loss. Reports:
+`outputs/graph_surface/compute_plan_generator_native_broadcast_fp16_3s_cpu_ne.json`,
+`outputs/graph_surface/compute_plan_generator_native_broadcast_fp16_pal8_3s_cpu_ne.json`,
+and
+`outputs/graph_surface/compute_plan_generator_native_broadcast_fp16_3s_cpu_gpu.json`.
+
 ---
 
 ## Bakeoff v5: Corrected benchmark (3s-30s) on M2 Ultra
