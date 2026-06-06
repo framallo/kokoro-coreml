@@ -794,6 +794,50 @@ production-approved until listening decisions accept the different source
 character or a
 quality-preserving source formulation closes the metric gap.
 
+#### F0/HAR source variant probes
+
+`scripts/probe_f0_source_variants.py` compares cheap PyTorch source/STFT
+variants against dumped Swift `har_source` and `har_padded` tensors before any
+Core ML export. The downsample approximation is not the quality culprit:
+`avg_pool` and linear interpolation are effectively tied at the source boundary
+(`3s` corr `0.93978`, `7s` corr `0.96731`). Recomputing STFT from the exact
+dumped Swift source gives exact magnitude but phase differs at the `+-pi`
+representation boundary; modulo `2*pi`, the phase error is tiny. A PyTorch
+waveform sensitivity check confirms that recomputed STFT from the dumped source
+still gives high waveform parity (`3s` corr `0.99881`, `7s` corr `0.99846`),
+so the F0-source quality loss is source drift, not the STFT convention alone.
+
+`scripts/probe_har_source_noise_split.py` exports a temporary
+`har_source + style -> x_source_*` package, then reuses the decoder-vocoder
+body/tail split. This tests a compact exact-source boundary without changing
+shipping packages.
+
+Local generated command examples:
+
+```bash
+uv run --no-sync python scripts/probe_f0_source_variants.py \
+  outputs/generator_isolation/dumps/3s \
+  outputs/generator_isolation/dumps/7s \
+  --output outputs/f0_source_variants/report_3s_7s.json
+
+uv run --no-sync python scripts/probe_har_source_noise_split.py \
+  outputs/generator_isolation/dumps/7s \
+  --decoder-pre-package coreml/kokoro_decoder_pre_7s.mlpackage \
+  --fused-package coreml/kokoro_decoder_har_post_7s.mlpackage \
+  --label 7s --warmup 2 --iterations 10
+```
+
+| Probe | Baseline median | Candidate median | Candidate vs dump | Decision |
+| --- | ---: | ---: | --- | --- |
+| `har_source` split, 3s padded | 35.2 ms | 36.5 ms | corr 0.980600, SNR 13.09 dB | reject: slower before source-generation cost and not parity |
+| `har_source` split, 7s padded | 67.4 ms | 62.8 ms | corr 0.979393, SNR 13.07 dB | reject/low priority: small speed before source-generation cost and not parity |
+
+Interpretation: exact dumped source improves quality over the F0-source path,
+but the Core ML STFT/noise-conv split still fails strict parity and has too
+little speed margin once Swift source generation is counted. This is not the
+winning route unless a later package variant recovers parity and keeps the 7s+
+speed margin after source-generation timing is included.
+
 #### HAR input-trim probe
 
 `scripts/probe_generator_har_input_trim.py` tests a lower-risk variant of the

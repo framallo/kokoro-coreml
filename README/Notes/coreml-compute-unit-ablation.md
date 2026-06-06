@@ -372,6 +372,18 @@ sudo powermetrics -i 1000 --samplers ane
   `0.796791`, SNR `4.77 dB`; `7s` padded corr `0.962251`, SNR `11.51 dB`).
   Treat this as a human listening gate or source-formulation research path, not
   a runtime integration approval.
+- **HAR-source boundary is not the escape hatch:** `scripts/probe_f0_source_variants.py`
+  shows the F0-source downsample shortcut is not the main quality loss:
+  `avg_pool` and linear interpolation are effectively tied against dumped Swift
+  `har_source` (`3s` corr `0.93978`, `7s` corr `0.96731`). Recomputed STFT from
+  dumped source is magnitude-exact and phase-equivalent modulo `2*pi`, and a
+  PyTorch sensitivity check remains high parity (`3s` waveform corr `0.99881`,
+  `7s` corr `0.99846`). `scripts/probe_har_source_noise_split.py` then exports a
+  temporary exact-source boundary (`har_source + style -> x_source_*`) and
+  rejects it as the winning path: 3s is slower before source-generation cost
+  (`36.5 ms` vs `35.2 ms`) and 7s has only a small pre-source speedup
+  (`62.8 ms` vs `67.4 ms`), while both fail strict waveform parity (corr
+  `~0.98`, SNR `~13.1 dB`).
 - **HAR input-tail trimming is too small:** `scripts/probe_generator_har_input_trim.py`
   keeps the bucketed `x_pre` shape and current Swift HAR source, but exports a
   temporary `GeneratorFromHar` with a shorter static `har` axis. The aggressive
