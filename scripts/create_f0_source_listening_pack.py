@@ -91,6 +91,26 @@ def _duration_label(report: dict[str, Any], report_path: Path) -> str:
     return label
 
 
+def _natural_asr_enabled(report: dict[str, Any], report_path: Path) -> bool:
+    """Return whether a saved F0-source report expects natural-ASR inputs."""
+
+    export = report.get("export")
+    if isinstance(export, dict) and "natural_asr" in export:
+        return bool(export.get("natural_asr"))
+    haystack = " ".join(
+        str(value)
+        for value in (
+            report.get("report"),
+            report.get("noise_package"),
+            report.get("body_package"),
+            report.get("tail_package"),
+            report_path,
+        )
+        if value
+    )
+    return "natural_asr" in haystack
+
+
 def _render_pair(
     report_path: Path,
     out_root: Path,
@@ -107,7 +127,7 @@ def _render_pair(
 
     tensor_dump = Path(str(report["tensor_dump"]))
     manifest, tensors = load_tensor_dump(tensor_dump)
-    natural_asr = bool((report.get("export") or {}).get("natural_asr"))
+    natural_asr = _natural_asr_enabled(report, report_path)
     inputs = _select_inputs(tensors, natural_asr)
 
     decoder_pre = _load_model(Path(str(report["decoder_pre_package"])), args.decoder_pre_compute_units)

@@ -610,11 +610,11 @@ sudo powermetrics -i 1000 --samplers ane
   already been rejected.
 - **Listening evidence is now separated from timing evidence:** Added
   `scripts/external_bakeoff/summarize_irvine_listening_targets.py` and rendered
-  exact no-ASR listening packs for the recoverable Irvine `3s`/`7s` remote
-  reports at `outputs/f0_source_listening/irvine_exact_speed_branch/`. `10s`
-  and `15s` remote reports pointed to deleted `/tmp` packages, so the current
-  listening rows for those cells are same-label local WAVs rather than exact
-  remote-report renders. Human decisions remain blank, so none of these
+  exact no-ASR listening packs for the Irvine `3s`/`7s`/`10s`/`15s` remote
+  reports at `outputs/f0_source_listening/irvine_exact_speed_branch/`. The
+  `10s`/`15s` reports initially pointed at local-missing `/tmp` packages, but
+  the corresponding probe directories still existed on Irvine and were copied
+  to local `/tmp` for rendering. Human decisions remain blank, so none of these
   quality-fail speed branches are production-approved.
 
 **2026-05-17**

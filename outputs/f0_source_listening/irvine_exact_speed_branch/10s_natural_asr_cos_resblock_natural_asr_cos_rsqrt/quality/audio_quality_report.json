@@ -1,0 +1,77 @@
+{
+  "samples": [
+    {
+      "decision": "reference_pass",
+      "metrics": {
+        "active_fraction_gt128": 0.7313151041666667,
+        "active_fraction_gt32": 0.8317361111111111,
+        "channels": 1,
+        "clipped_fraction": 4.340277777777778e-06,
+        "dc_offset_pcm": 1626.8677560763888,
+        "duration_s": 9.6,
+        "frames": 230400,
+        "path": "outputs/f0_source_listening/irvine_exact_speed_branch/10s_natural_asr_cos_resblock_natural_asr_cos_rsqrt/wav/10s_natural_asr_cos_resblock_natural_asr_cos_rsqrt_swift_dump.wav",
+        "peak_pcm": 32767,
+        "rms_pcm": 4770.555669893492,
+        "sample_rate": 24000,
+        "sample_width": 2,
+        "spectral_centroid_hz": 461.4930831882254,
+        "voiced_band_energy_ratio": 0.9896514732138671,
+        "zero_crossing_rate": 0.09289930555555556
+      },
+      "reject_reasons": [],
+      "role": "reference"
+    },
+    {
+      "decision": "reference_pass",
+      "metrics": {
+        "active_fraction_gt128": 0.7521961805555556,
+        "active_fraction_gt32": 0.8627473958333334,
+        "channels": 1,
+        "clipped_fraction": 4.340277777777778e-06,
+        "dc_offset_pcm": 1680.6199348958332,
+        "duration_s": 9.6,
+        "frames": 230400,
+        "path": "outputs/f0_source_listening/irvine_exact_speed_branch/10s_natural_asr_cos_resblock_natural_asr_cos_rsqrt/wav/10s_natural_asr_cos_resblock_natural_asr_cos_rsqrt_baseline.wav",
+        "peak_pcm": 32767,
+        "rms_pcm": 4867.097124601016,
+        "sample_rate": 24000,
+        "sample_width": 2,
+        "spectral_centroid_hz": 441.4972537563963,
+        "voiced_band_energy_ratio": 0.9908402586258791,
+        "zero_crossing_rate": 0.09383680555555556
+      },
+      "reject_reasons": [],
+      "role": "reference"
+    },
+    {
+      "decision": "needs_listening",
+      "metrics": {
+        "active_fraction_gt128": 0.7285633680555555,
+        "active_fraction_gt32": 0.8363454861111111,
+        "channels": 1,
+        "clipped_fraction": 4.340277777777778e-06,
+        "dc_offset_pcm": 1419.6341710069444,
+        "duration_s": 9.6,
+        "frames": 230400,
+        "path": "outputs/f0_source_listening/irvine_exact_speed_branch/10s_natural_asr_cos_resblock_natural_asr_cos_rsqrt/wav/10s_natural_asr_cos_resblock_natural_asr_cos_rsqrt_candidate.wav",
+        "peak_pcm": 32767,
+        "rms_pcm": 4201.267000579776,
+        "sample_rate": 24000,
+        "sample_width": 2,
+        "spectral_centroid_hz": 533.3984044039656,
+        "voiced_band_energy_ratio": 0.9831791062653426,
+        "zero_crossing_rate": 0.10042534722222222
+      },
+      "reject_reasons": [],
+      "role": "candidate"
+    }
+  ],
+  "thresholds": {
+    "max_clipped_fraction": 0.01,
+    "min_active_fraction_gt32": 0.20793402777777778,
+    "min_rms_pcm": 1192.638917473373,
+    "min_voiced_band_energy_ratio": 0.4948257366069336,
+    "min_zero_crossing_rate": 0.02322482638888889
+  }
+}

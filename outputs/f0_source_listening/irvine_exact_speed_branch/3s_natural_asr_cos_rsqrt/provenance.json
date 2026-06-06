@@ -82,15 +82,15 @@
   "review": "outputs/f0_source_listening/irvine_exact_speed_branch/3s_natural_asr_cos_rsqrt/listening_review.md",
   "single_predict_ms": {
     "baseline": {
-      "decoder_pre_ms": 10.052249999716878,
-      "generator_ms": 108.46279107499868,
-      "total_ms": 118.51504107471555
+      "decoder_pre_ms": 10.011333040893078,
+      "generator_ms": 106.98045906610787,
+      "total_ms": 116.99179210700095
     },
     "candidate": {
-      "body_ms": 94.973708037287,
-      "noise_ms": 68.73900000937283,
-      "tail_ms": 17.4496250692755,
-      "total_ms": 181.16233311593533
+      "body_ms": 92.8825419396162,
+      "noise_ms": 46.48558399640024,
+      "tail_ms": 15.481000067666173,
+      "total_ms": 154.8491260036826
     }
   },
   "source_report": "outputs/f0_noise_exact_shape/remote_reports/report_f0_noise_exact_3s_irvine.json",

@@ -3,6 +3,7 @@ import hashlib
 import json
 from pathlib import Path
 
+from scripts.create_f0_source_listening_pack import _natural_asr_enabled
 from scripts.external_bakeoff.create_listening_review import _write_decisions_csv
 from scripts.external_bakeoff.ingest_ios_runner_result import _ingest_records
 from scripts.external_bakeoff.run_laishere_kokoro_coreml import (
@@ -376,6 +377,17 @@ def test_f0_source_decision_validator_requires_caveat_notes():
 
     assert not summary["valid"]
     assert errors == ["candidate: human_decision=caveat requires notes"]
+
+
+def test_f0_source_listening_pack_infers_natural_asr_without_export_metadata():
+    report = {
+        "export": None,
+        "report": "/tmp/probe/10s_natural_asr_cos_resblock/report_irvine_skip_export.json",
+        "noise_package": "/tmp/probe/10s_natural_asr_cos_resblock/kokoro_f0_noise.mlpackage",
+    }
+
+    assert _natural_asr_enabled(report, Path("outputs/remote_report.json")) is True
+    assert _natural_asr_enabled({"export": {"natural_asr": False}}, Path("natural_asr_name.json")) is False
 
 
 def test_f0_source_decision_csv_preserves_human_fields(tmp_path):

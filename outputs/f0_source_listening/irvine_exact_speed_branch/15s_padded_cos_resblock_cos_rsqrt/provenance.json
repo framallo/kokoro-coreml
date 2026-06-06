@@ -1,0 +1,105 @@
+{
+  "asr_note": "No ASR/Whisper gate used; this pack is waveform health plus human listening only.",
+  "asr_used": false,
+  "body_input_dtype": "fp32",
+  "compute_units": {
+    "body": "cpuAndGPU",
+    "decoder_pre": "cpuAndNeuralEngine",
+    "fused": "cpuAndGPU",
+    "noise": "all",
+    "tail": "all"
+  },
+  "label": "15s_padded_cos_resblock_cos_rsqrt",
+  "manifest_metadata": {
+    "bucket_seconds": 15,
+    "canonical_duration_s": 13.9,
+    "decoder_frame_count": 600,
+    "duration_model": "exact_t219",
+    "duration_model_allows_padding": false,
+    "duration_token_length": 219,
+    "executable": "kokoro-bench",
+    "full_f0_len": 1200,
+    "har_expected_time": 144001,
+    "hnsf_reference_command": "uv run --no-sync python scripts/validate_hnsf_swift.py generate",
+    "input_key": "15s",
+    "natural_frames": 556,
+    "num_tokens": 219,
+    "observed_audio_duration_s": 13.9,
+    "producer": "swift",
+    "seed": 42,
+    "speed": 1,
+    "t_frames": 600,
+    "text": "The ancient lighthouse stood alone on the rocky cliff, its beam sweeping across dark waters with the patience of centuries. Ships had come and gone, storms had battered its walls, yet still it turned, guiding sailors home.",
+    "trim_len": 333600,
+    "voice": "af_heart",
+    "x_pre_expected_time": 1200
+  },
+  "metrics": {
+    "baseline_vs_dump_trimmed": {
+      "candidate_samples": 333600,
+      "correlation": 0.9836474462489652,
+      "cosine_similarity": 0.985506901584788,
+      "max_abs_error": 0.35791015625,
+      "mean_abs_error": 0.0009989530257305385,
+      "reference_samples": 333600,
+      "rmse": 0.010087279764659582,
+      "samples_compared": 333600,
+      "snr_db": 15.277609297448407
+    },
+    "candidate_vs_baseline_trimmed": {
+      "candidate_samples": 333600,
+      "correlation": 0.9567013367162086,
+      "cosine_similarity": 0.9617093147429838,
+      "max_abs_error": 0.3187239170074463,
+      "mean_abs_error": 0.008732445284649145,
+      "reference_samples": 333600,
+      "rmse": 0.016782574171159928,
+      "samples_compared": 333600,
+      "snr_db": 10.987930784364377
+    },
+    "candidate_vs_dump_trimmed": {
+      "candidate_samples": 333600,
+      "correlation": 0.9393189602445609,
+      "cosine_similarity": 0.9462841047993448,
+      "max_abs_error": 0.3187239170074463,
+      "mean_abs_error": 0.009458094347958147,
+      "reference_samples": 333600,
+      "rmse": 0.019068939854204943,
+      "samples_compared": 333600,
+      "snr_db": 9.746559636671865
+    }
+  },
+  "natural_asr": false,
+  "packages": {
+    "body": "/tmp/kokoro-coreml-15s-probe/outputs/f0_noise_exact_shape/15s_padded_cos_resblock_cos_rsqrt/kokoro_f0_noise_body_15s_padded_cos_resblock_cos_rsqrt.mlpackage",
+    "decoder_pre": "coreml/kokoro_decoder_pre_15s.mlpackage",
+    "fused": "coreml/kokoro_decoder_har_post_15s.mlpackage",
+    "noise": "/tmp/kokoro-coreml-15s-probe/outputs/f0_noise_exact_shape/15s_padded_cos_resblock_cos_rsqrt/kokoro_f0_noise_15s_padded_cos_resblock_cos_rsqrt.mlpackage",
+    "tail": "/tmp/kokoro-coreml-15s-probe/outputs/f0_noise_exact_shape/15s_padded_cos_resblock_cos_rsqrt/kokoro_f0_noise_tail_15s_padded_cos_resblock_cos_rsqrt.mlpackage"
+  },
+  "quality_report": "outputs/f0_source_listening/irvine_exact_speed_branch/15s_padded_cos_resblock_cos_rsqrt/quality/audio_quality_report.json",
+  "quality_summary": "outputs/f0_source_listening/irvine_exact_speed_branch/15s_padded_cos_resblock_cos_rsqrt/quality/audio_quality_summary.md",
+  "review": "outputs/f0_source_listening/irvine_exact_speed_branch/15s_padded_cos_resblock_cos_rsqrt/listening_review.md",
+  "single_predict_ms": {
+    "baseline": {
+      "decoder_pre_ms": 24.06166703440249,
+      "generator_ms": 179.9296250101179,
+      "total_ms": 203.99129204452038
+    },
+    "candidate": {
+      "body_ms": 141.00866694934666,
+      "noise_ms": 65.13674999587238,
+      "tail_ms": 20.713291014544666,
+      "total_ms": 226.8587079597637
+    }
+  },
+  "source_report": "outputs/f0_noise_exact_shape/remote_reports/report_f0_noise_padded_15s_irvine.json",
+  "tensor_dump": "/tmp/kokoro-coreml-15s-probe/outputs/generator_isolation/dumps/15s",
+  "waveform_gate_decision": "needs_listening",
+  "waveform_gate_reasons": [],
+  "wavs": {
+    "baseline": "outputs/f0_source_listening/irvine_exact_speed_branch/15s_padded_cos_resblock_cos_rsqrt/wav/15s_padded_cos_resblock_cos_rsqrt_baseline.wav",
+    "candidate": "outputs/f0_source_listening/irvine_exact_speed_branch/15s_padded_cos_resblock_cos_rsqrt/wav/15s_padded_cos_resblock_cos_rsqrt_candidate.wav",
+    "swift_dump": "outputs/f0_source_listening/irvine_exact_speed_branch/15s_padded_cos_resblock_cos_rsqrt/wav/15s_padded_cos_resblock_cos_rsqrt_swift_dump.wav"
+  }
+}
