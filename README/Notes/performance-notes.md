@@ -161,6 +161,23 @@ compile time, and the clang tool as the immediate failure; the blocker is the
 local Xcode/SwiftBuild build-description service path for this generated
 Config F runner.
 
+Manual Xcode bypass: `scripts/external_bakeoff/build_install_config_f_ios_manual.sh`
+now compiles the same runner and `KokoroPipeline` Swift sources with direct
+`swiftc`, copies the five runtime bucket `.mlpackage` sets and JSON inputs into
+the app bundle, embeds the existing wildcard iOS development provisioning
+profile, signs with the Apple Development identity, and optionally installs via
+`devicectl`. The one-off manual run produced an arm64 iOS executable, created
+an `882M` `ConfigFIOSRunner.app`, signed it with team entitlement
+`6ETYBAJKY8`, and installed it successfully on the connected iPhone as
+`com.kokoro.externalbakeoff.ConfigFIOSRunnerManual`. Launch then failed with
+`FBSOpenApplicationServiceErrorDomain ... RequestDenied ... Locked` because the
+iPhone was locked; `devicectl device info lockState` still reports
+`passcodeRequired: true` and `unlockedSinceBoot: true`. The remaining iPhone
+step is to unlock the device, relaunch the installed manual runner, tap `Run`,
+and ingest the JSON from the clipboard/output. This bypass path means Config F
+iPhone benchmarking is no longer blocked on Xcode project build, but warmed
+Config F iPhone timings are still absent until the installed runner executes.
+
 Whisper, ASR, VAD, playback, and echo-demo dependencies are not part of this
 bakeoff boundary. The iOS runner is intentionally Kokoro TTS only.
 
