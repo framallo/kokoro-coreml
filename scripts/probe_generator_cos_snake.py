@@ -16,6 +16,7 @@ against both the Swift dump and the shipping fused output.
 from __future__ import annotations
 
 import argparse
+import importlib.metadata
 import json
 import statistics
 import sys
@@ -34,6 +35,25 @@ from audio_parity_tensor_io import load_tensor_dump  # noqa: E402
 from probe_generator_dual_anchor_split import _patch_cos_snake  # noqa: E402
 from probe_generator_exact_geometry import _compute_units, _load_kmodel, _metrics  # noqa: E402
 from probe_generator_split import _duration_label_from_dump, _precision_arg, _remove_existing_package  # noqa: E402
+
+
+def _package_version(package: str) -> str | None:
+    """Return the installed package version without importing heavy modules."""
+
+    try:
+        return importlib.metadata.version(package)
+    except importlib.metadata.PackageNotFoundError:
+        return None
+
+
+def _toolchain_report() -> dict[str, Any]:
+    """Return conversion/runtime package versions for reproducible probes."""
+
+    return {
+        "coremltools": _package_version("coremltools"),
+        "torch": _package_version("torch"),
+        "numpy": _package_version("numpy"),
+    }
 
 
 def _deployment_target(ct: Any, name: str) -> Any:
@@ -192,6 +212,7 @@ def _export_package(
     mlmodel.save(str(package))
     return {
         "package": str(package),
+        "toolchain": _toolchain_report(),
         "precision": precision,
         "cos_snake": bool(cos_snake),
         "broadcast_adain": bool(broadcast_adain),
@@ -341,6 +362,7 @@ def run(args: argparse.Namespace) -> dict[str, Any]:
         "fused_package": str(args.fused_package),
         "cos_package": str(cos_package),
         "report": str(report_path),
+        "toolchain": _toolchain_report(),
         "manifest_metadata": manifest.get("metadata", {}),
         "cos_snake": bool(args.cos_snake),
         "broadcast_adain": bool(args.broadcast_adain),

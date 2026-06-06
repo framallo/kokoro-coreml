@@ -577,6 +577,28 @@ split: its palettized vocoder emits an intermediate audio anchor that is
 discarded, while a separate tail emits the listener-facing waveform. Do not
 ship or rank palettized fused-generator packages without a fresh quality gate.
 
+The toolchain-only hypothesis is also rejected for the current fused generator.
+`scripts/probe_generator_cos_snake.py` now records `coremltools`, `torch`, and
+`numpy` versions in its JSON reports, so the CT8/CT9 comparison is reproducible.
+The CT9 package was generated with the same PyTorch 2.6 traced graph, same
+iOS17 target, same fixed tensor shapes, and no source-level operator rewrites.
+Its visible MIL surface is identical to the CT8 iOS17 package and shipping
+package: `2207` ops, `51` conv, `4` conv_transpose, `88` reduce_mean, `96`
+tile, `50` sin, and `1` cos.
+
+| Host | Bucket | Shipping fused | CT8.3 iOS17 plain | CT9.0 iOS17 plain | Decision |
+| --- | --- | ---: | ---: | ---: | --- |
+| m2-studio | 3s | 30.07 ms | 29.76 ms | 29.81 ms | tie; same-process N=30 |
+| m2-studio | 7s | 59.87 ms | not rerun | 60.49 ms | reject |
+| m2-air | 3s | 120.803 ms | not rerun | 120.816 ms | tie; remote N=30 |
+| irvine-m1 | 3s | 167.900 ms | not rerun | 167.947 ms | tie; remote N=30 |
+
+The initial CT9 3s export run looked modestly faster than fused (`29.74 ms` vs
+`30.39 ms`), but an alternating same-process timing pass showed CT8 iOS17,
+CT9 iOS17, and shipping fused within run noise. On M2 Air and Irvine M1, CT9
+was effectively identical to shipping fused. Therefore a coremltools 9
+conversion alone is not the reason laishere retains an M1 short-bucket lead.
+
 #### Style-specialized generator probe
 
 `scripts/probe_generator_style_specialization.py` tests a more aggressive

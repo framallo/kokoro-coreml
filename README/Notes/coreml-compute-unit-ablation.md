@@ -254,6 +254,16 @@ sudo powermetrics -i 1000 --samplers ane
   Laishere's palettized vocoder output is discarded before its separate tail,
   so its quantization error does not map directly onto our fused final
   waveform output.
+- **coremltools 9 conversion-only path rejected:** the probe now records
+  conversion toolchain versions. A plain iOS17 fused-generator export with
+  `coremltools==9.0` preserved the same visible MIL surface as CT8 (`2207`
+  ops; `51` conv, `4` conv_transpose, `88` reduce_mean, `96` tile, `50` sin).
+  Same-process local 3s timing was a tie: shipping fused `30.07 ms`, CT8 iOS17
+  `29.76 ms`, CT9 iOS17 `29.81 ms`. Remote 3s timing also tied on the losing
+  machines: M2 Air shipping `120.803 ms` vs CT9 `120.816 ms`; Irvine M1
+  shipping `167.900 ms` vs CT9 `167.947 ms`. The 7s local CT9 candidate was
+  slower (`60.49 ms` vs `59.87 ms`). Do not pursue a CT9-only migration for the
+  current fused final-waveform package without a new compute-plan signal.
 - **Style-specialized generator rejected:** `scripts/probe_generator_style_specialization.py`
   bakes the dump's `ref_s` into the generator and replaces all `AdaIN1d`
   projections with fixed gamma/beta constants. The 3s MIL graph shrank from
