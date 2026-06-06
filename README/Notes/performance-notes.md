@@ -4258,13 +4258,17 @@ a speed path. `scripts/probe_generator_style_specialization.py` freezes the
 a runtime input, and exports a strict HAR-post package with the same `x_pre` and
 `har` inputs. On local M2 Studio `3s`, CPU+GPU preserves quality but is slower:
 fused `26.386 ms`, style-specialized `26.766 ms` (`-1.44%`), corr `0.999994`,
-SNR `49.36 dB`, max abs `0.00238`. CPU+NE is not usable: it reports
-style-specialized `935.970 ms` vs fused `1467.920 ms`, still far slower than the
-CPU+GPU path, fails the strict max-abs gate (`0.01245`), and logs
+SNR `49.36 dB`, max abs `0.00238`. Older remote CPU+GPU reruns show the same
+direction: M2 Air `3s` fused `120.84 ms` vs style `123.04 ms` (`-1.82%`),
+Irvine M1 `3s` fused `167.80 ms` vs style `170.80 ms` (`-1.79%`), and local
+`7s` fused `63.87 ms` vs style `64.19 ms` (`-0.50%`). CPU+NE is not usable: it
+reports style-specialized `935.970 ms` vs fused `1467.920 ms`, still far slower
+than the CPU+GPU path, fails the strict max-abs gate (`0.01245`), and logs
 `ANECCompile() FAILED`. Reports:
 `outputs/generator_style_specialization/3s_style_specialized/report_cpu_gpu.json`
 and
-`outputs/generator_style_specialization/3s_style_specialized/report_cpu_ne.json`.
+`outputs/generator_style_specialization/3s_style_specialized/report_cpu_ne.json`,
+plus the older remote reports under `outputs/generator_style_specialization/3s/`.
 Do not carry style-specialization to Irvine unless a different operator rewrite
 changes the CPU+GPU result first.
 
