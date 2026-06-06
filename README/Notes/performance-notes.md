@@ -4506,6 +4506,29 @@ is finite and strict-like. Reports:
 Irvine M1 warmed timing when the host is quiet; only then should the checked-in
 five runtime bucket packages be regenerated.
 
+The same five rewrite packages also survive an end-to-end Config F local
+overlay run: `outputs/export_rewrite_smoke/coreml_overlay` symlinks every
+non-generator package back to `coreml/` and redirects only
+`kokoro_decoder_har_post_{3s,7s,10s,15s,30s}.mlpackage` to the rewrite export.
+This preserves the staged compute policy and exact-duration package path. Against
+the current best local Config F `vector_noise_batch` result, warmed end-to-end
+medians improve by `1.2-2.6%`:
+
+| Bucket | Current best local | Rewrite overlay | Speedup |
+| --- | ---: | ---: | ---: |
+| 3s | 50.665 ms | 49.669 ms | 1.97% |
+| 7s | 95.503 ms | 93.792 ms | 1.79% |
+| 10s | 125.687 ms | 123.655 ms | 1.62% |
+| 15s | 185.782 ms | 183.511 ms | 1.22% |
+| 30s | 383.906 ms | 373.985 ms | 2.58% |
+
+Spotcheck WAVs versus `vector_noise_batch` remain strict-like: corr
+`0.999994895-0.999996490`, SNR `46.51-51.48 dB`, and max abs error
+`<=0.008453`. Result:
+`outputs/external_bakeoff/results_config_f_reference_m2-studio-local_rewrite_ups_as_conv.json`.
+Do not promote this to the paper-facing frontier until Irvine M1 warmed timing
+confirms the same direction on the lower-end loss platform.
+
 ---
 
 ## Bakeoff v5: Corrected benchmark (3s-30s) on M2 Ultra

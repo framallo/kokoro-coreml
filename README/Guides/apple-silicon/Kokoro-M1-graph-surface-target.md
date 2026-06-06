@@ -383,6 +383,13 @@ cos/native-IN/broadcast/fp16 probe surface. Next proof must be Irvine M1 warmed
 timing and, if positive, regenerating the actual five shipped
 `coreml/kokoro_decoder_har_post_{3s,7s,10s,15s,30s}.mlpackage` packages.
 
+The end-to-end Config F overlay also moves in the right direction locally:
+redirecting only the five HAR-post generator packages to the rewrite export
+improves warmed M2 Studio medians by `1.97%` `3s`, `1.79%` `7s`, `1.62%`
+`10s`, `1.22%` `15s`, and `2.58%` `30s` versus the current best local
+`vector_noise_batch` result. Treat that as local implementation proof, not a
+paper frontier update, until Irvine M1 repeats it under quiet warmed conditions.
+
 ## Deep Research Request
 
 A useful external deep-research guide would be narrower than "Core ML
