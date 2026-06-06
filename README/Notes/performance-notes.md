@@ -377,6 +377,20 @@ Current ratio table, competitor median divided by Config F median; values above
 | irvine-m1 | laishere | 0.75x | 0.80x | 0.87x | 0.90x | 1.09x |
 | irvine-m1 | Soniqo | 5.70x | 2.73x | 1.92x | 1.32x | 0.69x |
 
+**Current answer to "why is MLX faster?": it is not faster in the corrected
+warmed comparison.** MLX originally looked faster because the first Config F
+external table timed a less production-shaped Core ML path: padded Duration
+graphs, `.all` placement, and avoidable host/HAR overhead. MLX was already on
+its natural MLX/Metal path, so it did not pay that same mistake. After switching
+Config F to staged compute units, exact Duration packages, direct HAR padding,
+vDSP HnSF, and vectorized HnSF noise, Config F beats the pinned `mlx-audio
+0.4.3`/`mlx-community/Kokoro-82M-bf16` implementation on every valid
+MLX-comparable Mac cell. Placement evidence also says MLX is GPU/Metal, not ANE:
+the M2 Studio MLX powermetrics run reported `ANE Power` min/median/max
+`0/0/0 mW` and `GPU HW active residency` min/median/max `32.6/49.435/98.28%`.
+The remaining warmed Mac losses are all to laishere, whose split Core ML chain
+has a different source/vocoder boundary and partial hardware-placement behavior.
+
 #### Competitive frontier gate
 
 `scripts/external_bakeoff/summarize_competitive_frontier.py` turns the current
@@ -914,6 +928,16 @@ So the current M1 root-cause hypothesis is no longer "MLX is faster" or
 "laishere has lower Python overhead"; it is that laishere's different iOS17
 vocoder boundary/operator surface unlocks partial NE placement on M1, while our
 quality-safe HAR-post generator remains GPU-bound.
+
+Fresh Irvine compute-plan JSONs saved under ignored
+`outputs/external_bakeoff/compute_plan/` make the contrast explicit. Our strict
+`kokoro_decoder_har_post_3s.mlpackage` under `cpuAndNeuralEngine` reports
+`2207` ops with preferred-device counts `cpu=1038`, `unknown=1169`, and `0`
+Neural Engine-preferred ops. laishere's `KokoroVocoder.mlpackage` under the
+same policy reports `1534` ops with `597` Neural Engine-preferred ops and
+`47.5%` estimated cost on Neural Engine. laishere's `KokoroNoise` and
+`KokoroTail` remain CPU/unknown-only, so the useful M1 placement advantage is
+localized to the vocoder body.
 
 Follow-up check: the strict-parity visible-surface candidate
 `3s_broadcast_adain_native_in_ios17` also unlocks partial NE placement on Irvine
