@@ -577,9 +577,12 @@ sudo powermetrics -i 1000 --samplers ane
   pre-change tensor dump passed through `waveform_full`; final waveform corr is
   `0.999997`, and HnSF boundary tensors are corr `1.0`. This is production-safe
   host-DSP cleanup, not a model-architecture escape from the generator
-  bottleneck. Irvine M1 validation with synced vectorized sources measured HnSF
-  `17.3/35.7/42.2/55.2/96.3 ms` for `3s`/`7s`/`10s`/`15s`/`30s`, while
-  generator predict still dominated at `168.6/391.1/545.2/820.8/1638.6 ms`.
+  bottleneck. Persistent-batch validation with synced vectorized sources gives
+  current Config F medians of `55.1/103.8/135.2/202.6/409.1 ms` on M2 Studio,
+  `148.0/330.7/466.0/693.6/1404.8 ms` on M2 Air, and
+  `233.6/492.7/685.5/1014.9/1959.4 ms` on Irvine M1 for
+  `3s`/`7s`/`10s`/`15s`/`30s`. The remaining lower-end loss is still generator
+  predict, not host HnSF.
 
 **2026-05-17**
 

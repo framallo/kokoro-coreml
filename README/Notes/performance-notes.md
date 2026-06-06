@@ -261,26 +261,40 @@ with `.cpuAndGPU`, while decoder-pre loads with `.cpuAndNeuralEngine`. The
 external Config F adapter now defaults to this staged policy and enables exact
 duration model discovery by default. With the missing
 `kokoro_duration_exact_t156.mlpackage` generated for the `10s` fixture, the
-corrected warm medians after the vDSP HnSF optimization and direct HAR-padding
-fast path are:
+corrected warm medians after the vDSP HnSF optimization, direct HAR-padding
+fast path, and vectorized HnSF Gaussian noise are:
 
 | Machine | 3s | 7s | 10s | 15s | 30s |
 | --- | ---: | ---: | ---: | ---: | ---: |
-| m2-studio | 60.2 ms | 110.5 ms | 149.6 ms | 222.6 ms | 449.0 ms |
-| m2-air | 151.7 ms | 335.0 ms | 474.6 ms | 704.7 ms | 1430.0 ms |
-| irvine-m1 | 239.2 ms | 510.2 ms | 700.7 ms | 1028.9 ms | 1977.7 ms |
+| m2-studio | 55.1 ms | 103.8 ms | 135.2 ms | 202.6 ms | 409.1 ms |
+| m2-air | 148.0 ms | 330.7 ms | 466.0 ms | 693.6 ms | 1404.8 ms |
+| irvine-m1 | 233.6 ms | 492.7 ms | 685.5 ms | 1014.9 ms | 1959.4 ms |
 
 This corrected run flips the MLX comparison for every MLX-comparable Mac
-bucket across all three hardware platforms. It also beats Soniqo's valid `3s`
-macOS cell on every Mac and beats laishere on every M2 Studio cell. The
-remaining negative rows are important: laishere's narrower Core ML-chain-only
-boundary is still faster on M2 Air and M1 short/medium buckets, though the gap
-is now small on M2 Air and Config F now wins the M2 Air and M1 `30s` laishere
-rows. Soniqo's 5s-only public artifact remains faster than full-duration Config
-F for the 30s row because it emits much less audio. The exact duration package
-set, including
+bucket across all three hardware platforms. It beats laishere on every M2
+Studio cell, effectively ties laishere on M2 Air short/medium buckets, and wins
+the M2 Air and M1 `30s` laishere rows. The remaining negative rows are
+important: laishere's narrower Core ML-chain-only boundary is still faster on
+Irvine M1 short/medium buckets. Soniqo's 5s-only public artifact remains faster
+than full-duration Config F for the 15s/30s rows because it emits much less
+audio. The exact duration package set, including
 `kokoro_duration_exact_t156.mlpackage`, still needs to be published with the
 model artifacts for third-party reproduction.
+
+Current ratio table, competitor median divided by Config F median; values above
+`1.0x` mean Config F is faster:
+
+| Machine | Comparator | 3s | 7s | 10s | 15s | 30s |
+| --- | --- | ---: | ---: | ---: | ---: | ---: |
+| m2-studio | MLX | n/a | 2.16x | 2.14x | 1.86x | 1.86x |
+| m2-studio | laishere | 3.86x | 3.88x | 4.63x | 2.12x | 2.26x |
+| m2-studio | Soniqo | 1.30x | 0.67x | 0.53x | 0.34x | 0.17x |
+| m2-air | MLX | n/a | 2.07x | 1.79x | 2.19x | 1.85x |
+| m2-air | laishere | 0.96x | 0.96x | 0.97x | 0.95x | 1.05x |
+| m2-air | Soniqo | 7.41x | 3.43x | 2.41x | 1.62x | 0.80x |
+| irvine-m1 | MLX | n/a | 1.67x | 1.64x | 1.57x | 1.57x |
+| irvine-m1 | laishere | 0.75x | 0.80x | 0.87x | 0.90x | 1.09x |
+| irvine-m1 | Soniqo | 5.70x | 2.73x | 1.92x | 1.32x | 0.69x |
 
 #### Corrected Config F stage medians
 
@@ -290,21 +304,21 @@ Swift HnSF step is the second largest long-bucket cost on all machines.
 
 | Machine | Input | Duration | F0Ntrain | DecoderPre | Generator | Swift HnSF |
 | --- | --- | ---: | ---: | ---: | ---: | ---: |
-| m2-studio | 3s | 9.5 ms | 5.8 ms | 4.2 ms | 28.8 ms | 10.5 ms |
-| m2-studio | 7s | 13.6 ms | 6.6 ms | 5.5 ms | 58.3 ms | 24.7 ms |
-| m2-studio | 10s | 17.8 ms | 7.8 ms | 7.5 ms | 79.2 ms | 35.5 ms |
-| m2-studio | 15s | 22.4 ms | 11.3 ms | 16.1 ms | 115.8 ms | 53.8 ms |
-| m2-studio | 30s | 41.2 ms | 18.6 ms | 50.5 ms | 220.6 ms | 113.2 ms |
-| m2-air | 3s | 11.4 ms | 5.0 ms | 3.0 ms | 120.6 ms | 10.7 ms |
-| m2-air | 7s | 18.3 ms | 8.7 ms | 5.2 ms | 277.6 ms | 24.6 ms |
-| m2-air | 10s | 23.7 ms | 11.1 ms | 7.5 ms | 395.1 ms | 35.5 ms |
-| m2-air | 15s | 33.2 ms | 15.4 ms | 11.4 ms | 589.3 ms | 53.9 ms |
-| m2-air | 30s | 73.2 ms | 31.6 ms | 29.9 ms | 1182.6 ms | 108.2 ms |
-| irvine-m1 | 3s | 26.5 ms | 12.1 ms | 4.4 ms | 167.6 ms | 27.3 ms |
-| irvine-m1 | 7s | 43.9 ms | 18.0 ms | 8.4 ms | 387.6 ms | 47.1 ms |
-| irvine-m1 | 10s | 58.0 ms | 21.9 ms | 11.3 ms | 550.6 ms | 57.5 ms |
-| irvine-m1 | 15s | 79.4 ms | 31.8 ms | 17.9 ms | 821.5 ms | 75.7 ms |
-| irvine-m1 | 30s | 140.7 ms | 42.6 ms | 34.9 ms | 1633.2 ms | 120.6 ms |
+| m2-studio | 3s | 10.1 ms | 4.9 ms | 3.5 ms | 28.6 ms | 7.6 ms |
+| m2-studio | 7s | 13.8 ms | 7.7 ms | 5.5 ms | 58.7 ms | 18.2 ms |
+| m2-studio | 10s | 15.7 ms | 7.7 ms | 7.7 ms | 78.7 ms | 24.7 ms |
+| m2-studio | 15s | 21.8 ms | 10.7 ms | 16.2 ms | 113.4 ms | 37.9 ms |
+| m2-studio | 30s | 37.7 ms | 18.0 ms | 50.7 ms | 218.5 ms | 82.5 ms |
+| m2-air | 3s | 11.4 ms | 5.0 ms | 2.9 ms | 120.6 ms | 7.7 ms |
+| m2-air | 7s | 18.5 ms | 8.9 ms | 5.0 ms | 278.3 ms | 17.6 ms |
+| m2-air | 10s | 23.7 ms | 11.2 ms | 7.1 ms | 396.0 ms | 25.8 ms |
+| m2-air | 15s | 33.4 ms | 15.5 ms | 11.5 ms | 591.5 ms | 39.8 ms |
+| m2-air | 30s | 75.4 ms | 32.0 ms | 29.8 ms | 1183.2 ms | 78.8 ms |
+| irvine-m1 | 3s | 27.5 ms | 12.1 ms | 4.4 ms | 167.1 ms | 21.2 ms |
+| irvine-m1 | 7s | 45.5 ms | 17.9 ms | 8.4 ms | 383.7 ms | 35.5 ms |
+| irvine-m1 | 10s | 58.7 ms | 20.3 ms | 10.4 ms | 548.6 ms | 41.6 ms |
+| irvine-m1 | 15s | 80.7 ms | 30.9 ms | 17.1 ms | 820.8 ms | 62.6 ms |
+| irvine-m1 | 30s | 143.3 ms | 42.3 ms | 36.3 ms | 1631.9 ms | 94.8 ms |
 
 #### Vectorized HnSF Gaussian noise
 
@@ -332,19 +346,17 @@ and `waveform_full` with no failing boundary. Final waveform correlation was
 `0.999997` with max abs `0.00274658`; the HnSF boundary tensors were
 correlation `1.0`.
 
-Irvine M1 validation used the synced vectorized Swift sources, exact duration
-models, staged compute units, `--warmup 2`, and `--iterations 5`. HnSF improved
-relative to the older recorded M1 stage medians (`27.3/47.1/57.5/75.7/120.6 ms`
-for `3s`/`7s`/`10s`/`15s`/`30s`), but total wall remains dominated by the
-generator predict call.
+Cross-machine validation used synced vectorized Swift sources, exact duration
+models, staged compute units, and the persistent external batch runner with
+three discarded preflight calls plus five warm measurements per input. HnSF
+improved relative to the older recorded stage medians, but total wall remains
+dominated by the generator predict call.
 
-| Input | Irvine M1 vector wall | Irvine M1 vector HnSF | Irvine M1 generator |
-| --- | ---: | ---: | ---: |
-| 3s | 229.3 ms | 17.3 ms | 168.6 ms |
-| 7s | 513.7 ms | 35.7 ms | 391.1 ms |
-| 10s | 693.9 ms | 42.2 ms | 545.2 ms |
-| 15s | 1014.1 ms | 55.2 ms | 820.8 ms |
-| 30s | 1969.9 ms | 96.3 ms | 1638.6 ms |
+| Machine | 3s HnSF | 7s HnSF | 10s HnSF | 15s HnSF | 30s HnSF |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| m2-studio | 7.6 ms | 18.2 ms | 24.7 ms | 37.9 ms | 82.5 ms |
+| m2-air | 7.7 ms | 17.6 ms | 25.8 ms | 39.8 ms | 78.8 ms |
+| irvine-m1 | 21.2 ms | 35.5 ms | 41.6 ms | 62.6 ms | 94.8 ms |
 
 #### Direct HAR padding fast path
 
