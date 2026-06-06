@@ -33,6 +33,7 @@ CONFIG_STAGE_KEYS = (
     "t_duration_coreml_s",
     "t_f0ntrain_coreml_s",
     "t_decoder_pre_coreml_s",
+    "t_decoder_pre_hnsf_overlap_s",
     "t_coreml_predict_s",
     "t_hnsf_swift_s",
     "t_matrix_ops_s",
@@ -101,7 +102,12 @@ def summarize_config_record(record: dict[str, Any]) -> dict[str, Any]:
     if wall_s is None:
         wall_values = [float(value) for value in record.get("warm_wall_times_s") or []]
         wall_s = _median(wall_values)
-    known_sum = sum(float(value) for value in medians.values() if value is not None)
+    overlap_s = float(medians["t_decoder_pre_hnsf_overlap_s"] or 0.0)
+    known_sum = sum(
+        float(value)
+        for key, value in medians.items()
+        if value is not None and key != "t_decoder_pre_hnsf_overlap_s"
+    ) - overlap_s
     host_other_s = None if wall_s is None else wall_s - known_sum
     non_generator_s = None
     generator_s = medians["t_coreml_predict_s"]
@@ -112,6 +118,7 @@ def summarize_config_record(record: dict[str, Any]) -> dict[str, Any]:
         "duration_s": medians["t_duration_coreml_s"],
         "f0n_s": medians["t_f0ntrain_coreml_s"],
         "decoder_pre_s": medians["t_decoder_pre_coreml_s"],
+        "decoder_pre_hnsf_overlap_s": overlap_s,
         "generator_s": generator_s,
         "hnsf_s": medians["t_hnsf_swift_s"],
         "matrix_ops_s": medians["t_matrix_ops_s"],
@@ -252,8 +259,8 @@ def render_markdown(summary: dict[str, Any]) -> str:
             "",
             "## Config F Stage Details",
             "",
-            "| Machine | Bucket | Duration | F0Ntrain | DecoderPre | Generator | HnSF | Matrix/pad/trim | Host other |",
-            "| --- | --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: |",
+            "| Machine | Bucket | Duration | F0Ntrain | DecoderPre | HnSF | Overlap | Generator | Matrix/pad/trim | Host other |",
+            "| --- | --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |",
         ]
     )
     for row in summary["rows"]:
@@ -271,8 +278,9 @@ def render_markdown(summary: dict[str, Any]) -> str:
                     _ms(config["duration_s"]),
                     _ms(config["f0n_s"]),
                     _ms(config["decoder_pre_s"]),
-                    _ms(config["generator_s"]),
                     _ms(config["hnsf_s"]),
+                    _ms(config["decoder_pre_hnsf_overlap_s"]),
+                    _ms(config["generator_s"]),
                     _ms(aux),
                     _ms(config["host_other_s"]),
                 ]

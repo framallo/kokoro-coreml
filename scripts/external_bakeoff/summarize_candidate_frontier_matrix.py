@@ -19,6 +19,7 @@ DEFAULT_OUTPUT_DIR = Path("outputs/external_bakeoff")
 DEFAULT_OUTPUT = DEFAULT_OUTPUT_DIR / "candidate_frontier_matrix.md"
 DEFAULT_JSON_OUTPUT = DEFAULT_OUTPUT_DIR / "candidate_frontier_matrix.json"
 DEFAULT_STRICT_BUDGET = DEFAULT_OUTPUT_DIR / "strict_win_budget_after_rewrite.json"
+DEFAULT_OVERLAP_REWRITE_BUDGET = DEFAULT_OUTPUT_DIR / "strict_win_budget_after_overlap_rewrite.json"
 DEFAULT_IOS_INSTALL = DEFAULT_OUTPUT_DIR / "config_f_ios_manual_install_latest.json"
 
 
@@ -38,6 +39,17 @@ class Candidate:
 
 
 CANDIDATES: tuple[Candidate, ...] = (
+    Candidate(
+        family="DecoderPre/HnSF runtime overlap",
+        scope="Swift runtime scheduling inside current Config F boundary",
+        best_signal="local M2 Studio hash-identical all-bucket save: +4.80% 3s, +5.36% 7s, +6.92% 10s, +7.24% 15s, +14.25% 30s versus same-binary serial shipped path",
+        quality="strict; overlap-only WAV hashes identical on all five buckets",
+        strict=True,
+        production_ready=True,
+        decision="keep enabled by default; fallback env KOKORO_DISABLE_DECODER_HNSF_OVERLAP=1",
+        evidence="outputs/external_bakeoff/lower_end_mac_win_attempts.md",
+        next_gate="quiet lower-end A/B; if a host regresses, use fallback and inspect decoder-pre CPU contention",
+    ),
     Candidate(
         family="HAR-post upsample ConvT rewrite",
         scope="single-package GeneratorFromHar",
@@ -134,30 +146,30 @@ CANDIDATES: tuple[Candidate, ...] = (
         strict=True,
         production_ready=False,
         decision="reject; split boundary/sync overhead exceeds body savings",
-        evidence="README/Guides/apple-silicon/Kokoro-M1-vocoder-boundary-research-brief.md",
+        evidence="README/Kokoro-M1-vocoder-boundary-research-brief.md",
         next_gate="do not repeat broad exact split; only try if a Core ML call boundary is removed",
     ),
     Candidate(
         family="Exact generator noise/body split",
         scope="multi-package exact HAR-post generator split",
-        best_signal="body-only is faster if x_source tensors are free (M2 17.6 vs 26.4 ms; Irvine 105.9 vs 168.3 ms), but full strict split loses once noise/source is included",
+        best_signal="body-only is faster if x_source tensors are free (M2 17.6 vs 26.4 ms; Irvine 105.9 vs 168.3 ms), but full strict split loses once noise/source is included; decoderPre overlap cannot hide noise because noise waits for HAR and HnSF already exceeds decoderPre on measured 3s hosts; padded/Nyquist 3s source-noise split is quality-good but slower (34.4 vs 30.4 ms, -13.0%)",
         quality="strict on CPU+GPU; CPU+NE quality fails",
         strict=True,
         production_ready=False,
         decision="reject; x_source body package is promising only with a cheaper strict source contract",
-        evidence="README/Notes/performance-notes.md",
+        evidence="outputs/external_bakeoff/lower_end_mac_win_attempts.md",
         next_gate="only revisit if x_source is produced without a separate Core ML noise call or with a new source representation",
     ),
     Candidate(
         family="HAR-source fused strict path",
         scope="source/STFT/HAR fused path",
-        best_signal="Irvine 3s CPU+GPU -22.9 ms; CPU+NE -163.8 ms",
+        best_signal="natural har_source is speed-positive but quality-failing; strict padded/Nyquist fused path has replacement-quality versus the current generator but no net win after Swift STFT credit (+0.051 ms 3s, +1.326 ms 7s, +2.231 ms 10s, +14.977 ms 30s); atan_swift fp32 raw phase is worse (-0.89 dB)",
         quality="strict with padded geometry and dumped Nyquist phase",
         strict=True,
         production_ready=False,
         decision="reject; preserving strict source contract loses the speed edge",
-        evidence="outputs/nyquist_phase_contribution/summary.md",
-        next_gate="new representation only; do not promote padded strict path",
+        evidence="README/Notes/har-stft-phase-contract.md; scripts/external_bakeoff/summarize_hnsf_source_boundary.py",
+        next_gate="new representation only: phase reparameterization, weight folding, or a no-extra-boundary Nyquist side input",
     ),
     Candidate(
         family="RangeDim/flexible input generator",
@@ -169,6 +181,17 @@ CANDIDATES: tuple[Candidate, ...] = (
         decision="reject; dynamic broadcast/shape propagation is both slower and not strict",
         evidence="README/Notes/performance-notes.md",
         next_gate="do not use RangeDim for the fused generator hot path; keep fixed buckets",
+    ),
+    Candidate(
+        family="Per-stage prefix compute-unit overrides",
+        scope="Swift runtime policy for duration/F0Ntrain/decoder-pre",
+        best_signal="local 3s duration+F0Ntrain CPU+ANE N=5 looked +1.858 ms, but N=20 shrank to +0.213 ms and 7s/10s regressed by 11.241/18.366 ms",
+        quality="not strict: 3s CPU+ANE prefix WAV vs staged baseline corr 0.691758, SNR 2.38 dB",
+        strict=False,
+        production_ready=False,
+        decision="reject as production candidate; keep per-stage override harness for diagnostics",
+        evidence="README/Notes/stage-compute-policy-ablation.md",
+        next_gate="none unless a future export makes duration/F0Ntrain CPU+ANE numerically stable and materially faster",
     ),
     Candidate(
         family="Linear weight quantization",
@@ -202,6 +225,14 @@ def _load_optional_json(path: Path) -> dict[str, Any]:
     if not isinstance(payload, dict):
         raise ValueError(f"{path} did not contain a JSON object")
     return payload
+
+
+def _default_strict_budget() -> Path:
+    """Prefer the overlap+rewrite budget when the generated artifact exists."""
+
+    if DEFAULT_OVERLAP_REWRITE_BUDGET.exists():
+        return DEFAULT_OVERLAP_REWRITE_BUDGET
+    return DEFAULT_STRICT_BUDGET
 
 
 def _status_order(candidate: Candidate) -> tuple[int, str]:
@@ -240,6 +271,9 @@ def build_payload(args: argparse.Namespace) -> dict[str, Any]:
             "Run scripts/external_bakeoff/check_remote_host_quiet.py before any lower-end Mac promotion run.",
             "Retest the HAR-post upsample rewrite on Irvine M1 and M2 Air only when outputs/external_bakeoff/remote_host_quiet_latest.md reports quiet=yes.",
             "Do not use cold compile/cache timings; every frontier update must use warmed medians.",
+            "Use README/Notes/fixed-cost-latency-fit.md to separate fixed-boundary overhead from duration-scaled generator cost before promoting a new optimization family.",
+            "Use README/Notes/har-stft-phase-contract.md and scripts/external_bakeoff/summarize_hnsf_source_boundary.py before revisiting any har_source boundary; Swift STFT credit alone does not make the strict padded/Nyquist path win.",
+            "Use README/Kokoro-M1-HAR-STFT-contract-deep-research-prompt.md for the next external research pass; the source equation is solved, the HAR/STFT contract is not.",
             "For a new strict candidate, require a single-package graph or a removed Core ML call boundary before lower-end promotion.",
             "Run the installed Config F iPhone runner only after the physical iPhone is unlocked; current launch blocker is device_locked.",
             "Keep fast F0/source branches separate from strict paper claims unless no-ASR human listening accepts the exact WAVs.",
@@ -268,7 +302,7 @@ def render_markdown(payload: dict[str, Any]) -> str:
         f"- Production-ready strict candidates: `{summary['production_ready_strict_candidates']}`.",
         f"- Strict rejected or too-small candidates: `{summary['strict_rejected_or_too_small']}`.",
         f"- Non-strict or quality-changing candidates: `{summary['non_strict_candidates']}`.",
-        f"- Irvine profile rows remaining after rewrite projection: `{summary['profile_rows_remaining_after_rewrite']}`.",
+        f"- Irvine profile rows remaining after current projection: `{summary['profile_rows_remaining_after_rewrite']}`.",
         f"- iPhone Config F launch blocker: `{summary['iphone_launch_blocker']}`.",
         "",
         "## Matrix",
@@ -306,7 +340,7 @@ def main() -> int:
     """CLI entrypoint."""
 
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--strict-budget", type=Path, default=DEFAULT_STRICT_BUDGET)
+    parser.add_argument("--strict-budget", type=Path, default=_default_strict_budget())
     parser.add_argument("--ios-install", type=Path, default=DEFAULT_IOS_INSTALL)
     parser.add_argument("--output", type=Path, default=DEFAULT_OUTPUT)
     parser.add_argument("--json-output", type=Path, default=DEFAULT_JSON_OUTPUT)

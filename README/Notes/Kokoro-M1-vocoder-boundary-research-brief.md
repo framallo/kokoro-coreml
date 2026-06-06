@@ -21,8 +21,11 @@ laishere on Irvine M1 short and medium buckets. The live frontier is tracked by:
 - `outputs/external_bakeoff/irvine_3s_placement_target.md`
 - `outputs/external_bakeoff/candidate_frontier_matrix.md`
 - `outputs/external_bakeoff/remote_host_quiet_latest.md`
-- `README/Guides/apple-silicon/Kokoro-M1-graph-surface-target.md`
-- `README/Guides/apple-silicon/Kokoro-M1-kernel-partition-deep-research-prompt.md`
+- `README/Kokoro-M1-graph-surface-target.md`
+- `README/Kokoro-M1-kernel-partition-deep-research-prompt.md`
+- [Core ML vs MLX vocoder scheduling (ConvTranspose / iSTFT)](Core%20ML-MLX-Scheduling-1D-ConvTranspose-ISTFTNet-vocoders-guide.md) —
+  synthesized field guide: fixed-cost diagnosis, handoff collapse, dual-output
+  anchor, and staged recommendations for Irvine M1 short buckets.
 
 For `irvine-m1/3s`, the warmed profile gap is:
 
@@ -89,7 +92,7 @@ Saved Irvine M1 `3s` strict-equivalent results:
 | Fused native-IN + broadcast + fp16 inputs | local `3s +0.08%`; `88 -> 0` reductions, `96 -> 0` tiles, `44` instance_norm | Near-surface match but no material speed win. |
 | Fused native-IN + broadcast + fp16 + pal8 | local `3s -2.83%`; `101` LUT ops, no reductions/tiles | Full visible surface match still loses and reduces quality margin. |
 | Fused cos-Snake + native-IN + broadcast + fp16 + upsample ConvT rewrite | local `3s +4.45%`, `7s +3.42%`, `10s +3.56%`, `15s +3.52%`, `30s +3.24%` | Strict local win; promote to Irvine when quiet. |
-| HAR-source fused strict path | `-22.9 ms` CPU+GPU, `-163.8 ms` CPU+NE | Source/STFT boundary not a win. |
+| HAR-source fused strict path | after Swift STFT credit: `+0.051 ms` 3s, `+1.326 ms` 7s, `+2.231 ms` 10s, `+14.977 ms` 30s | Source/STFT boundary is not a net win unless a Core ML call boundary or body cost is also removed. |
 
 Do not spend research budget on another broad split of the current
 `GeneratorFromHar` package unless it removes a Core ML call boundary or changes
@@ -132,12 +135,12 @@ The shortest useful formulation is:
 > regression.
 
 For the next implementation pass, use the constrained handoff prompt in
-`README/Guides/apple-silicon/Kokoro-M1-source-body-deep-research-prompt.md`.
+`README/Kokoro-M1-source-body-deep-research-prompt.md`.
 For a narrower external-research pass on the current M1 partition paradox, use
-`README/Guides/apple-silicon/Kokoro-M1-kernel-partition-deep-research-prompt.md`.
+`README/Kokoro-M1-kernel-partition-deep-research-prompt.md`.
 The numeric post-rewrite target budget is generated at
-`outputs/external_bakeoff/strict_win_budget_after_rewrite.md`; update it after
-any new strict candidate before changing the research prompt. The candidate
+`outputs/external_bakeoff/strict_win_budget_after_overlap_rewrite.md`; update it
+after any new strict candidate before changing the research prompt. The candidate
 frontier matrix at `outputs/external_bakeoff/candidate_frontier_matrix.md`
 summarizes the current strict wins, strict rejections, quality-fail speed
 branches, and iPhone launch gate; update it whenever a candidate changes status.

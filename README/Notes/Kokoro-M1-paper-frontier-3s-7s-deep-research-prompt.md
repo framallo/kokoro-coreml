@@ -11,18 +11,16 @@ evidence already shows MLX has `0` Mac wins against Config F.
 
 Find an implementation path that removes at least the remaining Irvine M1
 paper-frontier gap after combining the best saved source/body candidates with
-the measured HAR-post rewrite projection:
+the measured HAR-post rewrite and `decoder_pre`/HnSF overlap projections:
 
-| Bucket | Best saved source/body | HAR-post rewrite save | Combined projected Config F | Paper frontier | Extra save needed |
-| --- | --- | ---: | ---: | ---: | ---: |
-| `3s` | `3s_natural_asr_cos_rsqrt` | `7.2 ms` | `207.7 ms` | `176.3 ms` | `31.4 ms` |
-| `7s` | `7s_natural_asr_cos_rsqrt` | `12.1 ms` | `432.0 ms` | `394.6 ms` | `37.4 ms` |
+| Bucket | Best saved source/body | Rewrite save | Overlap save | Combined projected Config F | Paper frontier | Extra save needed |
+| --- | --- | ---: | ---: | ---: | ---: | ---: |
+| `3s` | `3s_natural_asr_cos_rsqrt` | `7.2 ms` | `4.4 ms` | `203.3 ms` | `176.3 ms` | `27.0 ms` |
+| `7s` | `7s_natural_asr_cos_rsqrt` | `12.1 ms` | `8.4 ms` | `423.6 ms` | `394.6 ms` | `29.0 ms` |
 
-The same combined path can close Irvine `10s` by `+2.6 ms` if listening accepts
-`10s_natural_asr_cos_resblock_natural_asr_cos_rsqrt`, and leaves Irvine `15s`
-only `2.7 ms` short. Therefore this research pass should not spend its main
-effort on `10s` or `15s`; they are promotion and small-margin work. The hard
-problem is `3s/7s`.
+The same combined path should close Irvine `10s` and `15s` if listening accepts
+the saved source/body candidates, so this research pass should not spend its
+main effort there. The hard problem is still `3s/7s`.
 
 Authoritative current report:
 
@@ -52,8 +50,8 @@ Current saved source/body candidates:
 | `3s` | `3s_natural_asr_cos_rsqrt` | `214.8 ms` | `176.3 ms` | `38.5 ms short` |
 | `7s` | `7s_natural_asr_cos_rsqrt` | `444.1 ms` | `394.6 ms` | `49.5 ms short` |
 
-After adding the measured HAR-post rewrite projection, they still remain short
-by `31.4 ms` and `37.4 ms`.
+After adding the measured HAR-post rewrite and runtime-overlap projections,
+they still remain short by `27.0 ms` and `29.0 ms`.
 
 ### Surface matching alone has failed
 
@@ -69,7 +67,7 @@ surface but did not reproduce laishere's M1 runtime behavior:
 
 Detailed evidence:
 
-- `README/Guides/apple-silicon/Kokoro-M1-graph-surface-target.md`
+- `README/Kokoro-M1-graph-surface-target.md`
 - `outputs/external_bakeoff/irvine_3s_placement_target.md`
 - `outputs/external_bakeoff/candidate_frontier_matrix.md`
 
@@ -82,7 +80,7 @@ layout, synchronization, or a narrower runtime contract.
 
 ## Research Questions
 
-1. What package-boundary or tensor-layout change can remove `31-37 ms` on
+1. What package-boundary or tensor-layout change can remove `27-29 ms` on
    Irvine M1 `3s/7s` without adding another hot Core ML call?
 2. Can the source/body simplification and HAR-post rewrite be fused into one
    runtime-positive package path rather than treated as additive projections?
@@ -100,7 +98,7 @@ A useful proposal must specify:
 - exact package boundary and model inputs/outputs;
 - tensor ranks and static shapes for `3s` and `7s`;
 - whether it preserves strict waveform parity or requires no-ASR listening;
-- expected impact on the `31.4 ms` and `37.4 ms` remaining gaps;
+- expected impact on the `27.0 ms` and `29.0 ms` remaining gaps;
 - why it avoids the already-measured split-boundary penalty;
 - Core ML deployment target, precision, compute units, and expected
   `MLComputePlan` signature;

@@ -15,31 +15,33 @@ Config F beat laishere on Irvine M1 for `3s`, `7s`, `10s`, and `15s` without
 using cold compile/cache time, `.all` wishful thinking, or quality-changing
 shortcuts.
 
-After the HAR-post upsample rewrite projection, the remaining Irvine profile
-budget is:
+After the HAR-post upsample rewrite plus `decoder_pre`/HnSF overlap projection,
+the remaining Irvine profile budget is:
 
-| Bucket | Projected Config F after rewrite | laishere profile | Extra strict save needed |
+| Bucket | Projected Config F after overlap+rewrite | laishere profile | Extra strict save needed |
 | --- | ---: | ---: | ---: |
-| `3s` | `226.4 ms` | `195.0 ms` | `31.4 ms` |
-| `7s` | `480.6 ms` | `444.2 ms` | `36.4 ms` |
-| `10s` | `668.0 ms` | `644.9 ms` | `23.2 ms` |
-| `15s` | `993.6 ms` | `990.6 ms` | `3.0 ms` |
+| `3s` | `222.0 ms` | `195.0 ms` | `27.0 ms` |
+| `7s` | `472.2 ms` | `444.2 ms` | `28.0 ms` |
+| `10s` | `657.6 ms` | `644.9 ms` | `12.8 ms` |
+| `15s` | `976.4 ms` | `990.6 ms` | `0.0 ms` |
 
 The stricter paper frontier target still needs more. Use
-`outputs/external_bakeoff/strict_win_budget_after_rewrite.md` as the current
-numeric authority.
+`outputs/external_bakeoff/strict_win_budget_after_overlap_rewrite.md` as the
+current numeric authority.
 
 The latest paper-frontier path is now more specific:
 
 - `outputs/external_bakeoff/irvine_paper_frontier_path.md`
-- source/body plus HAR-post rewrite closes Irvine `10s` by `+2.6 ms` if
-  listening accepts the source candidate;
-- `15s` is still `2.7 ms` short;
-- `3s` and `7s` remain the hard paper-frontier gaps, needing another `31.4 ms`
-  and `37.4 ms` after the best saved source/body plus rewrite projections.
+- source/body plus HAR-post rewrite plus runtime overlap should close Irvine
+  `10s` and `15s` if listening accepts the saved source candidates;
+- `3s` and `7s` remain the hard paper-frontier gaps, needing another `27.0 ms`
+  and `29.0 ms` after the best saved source/body plus overlap+rewrite
+  projections.
 
 For an external research pass focused only on those hard short-bucket gaps, use
-`README/Guides/apple-silicon/Kokoro-M1-paper-frontier-3s-7s-deep-research-prompt.md`.
+`README/Kokoro-M1-paper-frontier-3s-7s-deep-research-prompt.md`.
+For the narrower source/HAR representation blocker, use
+`README/Kokoro-M1-HAR-STFT-contract-deep-research-prompt.md`.
 
 Do not spend this research pass explaining or optimizing against MLX. The
 current generated evidence says MLX is not faster than corrected warmed Config F
@@ -81,10 +83,10 @@ This creates the main paradox:
 - `outputs/external_bakeoff/lower_end_mac_win_gate.md`
 - `outputs/external_bakeoff/irvine_paper_frontier_path.md`
 - `outputs/external_bakeoff/irvine_3s_placement_target.md`
-- `outputs/external_bakeoff/strict_win_budget_after_rewrite.md`
-- `README/Guides/apple-silicon/Kokoro-M1-paper-frontier-3s-7s-deep-research-prompt.md`
-- `README/Guides/apple-silicon/Kokoro-M1-graph-surface-target.md`
-- `README/Guides/apple-silicon/Kokoro-M1-vocoder-boundary-research-brief.md`
+- `outputs/external_bakeoff/strict_win_budget_after_overlap_rewrite.md`
+- `README/Kokoro-M1-paper-frontier-3s-7s-deep-research-prompt.md`
+- `README/Kokoro-M1-graph-surface-target.md`
+- `README/Kokoro-M1-vocoder-boundary-research-brief.md`
 - `README/Notes/coreml-compute-unit-ablation.md`
 - `README/Notes/performance-notes.md`
 

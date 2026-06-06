@@ -59,6 +59,9 @@ Before profiling, read these guides for context:
 
 - `README/Guides/apple-silicon/CoreML-Compute-Unit-Scheduling-guide.md` — silent
   fallback, graph partitioning, verification
+- `README/Guides/apple-silicon/Core ML-MLX-Scheduling-1D-ConvTranspose-ISTFTNet-vocoders-guide.md` —
+  vocoder fixed-cost diagnosis, `MLComputePlan` workflow, iSTFT tail boundaries
+- `scripts/inspect_coreml_compute_plan.m` — per-op placement summary on macOS 14.4+
 - `README/Notes/debug-notes.md` — institutional memory of past issues
 
 Full index: [coreml/reference.md](../coreml/reference.md).

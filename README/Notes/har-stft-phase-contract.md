@@ -1,0 +1,122 @@
+# HAR/STFT Phase Contract Bisection
+
+Collected: 2026-06-06.
+
+This note records the current strict source-boundary bisection for the Kokoro
+HAR/STFT path. It exists to stop repeated probes that treat phase as a circular
+quantity when the trained generator consumes raw phase values.
+
+## Findings
+
+The standalone Core ML forward-STFT subgraph is not the bug:
+
+- `coreml_vs_torch_magnitude`: SNR `156.10 dB`, max abs `0`.
+- `coreml_vs_torch_phase`: SNR `152.00 dB`, max abs `2.38e-7`.
+- `torch_magnitude_vs_swift_dump`: SNR `128.13 dB`.
+
+The mismatch is raw phase branch convention versus the dumped Swift HAR phase:
+
+- `atan_manual` fp32: raw phase SNR `8.12 dB`, max abs `2*pi`, but wrapped phase
+  max error only `0.08724`.
+- Branch errors are isolated to the Nyquist bin (`bin 10`): `2331` branch
+  mismatches on the 3s dump, with `1898` at `-2*pi` and `433` at `+2*pi`.
+- All branch-error samples have effectively zero imaginary component and
+  negative real component; a simple `real < 0 && abs(imag) < threshold` rule
+  catches them but also catches `4901` false positives.
+- `atan_swift` fp32 is worse, not better: raw phase SNR `-0.89 dB`, max abs
+  `2*pi`, wrapped max error `1.47`.
+
+The generator is sensitive to the raw phase branch. Although the STFT is
+mathematically equivalent modulo `2*pi`, the first noise convolutions do not
+consume phase modulo `2*pi`. Therefore wrapped-phase equivalence is not a
+strict waveform-parity proof for this trained generator.
+
+## Strict Source-Boundary Candidates
+
+| Candidate | Quality | Speed signal | Decision |
+| --- | --- | --- | --- |
+| natural `har_source -> fused generator` | quality fail, about `16-17 dB` SNR | speed-positive vs generator-only | reject for strict paper claim |
+| `har_source + dumped Nyquist + padded HAR` fused generator | replacement quality good versus current generator: SNR `48-50 dB` | after crediting removed Swift STFT, still no net win: `+0.051 ms` 3s, `+1.326 ms` 7s, `+2.231 ms` 10s, `+14.977 ms` 30s | reject as direct replacement |
+| `har_source + dumped Nyquist + padded HAR` source/noise split | quality good: corr `0.999986975`, SNR `46.25 dB` | slower than decoder-pre+generator: `34.4 ms` vs `30.4 ms` 3s, `-13.0%` | reject |
+
+## Net Source-Boundary Timing
+
+`kokoro-hnsf-bench` measures the shipping Swift HnSF source/STFT boundary for
+all five runtime buckets. The strict fused `har_source` candidate removes only
+Swift STFT. Swift source generation still remains required, so it cancels out
+of the net replacement delta.
+
+| Bucket | Swift source still required | Swift STFT removable | Strict fused generator delta | Net after STFT credit |
+| --- | ---: | ---: | ---: | ---: |
+| `3s` | `5.059 ms` | `0.518 ms` | `+0.569 ms` | `+0.051 ms` |
+| `7s` | `11.802 ms` | `1.293 ms` | `+2.619 ms` | `+1.326 ms` |
+| `10s` | `16.759 ms` | `1.738 ms` | `+3.969 ms` | `+2.231 ms` |
+| `15s` | `24.572 ms` | `2.495 ms` | n/a | n/a |
+| `30s` | `51.629 ms` | `5.001 ms` | `+19.979 ms` | `+14.977 ms` |
+
+Generated artifacts:
+
+- `outputs/external_bakeoff/hnsf_source_stft_timing_local.json`
+- `outputs/external_bakeoff/hnsf_source_boundary_net.md`
+- `scripts/external_bakeoff/summarize_hnsf_source_boundary.py`
+
+## Decision
+
+- Do not spend more time on `atan2`, `atan_manual`, or `atan_swift` branch
+  variants as direct strict replacements.
+- Do not promote padded/Nyquist source-boundary packages unless a future change
+  removes a Core ML prediction boundary or materially reduces the generator
+  body cost.
+- The remaining researchable path is phase reparameterization or weight folding:
+  make the generator consume a phase-wrap-invariant representation such as
+  `sin/cos`, or analytically fold Nyquist branch corrections into the first
+  noise-conv surface without retraining.
+
+## Repro Commands
+
+Standalone STFT branch check:
+
+```bash
+uv run --no-sync python scripts/probe_coreml_stft_semantics.py \
+  outputs/generator_isolation/dumps/3s \
+  --label 3s_atan_swift_fp32 \
+  --precision fp32 \
+  --phase-mode atan_swift \
+  --compute-units cpu_only
+```
+
+Strict padded/Nyquist source-noise split:
+
+```bash
+uv run --no-sync python scripts/probe_har_source_noise_split.py \
+  outputs/generator_isolation/dumps/3s \
+  --label 3s_atan_manual_fp32_nyquist_padded \
+  --report-name report_har_source_noise_nyquist_padded.json \
+  --phase-mode atan_manual \
+  --noise-precision fp32 \
+  --body-precision fp16 \
+  --tail-precision fp32 \
+  --nyquist-input \
+  --pad-har-to 28801 \
+  --decoder-pre-package coreml/kokoro_decoder_pre_3s.mlpackage \
+  --fused-package coreml/kokoro_decoder_har_post_3s.mlpackage \
+  --decoder-pre-compute-units cpuAndNeuralEngine \
+  --fused-compute-units cpuAndGPU \
+  --noise-compute-units cpuAndGPU \
+  --body-compute-units cpuAndGPU \
+  --tail-compute-units cpuAndGPU \
+  --warmup 2 \
+  --iterations 7
+```
+
+Net HnSF source-boundary timing:
+
+```bash
+cd swift
+swift run -c release kokoro-hnsf-bench \
+  --warmup 5 \
+  --iterations 30 \
+  --output ../outputs/external_bakeoff/hnsf_source_stft_timing_local.json
+cd ..
+python3 scripts/external_bakeoff/summarize_hnsf_source_boundary.py
+```

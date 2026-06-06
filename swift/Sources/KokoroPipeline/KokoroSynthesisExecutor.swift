@@ -62,6 +62,22 @@ private struct DurationProbe {
     let fullF0Len: Int
 }
 
+private struct TimedHarBuildResult {
+    let harFlat: [Float]
+    let harFrames: Int
+    let harDebug: HarDebugComponents?
+    let startedAt: CFAbsoluteTime
+    let endedAt: CFAbsoluteTime
+
+    var elapsed: Double {
+        endedAt - startedAt
+    }
+}
+
+private final class TimedHarBuildResultBox {
+    var result: TimedHarBuildResult?
+}
+
 /// Run the Core ML Kokoro pipeline once.
 ///
 /// This is the single orchestration path shared by `KokoroPipeline.synthesize`
@@ -241,7 +257,27 @@ public func executeKokoroSynthesis(
     try tensorDump?.writeFloatArray(name: "n_padded", values: nPadded, shape: [1, fullF0Len])
     try tensorDump?.writeMLMultiArray(name: "asr_padded", array: asrPadded)
 
-    // Stage 6: DecoderPre Core ML.
+    let overlapDecoderPreAndHnsf =
+        ProcessInfo.processInfo.environment["KOKORO_DISABLE_DECODER_HNSF_OVERLAP"] != "1"
+    let captureHarDebug = tensorDump != nil
+    let hnsfGroup = overlapDecoderPreAndHnsf ? DispatchGroup() : nil
+    let hnsfBox = TimedHarBuildResultBox()
+    if let hnsfGroup {
+        hnsfGroup.enter()
+        DispatchQueue.global(qos: .userInitiated).async {
+            hnsfBox.result = buildTimedHar(
+                f0Padded: f0Padded,
+                linearWeights: linearWeights,
+                linearBias: linearBias,
+                seed: request.seed,
+                captureDebug: captureHarDebug
+            )
+            hnsfGroup.leave()
+        }
+    }
+
+    // Stage 6: DecoderPre Core ML. When enabled, Stage 7 starts above because
+    // HnSF depends only on padded F0 and can overlap this Core ML prediction.
     let t10 = CFAbsoluteTimeGetCurrent()
     let decPreModel = try modelProvider.decoderPreModel(bucketSec: bucketSec)
     let f0Array3D = try makeZeroArray3D(channels: 1, time: fullF0Len)
@@ -264,34 +300,32 @@ public func executeKokoroSynthesis(
 
     try tensorDump?.writeMLMultiArray(name: "x_pre", array: xPre)
 
-    // Stage 7: hn-nsf Swift DSP.
-    let t12 = CFAbsoluteTimeGetCurrent()
-    let harFlat: [Float]
-    let harFrames: Int
-    let harDebug: HarDebugComponents?
-    if tensorDump != nil {
-        let components = buildHarComponents(
-            f0Padded: f0Padded,
-            linearWeights: linearWeights,
-            linearBias: linearBias,
-            seed: request.seed
-        )
-        harFlat = components.har
-        harFrames = components.nFrames
-        harDebug = components
+    // Stage 7: hn-nsf Swift DSP, overlapped with DecoderPre when possible.
+    let harBuild: TimedHarBuildResult
+    if let hnsfGroup {
+        hnsfGroup.wait()
+        harBuild = hnsfBox.result!
     } else {
-        let built = buildHar(
+        harBuild = buildTimedHar(
             f0Padded: f0Padded,
             linearWeights: linearWeights,
             linearBias: linearBias,
-            seed: request.seed
+            seed: request.seed,
+            captureDebug: captureHarDebug
         )
-        harFlat = built.har
-        harFrames = built.nFrames
-        harDebug = nil
     }
-    let t13 = CFAbsoluteTimeGetCurrent()
-    timings.hnsfSwift = t13 - t12
+    let harFlat = harBuild.harFlat
+    let harFrames = harBuild.harFrames
+    let harDebug = harBuild.harDebug
+    timings.hnsfSwift = harBuild.elapsed
+    timings.decoderPreHnsfOverlap = hnsfGroup == nil
+        ? 0
+        : overlapSeconds(
+            firstStart: t10,
+            firstEnd: t11,
+            secondStart: harBuild.startedAt,
+            secondEnd: harBuild.endedAt
+        )
 
     if let harDebug {
         try tensorDump?.writeFloatArray(
@@ -578,4 +612,56 @@ private func warmModels(
 
 private func decoderPreFrameCount(fullF0Len: Int) -> Int {
     (fullF0Len - 1) / 2 + 1
+}
+
+private func buildTimedHar(
+    f0Padded: [Float],
+    linearWeights: [Float],
+    linearBias: Float,
+    seed: UInt64,
+    captureDebug: Bool
+) -> TimedHarBuildResult {
+    let startedAt = CFAbsoluteTimeGetCurrent()
+    let harFlat: [Float]
+    let harFrames: Int
+    let harDebug: HarDebugComponents?
+
+    if captureDebug {
+        let components = buildHarComponents(
+            f0Padded: f0Padded,
+            linearWeights: linearWeights,
+            linearBias: linearBias,
+            seed: seed
+        )
+        harFlat = components.har
+        harFrames = components.nFrames
+        harDebug = components
+    } else {
+        let built = buildHar(
+            f0Padded: f0Padded,
+            linearWeights: linearWeights,
+            linearBias: linearBias,
+            seed: seed
+        )
+        harFlat = built.har
+        harFrames = built.nFrames
+        harDebug = nil
+    }
+
+    return TimedHarBuildResult(
+        harFlat: harFlat,
+        harFrames: harFrames,
+        harDebug: harDebug,
+        startedAt: startedAt,
+        endedAt: CFAbsoluteTimeGetCurrent()
+    )
+}
+
+private func overlapSeconds(
+    firstStart: CFAbsoluteTime,
+    firstEnd: CFAbsoluteTime,
+    secondStart: CFAbsoluteTime,
+    secondEnd: CFAbsoluteTime
+) -> Double {
+    max(0, min(firstEnd, secondEnd) - max(firstStart, secondStart))
 }

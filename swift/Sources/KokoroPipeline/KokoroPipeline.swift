@@ -82,13 +82,15 @@ public struct StageTimings {
     public var padding: Double = 0
     public var decoderPre: Double = 0
     public var hnsfSwift: Double = 0
+    public var decoderPreHnsfOverlap: Double = 0
     public var generatorCoreML: Double = 0
     public var trim: Double = 0
 
     /// Total pipeline wall time.
     public var total: Double {
         durationCoreML + alignment + matrixOps + f0ntrainCoreML +
-        padding + decoderPre + hnsfSwift + generatorCoreML + trim
+        padding + decoderPre + hnsfSwift - decoderPreHnsfOverlap +
+        generatorCoreML + trim
     }
 
     /// Pre-decoder overhead (everything before GeneratorFromHar predict).

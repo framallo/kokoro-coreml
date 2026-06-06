@@ -29,6 +29,14 @@ from scripts.external_bakeoff.summarize_mlx_speed_explanation import (
     build_report as build_mlx_speed_explanation,
     render_markdown as render_mlx_speed_explanation_markdown,
 )
+from scripts.external_bakeoff.summarize_fixed_cost_latency_fit import (
+    build_report as build_fixed_cost_latency_fit,
+    render_markdown as render_fixed_cost_latency_fit_markdown,
+)
+from scripts.external_bakeoff.summarize_hnsf_source_boundary import (
+    build_report as build_hnsf_source_boundary,
+    render_markdown as render_hnsf_source_boundary_markdown,
+)
 from scripts.external_bakeoff.summarize_candidate_frontier_matrix import (
     build_payload as build_candidate_frontier_matrix,
     render_markdown as render_candidate_frontier_matrix_markdown,
@@ -76,6 +84,14 @@ from scripts.external_bakeoff.summarize_stage_gap_decomposition import (
     summarize_config_record,
     summarize_laishere_record,
     summarize_stage_gaps,
+)
+from scripts.external_bakeoff.summarize_strict_win_budget import (
+    build_budget as build_strict_win_budget,
+    render_markdown as render_strict_win_budget_markdown,
+)
+from scripts.external_bakeoff.summarize_overlap_rewrite_candidate_impact import (
+    build_summary as build_overlap_rewrite_candidate_impact,
+    render_markdown as render_overlap_rewrite_candidate_impact_markdown,
 )
 from scripts.external_bakeoff.summarize_source_contract_frontier import (
     render_markdown as render_source_contract_frontier_markdown,
@@ -768,6 +784,107 @@ def test_mlx_speed_explanation_separates_corrected_frontier_from_raw_rows(tmp_pa
     assert "| m2-air | 7s | 810.0 ms | 680.0 ms | 130.0 ms |" in markdown
 
 
+def test_fixed_cost_latency_fit_compares_config_f_to_mlx_and_laishere(tmp_path):
+    frontier_path = tmp_path / "competitive_frontier.json"
+
+    rows = []
+    durations = {"3s": 3.0, "7s": 7.0, "10s": 10.0, "15s": 15.0}
+
+    def add(impl, label, bucket, ms):
+        rows.append(
+            {
+                "machine_id": "m2-air",
+                "input_key": bucket,
+                "impl": impl,
+                "impl_label": label,
+                "status": "ok",
+                "full_duration": True,
+                "canonical_audio_duration_s": durations[bucket],
+                "warm_median_ms": ms,
+            }
+        )
+
+    for bucket, ms in {"3s": 160.0, "7s": 280.0, "10s": 370.0, "15s": 520.0}.items():
+        add("config-f-reference", "Config F", bucket, ms)
+    for bucket, ms in {"3s": 150.0, "7s": 270.0, "10s": 390.0, "15s": 590.0}.items():
+        add("laishere-kokoro-coreml", "laishere", bucket, ms)
+    for bucket, ms in {"7s": 700.0, "10s": 940.0, "15s": 1340.0}.items():
+        add("mlx-audio", "MLX", bucket, ms)
+
+    frontier_path.write_text(json.dumps({"rows": rows, "summary": {}}))
+
+    report = build_fixed_cost_latency_fit(frontier_path)
+
+    assert report["summary"]["fit_rows"] == 3
+    assert report["summary"]["config_f_beats_mlx_full_duration_buckets"] == 3
+    assert report["summary"]["config_f_loses_laishere_full_duration_buckets"] == 2
+
+    config_fit = next(
+        row
+        for row in report["fits"]
+        if row["machine_id"] == "m2-air" and row["impl"] == "config-f-reference"
+    )
+    assert round(config_fit["fixed_ms"], 1) == 70.0
+    assert round(config_fit["slope_ms_per_audio_s"], 1) == 30.0
+
+    markdown = render_fixed_cost_latency_fit_markdown(report)
+    assert "Delta is `Config F - competitor`; positive means Config F is slower." in markdown
+    assert "| m2-air | MLX |" in markdown
+    assert "7s -420.0 ms" in markdown
+    assert "| m2-air | laishere |" in markdown
+    assert "3s +10.0 ms" in markdown
+
+
+def test_hnsf_source_boundary_credits_only_removed_stft(tmp_path):
+    hnsf_path = tmp_path / "hnsf.json"
+    fused_path = tmp_path / "fused.json"
+    hnsf_path.write_text(
+        json.dumps(
+            {
+                "timing_boundary": "source remains required; stft is removed",
+                "buckets": [
+                    {
+                        "bucket_s": 3,
+                        "source_median_ms": 5.0,
+                        "stft_median_ms": 0.5,
+                        "build_har_median_ms": 5.6,
+                    }
+                ],
+            }
+        )
+    )
+    fused_path.write_text(
+        json.dumps(
+            {
+                "compute_units": "cpuAndGPU",
+                "warm_predict_median_ms": {
+                    "baseline_generator": 28.0,
+                    "candidate_har_source_fused": 28.4,
+                },
+                "metrics": {
+                    "candidate_vs_baseline_trimmed": {
+                        "correlation": 0.99999,
+                        "snr_db": 50.0,
+                    }
+                },
+            }
+        )
+    )
+
+    report = build_hnsf_source_boundary(hnsf_path, {"3s": fused_path})
+
+    row = report["rows"][0]
+    assert round(row["candidate_minus_generator_ms"], 3) == 0.4
+    assert row["removable_swift_stft_ms"] == 0.5
+    assert round(row["net_delta_after_stft_credit_ms"], 3) == -0.1
+    assert row["source_still_required_ms"] == 5.0
+    assert report["summary"]["net_winning_buckets_after_stft_credit"] == 1
+
+    markdown = render_hnsf_source_boundary_markdown(report)
+    assert "Swift source generation still remains required" in markdown
+    assert "vs current generator corr" in markdown
+
+
 def test_frontier_freshness_flags_stage_profile_ties():
     frontier = {
         "summary": {
@@ -1035,6 +1152,143 @@ def test_stage_gap_decomposition_uses_warmed_stage_medians(tmp_path):
     )
     assert laishere["noise_vocoder_tail_s"] == 0.063
     assert laishere["other_plus_prepare_s"] == 0.028
+
+
+def test_stage_gap_decomposition_subtracts_decoder_hnsf_overlap():
+    config = summarize_config_record(
+        {
+            "input_key": "3s",
+            "warm_wall_times_s": [0.100],
+            "provenance": {
+                "raw_warm_results": [
+                    {
+                        "wall_time_s": 0.100,
+                        "t_duration_coreml_s": 0.010,
+                        "t_f0ntrain_coreml_s": 0.020,
+                        "t_decoder_pre_coreml_s": 0.006,
+                        "t_decoder_pre_hnsf_overlap_s": 0.005,
+                        "t_coreml_predict_s": 0.050,
+                        "t_hnsf_swift_s": 0.015,
+                        "t_matrix_ops_s": 0.001,
+                        "t_padding_s": 0.001,
+                        "t_trim_s": 0.001,
+                        "t_alignment_s": 0.0,
+                    }
+                ]
+            },
+        }
+    )
+
+    assert config["decoder_pre_hnsf_overlap_s"] == 0.005
+    assert round(config["known_sum_s"], 3) == 0.099
+    assert round(config["host_other_s"], 3) == 0.001
+
+
+def test_overlap_rewrite_candidate_projects_independent_savings(tmp_path):
+    def write_result(path, warm_s, generator_s, overlap_s, sha):
+        payload = {
+            "records": [
+                {
+                    "status": "ok",
+                    "input_key": "3s",
+                    "warm_wall_times_s": [warm_s],
+                    "output_sha256": sha,
+                    "provenance": {
+                        "raw_warm_results": [
+                            {
+                                "wall_time_s": warm_s,
+                                "t_coreml_predict_s": generator_s,
+                                "t_decoder_pre_coreml_s": 0.008,
+                                "t_hnsf_swift_s": 0.012,
+                                "t_decoder_pre_hnsf_overlap_s": overlap_s,
+                            }
+                        ]
+                    },
+                }
+            ]
+        }
+        path.write_text(json.dumps(payload))
+
+    serial = tmp_path / "serial.json"
+    overlap = tmp_path / "overlap.json"
+    combined = tmp_path / "combined.json"
+    write_result(serial, 0.100, 0.050, 0.000, "same")
+    write_result(overlap, 0.092, 0.050, 0.008, "same")
+    write_result(combined, 0.087, 0.045, 0.008, "changed")
+
+    package_report = tmp_path / "package.json"
+    package_report.write_text(json.dumps({"rows": [{"bucket": "3s", "speedup_vs_baseline_pct": 10.0}]}))
+    stage_gaps = tmp_path / "stage_gaps.json"
+    stage_gaps.write_text(
+        json.dumps(
+            {
+                "rows": [
+                    {
+                        "machine_id": "irvine-m1",
+                        "input_key": "3s",
+                        "config": {
+                            "total_s": 0.200,
+                            "generator_s": 0.100,
+                            "decoder_pre_s": 0.008,
+                            "hnsf_s": 0.012,
+                            "decoder_pre_hnsf_overlap_s": 0.0,
+                        },
+                        "laishere": {"total_s": 0.183},
+                        "frontier_best_ms": 170.0,
+                    }
+                ]
+            }
+        )
+    )
+
+    summary = build_overlap_rewrite_candidate_impact(
+        argparse.Namespace(
+            serial_results=serial,
+            overlap_results=overlap,
+            combined_results=combined,
+            package_report=package_report,
+            stage_gaps=stage_gaps,
+        )
+    )
+
+    assert summary["local_overlap_rows"][0]["hash_identical"] is True
+    assert summary["local_combined_rows"][0]["hash_identical"] is False
+    row = summary["projection_rows"][0]
+    assert row["projected_overlap_save_ms"] == 8.0
+    assert row["projected_rewrite_save_ms"] == 10.0
+    assert row["projected_total_ms"] == 182.0
+    assert row["closes_profile_gap"] is True
+    assert row["closes_frontier_gap"] is False
+    assert "non-publishable" in render_overlap_rewrite_candidate_impact_markdown(summary)
+
+
+def test_strict_win_budget_accepts_overlap_rewrite_projection_schema():
+    payload = build_strict_win_budget(
+        {
+            "projection_rows": [
+                {
+                    "machine_id": "irvine-m1",
+                    "bucket": "15s",
+                    "projected_total_ms": 976.4,
+                    "laishere_ms": 990.6,
+                    "gap_vs_laishere_ms": -14.2,
+                    "frontier_best_ms": 912.0,
+                    "gap_vs_frontier_ms": 64.4,
+                    "generator_ms": 820.8,
+                    "projected_rewrite_save_ms": 21.4,
+                }
+            ]
+        },
+        candidate_label="overlap + rewrite",
+    )
+
+    row = payload["rows"][0]
+    assert row["additional_profile_save_required_ms"] == 0.0
+    assert row["additional_paper_save_required_ms"] == 64.4
+    assert round(row["additional_paper_generator_speedup_required_pct"], 2) == 8.06
+    assert payload["summary"]["profile_rows_remaining"] == 0
+    assert payload["summary"]["paper_rows_remaining"] == 1
+    assert "Overlap + Rewrite" in render_strict_win_budget_markdown(payload)
 
 
 def test_stage_gap_decomposition_renders_loss_rows(tmp_path):
@@ -2054,13 +2308,14 @@ def test_candidate_frontier_matrix_records_successes_failures_and_blockers(tmp_p
     families = {row["family"] for row in payload["candidates"]}
 
     assert payload["summary"] == {
-        "candidate_count": 14,
-        "production_ready_strict_candidates": 1,
+        "candidate_count": 16,
+        "production_ready_strict_candidates": 2,
         "strict_rejected_or_too_small": 10,
-        "non_strict_candidates": 3,
+        "non_strict_candidates": 4,
         "profile_rows_remaining_after_rewrite": 4,
         "iphone_launch_blocker": "device_locked",
     }
+    assert "DecoderPre/HnSF runtime overlap" in families
     assert "HAR-post upsample ConvT rewrite" in families
     assert "RangeDim/flexible input generator" in families
     assert "Linear weight quantization" in families
@@ -2068,7 +2323,8 @@ def test_candidate_frontier_matrix_records_successes_failures_and_blockers(tmp_p
     assert "Style-specialized generator plus upsample rewrite" in families
     assert "LUT-palettized full surface plus upsample rewrite" in families
     assert "Fast F0/source simplification" in families
-    assert "Candidates recorded: `14`" in markdown
+    assert "Per-stage prefix compute-unit overrides" in families
+    assert "Candidates recorded: `16`" in markdown
     assert "Run scripts/external_bakeoff/check_remote_host_quiet.py" in markdown
 
 

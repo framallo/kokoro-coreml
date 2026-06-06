@@ -6,9 +6,9 @@ This note turns the laishere-vs-first-party Core ML graph comparison into an
 implementation target. It is not a general Core ML guide. It is the current
 strict-parity frontier for making Config F faster than laishere on Irvine M1.
 For external research on the unresolved kernel/partition behavior, use
-`README/Guides/apple-silicon/Kokoro-M1-kernel-partition-deep-research-prompt.md`.
+`README/Kokoro-M1-kernel-partition-deep-research-prompt.md`.
 For the narrower paper-frontier short-bucket target, use
-`README/Guides/apple-silicon/Kokoro-M1-paper-frontier-3s-7s-deep-research-prompt.md`.
+`README/Kokoro-M1-paper-frontier-3s-7s-deep-research-prompt.md`.
 
 ## Current Short-Bucket Paper Target
 
@@ -17,15 +17,15 @@ The latest source/body plus HAR-post rewrite combined frontier is tracked in:
 - `outputs/external_bakeoff/lower_end_mac_win_gate.md`
 - `outputs/external_bakeoff/irvine_paper_frontier_path.md`
 
-That report shows source/body plus the HAR-post rewrite can close Irvine `10s`
-if listening accepts the source candidate, leaves Irvine `15s` `2.7 ms` short,
-and leaves Irvine `3s/7s` `31.4 ms` and `37.4 ms` short of the paper-facing
-laishere rows. Do not treat newer profile-only wins as paper-frontier wins.
+After adding the HAR-post rewrite and `decoder_pre`/HnSF overlap projections,
+source/body still leaves Irvine `3s/7s` `27.0 ms` and `29.0 ms` short of the
+paper-facing laishere rows. Do not treat newer profile-only wins as
+paper-frontier wins.
 
 | Bucket | Combined projected Config F | Paper frontier | Extra save needed |
 | --- | ---: | ---: | ---: |
-| `3s` | `207.7 ms` | `176.3 ms` | `31.4 ms` |
-| `7s` | `432.0 ms` | `394.6 ms` | `37.4 ms` |
+| `3s` | `203.3 ms` | `176.3 ms` | `27.0 ms` |
+| `7s` | `423.6 ms` | `394.6 ms` | `29.0 ms` |
 
 The useful next implementation target is therefore not a small surface cleanup.
 It must change package boundary, tensor layout, runtime synchronization, or
@@ -414,13 +414,14 @@ improves warmed M2 Studio medians by `1.97%` `3s`, `1.79%` `7s`, `1.62%`
 `10s`, `1.22%` `15s`, and `2.58%` `30s` versus the current best local
 `vector_noise_batch` result. Treat that as local implementation proof, not a
 paper frontier update, until Irvine M1 repeats it under quiet warmed conditions.
-The projection artifact at `outputs/external_bakeoff/rewrite_candidate_impact.md`
-shows why this cannot be the final answer alone: applying the measured
-package-level generator speedup to current Irvine stage medians saves only
-`7.2 ms`, `12.1 ms`, `17.4 ms`, and `21.4 ms` on `3s/7s/10s/15s`, leaving
-projected gaps of `31.4 ms`, `36.4 ms`, `23.2 ms`, and `3.0 ms` against
-warmed laishere. The rewrite is a keeper, but it must combine with another
-strict source/body gain to prove absolute fastest on Irvine M1.
+The projection artifacts at
+`outputs/external_bakeoff/rewrite_candidate_impact.md` and
+`outputs/external_bakeoff/overlap_rewrite_candidate_impact.md` show why this
+cannot be the final answer alone: overlap + rewrite likely closes M2 Air and
+Irvine `15s` profile rows, but still leaves Irvine `3s/7s/10s` profile gaps of
+`27.0 ms`, `28.0 ms`, and `12.8 ms`. The rewrite is a keeper, but it must
+combine with another strict source/body gain to prove absolute fastest on
+Irvine M1.
 
 The larger cos/native-IN/broadcast/fp16/ups-as-conv probe packages were also
 tested as a Swift overlay and are contract-compatible, but they do not beat the

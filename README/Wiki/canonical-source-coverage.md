@@ -17,6 +17,7 @@ This is a deterministic coverage index, not a current-belief page. It lists read
 - [README/EXPORT_FIX_PLAN.md](../EXPORT_FIX_PLAN.md)
 - [README/Guides/In-Repo-memory-guide.md](../Guides/In-Repo-memory-guide.md)
 - [README/Guides/apple-silicon/CoreML-Compute-Unit-Scheduling-guide.md](../Guides/apple-silicon/CoreML-Compute-Unit-Scheduling-guide.md)
+- [README/Guides/apple-silicon/Core ML-MLX-Scheduling-1D-ConvTranspose-ISTFTNet-vocoders-guide.md](../Guides/apple-silicon/Core%20ML-MLX-Scheduling-1D-ConvTranspose-ISTFTNet-vocoders-guide.md)
 - [README/Guides/apple-silicon/CoreML-LSTM-Enumerated-Shapes.md](../Guides/apple-silicon/CoreML-LSTM-Enumerated-Shapes.md)
 - [README/Guides/apple-silicon/CoreML-LSTM-export-guide.md](../Guides/apple-silicon/CoreML-LSTM-export-guide.md)
 - [README/Guides/apple-silicon/HF-transformers-MPS-guide.md](../Guides/apple-silicon/HF-transformers-MPS-guide.md)

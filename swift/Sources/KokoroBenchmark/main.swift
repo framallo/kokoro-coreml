@@ -55,6 +55,81 @@ func median(_ values: [Double]) -> Double {
     return sorted[middle]
 }
 
+/// Per-stage Core ML compute-unit policy for the benchmark model cache.
+struct StageComputeUnitPolicy {
+    var duration: MLComputeUnits
+    var f0n: MLComputeUnits
+    var decoderPre: MLComputeUnits
+    var generator: MLComputeUnits
+
+    var label: String {
+        "duration=\(computeUnitLabel(duration)),f0n=\(computeUnitLabel(f0n))," +
+        "decoderPre=\(computeUnitLabel(decoderPre)),generator=\(computeUnitLabel(generator))"
+    }
+
+    static func single(_ units: MLComputeUnits) -> StageComputeUnitPolicy {
+        StageComputeUnitPolicy(duration: units, f0n: units, decoderPre: units, generator: units)
+    }
+
+    static let staged = StageComputeUnitPolicy(
+        duration: .cpuAndGPU,
+        f0n: .cpuAndGPU,
+        decoderPre: .cpuAndNeuralEngine,
+        generator: .cpuAndGPU
+    )
+}
+
+/// Parses a human-entered compute-unit label accepted by benchmark scripts.
+func parseComputeUnit(_ raw: String) -> MLComputeUnits? {
+    switch raw.lowercased().replacingOccurrences(of: "_", with: "").replacingOccurrences(of: "-", with: "") {
+    case "all":
+        return .all
+    case "cpuandneuralengine", "cpuandne", "cpune":
+        return .cpuAndNeuralEngine
+    case "cpuandgpu", "cpugpu":
+        return .cpuAndGPU
+    case "cpuonly", "cpu":
+        return .cpuOnly
+    default:
+        return nil
+    }
+}
+
+/// Builds the benchmark stage policy from the base policy plus optional overrides.
+func makeStagePolicy(
+    base rawBase: String,
+    durationOverride: String?,
+    f0nOverride: String?,
+    decoderPreOverride: String?,
+    generatorOverride: String?
+) -> StageComputeUnitPolicy? {
+    var policy: StageComputeUnitPolicy
+    switch rawBase.lowercased() {
+    case "staged", "production":
+        policy = .staged
+    default:
+        guard let units = parseComputeUnit(rawBase) else { return nil }
+        policy = .single(units)
+    }
+    if let durationOverride {
+        guard let units = parseComputeUnit(durationOverride) else { return nil }
+        policy.duration = units
+    }
+    if let f0nOverride {
+        guard let units = parseComputeUnit(f0nOverride) else { return nil }
+        policy.f0n = units
+    }
+    if let decoderPreOverride {
+        guard let units = parseComputeUnit(decoderPreOverride) else { return nil }
+        policy.decoderPre = units
+    }
+    if let generatorOverride {
+        guard let units = parseComputeUnit(generatorOverride) else { return nil }
+        policy.generator = units
+    }
+    return policy
+}
+
 // MARK: - JSON Input
 
 struct BenchInput: Decodable {
@@ -98,6 +173,7 @@ class ModelCache: KokoroModelProvider {
     let f0nConfig: MLModelConfiguration
     let decoderPreConfig: MLModelConfiguration
     let generatorConfig: MLModelConfiguration
+    let computeUnitPolicyLabel: String
     private let durationChoices: [DurationModelChoice]
 
     // Layer 1: Compiled URLs (persist forever — compilation is expensive)
@@ -112,25 +188,21 @@ class ModelCache: KokoroModelProvider {
     var decPreModels: [Int: MLModel] = [:]
     var genModels: [Int: MLModel] = [:]
 
-    init(modelsDir: URL, computeUnits: MLComputeUnits = .all, stagedComputeUnits: Bool = false) {
+    init(
+        modelsDir: URL,
+        computeUnits: MLComputeUnits = .all,
+        stagedComputeUnits: Bool = false,
+        stagePolicy: StageComputeUnitPolicy? = nil
+    ) {
         self.modelsDir = modelsDir
-        if stagedComputeUnits {
-            self.durationConfig = Self.makeConfig(.cpuAndGPU)
-            self.f0nConfig = Self.makeConfig(.cpuAndGPU)
-            self.decoderPreConfig = Self.makeConfig(.cpuAndNeuralEngine)
-            self.generatorConfig = Self.makeConfig(.cpuAndGPU)
-        } else {
-            self.durationConfig = Self.makeConfig(computeUnits)
-            self.f0nConfig = Self.makeConfig(computeUnits)
-            self.decoderPreConfig = Self.makeConfig(computeUnits)
-            self.generatorConfig = Self.makeConfig(computeUnits)
-        }
+        let resolvedPolicy = stagePolicy ?? (stagedComputeUnits ? .staged : .single(computeUnits))
+        self.durationConfig = Self.makeConfig(resolvedPolicy.duration)
+        self.f0nConfig = Self.makeConfig(resolvedPolicy.f0n)
+        self.decoderPreConfig = Self.makeConfig(resolvedPolicy.decoderPre)
+        self.generatorConfig = Self.makeConfig(resolvedPolicy.generator)
+        self.computeUnitPolicyLabel = resolvedPolicy.label
         self.durationChoices = KokoroPipeline.discoverDurationChoices(modelsDirectory: modelsDir)
-        if stagedComputeUnits {
-            fputs("  Compute units: staged (duration/f0n/generator=cpuAndGPU, decoderPre=cpuAndNeuralEngine)\n", stderr)
-        } else {
-            fputs("  Compute units: \(computeUnitLabel(computeUnits))\n", stderr)
-        }
+        fputs("  Compute units: \(resolvedPolicy.label)\n", stderr)
         fputs("  Duration choices: \(durationChoices.map { $0.cacheKey }.joined(separator: ", "))\n", stderr)
     }
 
@@ -361,6 +433,7 @@ func runPipeline(
         "input_key": inputKey,
         "status": "ok",
         "error": NSNull(),
+        "compute_unit_policy": cache.computeUnitPolicyLabel,
         "wall_time_s": round(result.wallTimeSeconds * 1e6) / 1e6,
         "canonical_audio_duration_s": round(canonicalDur * 1e6) / 1e6,
         "observed_audio_duration_s": round(observedDur * 1e6) / 1e6,
@@ -377,6 +450,7 @@ func runPipeline(
         "t_padding_s": round(timings.padding * 1e6) / 1e6,
         "t_decoder_pre_coreml_s": round(timings.decoderPre * 1e6) / 1e6,
         "t_hnsf_swift_s": round(timings.hnsfSwift * 1e6) / 1e6,
+        "t_decoder_pre_hnsf_overlap_s": round(timings.decoderPreHnsfOverlap * 1e6) / 1e6,
         "t_coreml_predict_s": round(timings.generatorCoreML * 1e6) / 1e6,
         "t_trim_s": round(timings.trim * 1e6) / 1e6,
         "t_prefix_extract_s": NSNull(),
@@ -431,7 +505,8 @@ func runSingleShot(modelsDir: String, inputsDir: String, hnsfWeightsPath: String
                     tensorDumpPath: String?,
                     warmupCount: Int,
                     computeUnits: MLComputeUnits = .all,
-                    stagedComputeUnits: Bool = false) throws {
+                    stagedComputeUnits: Bool = false,
+                    stagePolicy: StageComputeUnitPolicy? = nil) throws {
     let weightsData = try Data(contentsOf: URL(fileURLWithPath: hnsfWeightsPath))
     let weights = try JSONDecoder().decode(HnsfWeights.self, from: weightsData)
 
@@ -442,7 +517,8 @@ func runSingleShot(modelsDir: String, inputsDir: String, hnsfWeightsPath: String
     let cache = ModelCache(
         modelsDir: URL(fileURLWithPath: modelsDir),
         computeUnits: computeUnits,
-        stagedComputeUnits: stagedComputeUnits
+        stagedComputeUnits: stagedComputeUnits,
+        stagePolicy: stagePolicy
     )
 
     fputs("Loading models...\n", stderr)
@@ -469,7 +545,8 @@ func runGeneratorInputDump(modelsDir: String, tensorInputDumpPath: String,
                            outputPath: String?, tensorDumpPath: String?,
                            warmupCount: Int, iterations: Int,
                            computeUnits: MLComputeUnits = .all,
-                           stagedComputeUnits: Bool = false) throws {
+                           stagedComputeUnits: Bool = false,
+                           stagePolicy: StageComputeUnitPolicy? = nil) throws {
     let measuredIterations = max(1, iterations)
     let discardedWarmups = max(0, warmupCount)
     let reader = try TensorDumpReader(directory: URL(fileURLWithPath: tensorInputDumpPath))
@@ -478,7 +555,8 @@ func runGeneratorInputDump(modelsDir: String, tensorInputDumpPath: String,
     let cache = ModelCache(
         modelsDir: URL(fileURLWithPath: modelsDir),
         computeUnits: computeUnits,
-        stagedComputeUnits: stagedComputeUnits
+        stagedComputeUnits: stagedComputeUnits,
+        stagePolicy: stagePolicy
     )
     let genModel = try cache.generatorModel(bucket: bucketSec)
 
@@ -543,6 +621,7 @@ func runGeneratorInputDump(modelsDir: String, tensorInputDumpPath: String,
         "mode": "generator-input-dump",
         "status": "ok",
         "bucket_used": "\(bucketSec)s",
+        "compute_unit_policy": cache.computeUnitPolicyLabel,
         "source_tensor_dump": tensorInputDumpPath,
         "observed_audio_duration_s": round((Double(outputTrimLen) / 24000.0) * 1e6) / 1e6,
         "warmup_count": discardedWarmups,
@@ -566,13 +645,15 @@ func runGeneratorInputDump(modelsDir: String, tensorInputDumpPath: String,
 
 func runBatch(modelsDir: String, inputsDir: String, hnsfWeightsPath: String,
               computeUnits: MLComputeUnits = .all,
-              stagedComputeUnits: Bool = false) throws {
+              stagedComputeUnits: Bool = false,
+              stagePolicy: StageComputeUnitPolicy? = nil) throws {
     let weightsData = try Data(contentsOf: URL(fileURLWithPath: hnsfWeightsPath))
     let weights = try JSONDecoder().decode(HnsfWeights.self, from: weightsData)
     let cache = ModelCache(
         modelsDir: URL(fileURLWithPath: modelsDir),
         computeUnits: computeUnits,
-        stagedComputeUnits: stagedComputeUnits
+        stagedComputeUnits: stagedComputeUnits,
+        stagePolicy: stagePolicy
     )
     let inputsDirURL = URL(fileURLWithPath: inputsDir)
 
@@ -659,6 +740,10 @@ func main() throws {
     var seed: UInt64 = 42
     var batchMode = false
     var computeUnitsStr = "all"
+    var durationComputeUnitsStr: String?
+    var f0nComputeUnitsStr: String?
+    var decoderPreComputeUnitsStr: String?
+    var generatorComputeUnitsStr: String?
 
     var i = 1
     while i < args.count {
@@ -689,6 +774,14 @@ func main() throws {
             batchMode = true
         case "--compute-units":
             i += 1; computeUnitsStr = args[i]
+        case "--duration-compute-units":
+            i += 1; durationComputeUnitsStr = args[i]
+        case "--f0n-compute-units":
+            i += 1; f0nComputeUnitsStr = args[i]
+        case "--decoder-pre-compute-units":
+            i += 1; decoderPreComputeUnitsStr = args[i]
+        case "--generator-compute-units":
+            i += 1; generatorComputeUnitsStr = args[i]
         default:
             break
         }
@@ -710,27 +803,31 @@ func main() throws {
     case "staged", "production":
         computeUnits = .all
         stagedComputeUnits = true
-    case "all":
-        computeUnits = .all
-        stagedComputeUnits = false
-    case "cpuandneuralengine":
-        computeUnits = .cpuAndNeuralEngine
-        stagedComputeUnits = false
-    case "cpuandgpu":
-        computeUnits = .cpuAndGPU
-        stagedComputeUnits = false
-    case "cpuonly":
-        computeUnits = .cpuOnly
-        stagedComputeUnits = false
     default:
-        fputs("Unknown compute units: \(computeUnitsStr). Use: staged, all, cpuAndNeuralEngine, cpuAndGPU, cpuOnly\n", stderr)
+        if let parsed = parseComputeUnit(computeUnitsStr) {
+            computeUnits = parsed
+            stagedComputeUnits = false
+        } else {
+            fputs("Unknown compute units: \(computeUnitsStr). Use: staged, all, cpuAndNeuralEngine, cpuAndGPU, cpuOnly\n", stderr)
+            exit(1)
+        }
+    }
+    guard let stagePolicy = makeStagePolicy(
+        base: computeUnitsStr,
+        durationOverride: durationComputeUnitsStr,
+        f0nOverride: f0nComputeUnitsStr,
+        decoderPreOverride: decoderPreComputeUnitsStr,
+        generatorOverride: generatorComputeUnitsStr
+    ) else {
+        fputs("Unknown stage compute unit override. Use: all, cpuAndNeuralEngine, cpuAndGPU, cpuOnly\n", stderr)
         exit(1)
     }
 
     if batchMode {
         try runBatch(modelsDir: modelsDir, inputsDir: inputsDir, hnsfWeightsPath: hnsfWeightsPath,
                      computeUnits: computeUnits,
-                     stagedComputeUnits: stagedComputeUnits)
+                     stagedComputeUnits: stagedComputeUnits,
+                     stagePolicy: stagePolicy)
     } else if let generatorInputDumpPath {
         try runGeneratorInputDump(
             modelsDir: modelsDir,
@@ -740,7 +837,8 @@ func main() throws {
             warmupCount: warmupCount,
             iterations: iterations,
             computeUnits: computeUnits,
-            stagedComputeUnits: stagedComputeUnits
+            stagedComputeUnits: stagedComputeUnits,
+            stagePolicy: stagePolicy
         )
     } else {
         guard let inputKey = inputKey else {
@@ -752,7 +850,8 @@ func main() throws {
                           tensorDumpPath: tensorDumpPath,
                           warmupCount: warmupCount,
                           computeUnits: computeUnits,
-                          stagedComputeUnits: stagedComputeUnits)
+                          stagedComputeUnits: stagedComputeUnits,
+                          stagePolicy: stagePolicy)
     }
 }
 

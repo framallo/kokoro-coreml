@@ -98,6 +98,7 @@ struct StageTimingRecord: Codable, Sendable {
     let padding: Double
     let decoderPre: Double
     let hnsfSwift: Double
+    let decoderPreHnsfOverlap: Double
     let generatorCoreML: Double
     let trim: Double
     let total: Double
@@ -110,6 +111,7 @@ struct StageTimingRecord: Codable, Sendable {
         case padding
         case decoderPre = "decoder_pre"
         case hnsfSwift = "hnsf_swift"
+        case decoderPreHnsfOverlap = "decoder_pre_hnsf_overlap"
         case generatorCoreML = "generator_coreml"
         case trim
         case total
@@ -124,6 +126,7 @@ struct StageMedianRecord: Codable, Sendable {
     let padding: Double
     let decoderPre: Double
     let hnsfSwift: Double
+    let decoderPreHnsfOverlap: Double
     let generatorCoreML: Double
     let trim: Double
     let total: Double
@@ -136,6 +139,7 @@ struct StageMedianRecord: Codable, Sendable {
         case padding
         case decoderPre = "decoder_pre"
         case hnsfSwift = "hnsf_swift"
+        case decoderPreHnsfOverlap = "decoder_pre_hnsf_overlap"
         case generatorCoreML = "generator_coreml"
         case trim
         case total
@@ -470,6 +474,7 @@ func stageRecord(_ timings: StageTimings) -> StageTimingRecord {
         padding: rounded(timings.padding),
         decoderPre: rounded(timings.decoderPre),
         hnsfSwift: rounded(timings.hnsfSwift),
+        decoderPreHnsfOverlap: rounded(timings.decoderPreHnsfOverlap),
         generatorCoreML: rounded(timings.generatorCoreML),
         trim: rounded(timings.trim),
         total: rounded(timings.total)
@@ -485,6 +490,7 @@ func stageMedians(_ timings: [StageTimings]) -> StageMedianRecord {
         padding: rounded(median(timings.map(\.padding))),
         decoderPre: rounded(median(timings.map(\.decoderPre))),
         hnsfSwift: rounded(median(timings.map(\.hnsfSwift))),
+        decoderPreHnsfOverlap: rounded(median(timings.map(\.decoderPreHnsfOverlap))),
         generatorCoreML: rounded(median(timings.map(\.generatorCoreML))),
         trim: rounded(median(timings.map(\.trim))),
         total: rounded(median(timings.map(\.total)))

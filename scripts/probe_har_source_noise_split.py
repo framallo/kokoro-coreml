@@ -48,7 +48,13 @@ def _toolchain_report() -> dict[str, str | None]:
     }
 
 
-def _make_har_source_noise_module(generator: Any, phase_mode: str, *, nyquist_input: bool):
+def _make_har_source_noise_module(
+    generator: Any,
+    phase_mode: str,
+    *,
+    nyquist_input: bool,
+    pad_har_to: int | None,
+):
     import torch
     import torch.nn as nn
     import torch.nn.functional as F
@@ -149,6 +155,12 @@ def _make_har_source_noise_module(generator: Any, phase_mode: str, *, nyquist_in
                     raise RuntimeError("nyquist_phase input is required")
                 har_phase = torch.cat([har_phase[:, :-1, :], nyquist_phase], dim=1)
             har = torch.cat([har_spec, har_phase], dim=1)
+            if pad_har_to is not None:
+                current = har.size(2)
+                if current < pad_har_to:
+                    har = F.pad(har, (0, pad_har_to - current))
+                elif current > pad_har_to:
+                    har = har[:, :, :pad_har_to]
             outputs = []
             for conv, res in zip(self.noise_convs, self.noise_res):
                 x_source = conv(har)
@@ -202,7 +214,12 @@ def _export_packages(
     har_source = torch.zeros(har_source_shape, dtype=torch.float32)
     nyquist_phase = torch.zeros(nyquist_shape, dtype=torch.float32)
     style = torch.zeros(style_shape, dtype=torch.float32)
-    noise = _make_har_source_noise_module(gen, args.phase_mode, nyquist_input=args.nyquist_input)
+    noise = _make_har_source_noise_module(
+        gen,
+        args.phase_mode,
+        nyquist_input=args.nyquist_input,
+        pad_har_to=args.pad_har_to,
+    )
     noise_removed_dropouts = remove_dropout(noise)
     trace_inputs = (har_source, style, nyquist_phase) if args.nyquist_input else (har_source, style)
     with torch.no_grad():
@@ -296,6 +313,7 @@ def _export_packages(
         "noise_precision": args.noise_precision,
         "phase_mode": args.phase_mode,
         "nyquist_input": bool(args.nyquist_input),
+        "pad_har_to": args.pad_har_to,
         "body_precision": args.body_precision,
         "tail_precision": args.tail_precision,
         "har_source_shape": list(har_source_shape),
@@ -538,6 +556,12 @@ def main() -> None:
     parser.add_argument("--tail-precision", default="fp32", choices=["fp16", "fp32"])
     parser.add_argument("--phase-mode", default="atan2", choices=["atan2", "acos", "atan_manual", "atan_swift"])
     parser.add_argument("--nyquist-input", action="store_true")
+    parser.add_argument(
+        "--pad-har-to",
+        type=int,
+        default=None,
+        help="Pad or trim recomputed HAR along time before noise convolutions; use shipping har_expected_time for strict padded-geometry probes.",
+    )
     parser.add_argument("--anchor-mode", default="mean", choices=["mean", "sum", "first"])
     parser.add_argument("--decoder-pre-compute-units", default="all")
     parser.add_argument("--fused-compute-units", default="all")

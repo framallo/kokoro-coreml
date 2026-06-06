@@ -30,22 +30,65 @@ def _load_json(path: Path) -> dict[str, Any]:
     return payload
 
 
-def build_budget(rewrite_impact: dict[str, Any]) -> dict[str, Any]:
-    """Build the remaining strict-win budget from rewrite-impact rows."""
+def _first_float(row: dict[str, Any], *keys: str) -> float:
+    """Return the first present field from ``row`` as a float."""
+
+    for key in keys:
+        if key in row:
+            return float(row[key])
+    raise KeyError(f"missing any of: {', '.join(keys)}")
+
+
+def _gap(row: dict[str, Any], total_key: str, target_key: str, *gap_keys: str) -> float:
+    """Return a precomputed gap or derive it from total and target fields."""
+
+    for key in gap_keys:
+        if key in row:
+            return float(row[key])
+    return float(row[total_key]) - float(row[target_key])
+
+
+def build_budget(rewrite_impact: dict[str, Any], candidate_label: str = "rewrite") -> dict[str, Any]:
+    """Build the remaining strict-win budget from candidate-impact rows.
+
+    Supports both the original rewrite-only projection schema and the newer
+    overlap+rewrite schema. In both cases the "extra generator speedup" column is
+    anchored to the post-rewrite generator stage because that is the remaining
+    large strict surface.
+    """
 
     rows: list[dict[str, Any]] = []
     for row in rewrite_impact.get("projection_rows") or []:
         if row.get("machine_id") != "irvine-m1":
             continue
-        generator_after_ms = float(row["config_generator_ms"]) - float(row["projected_save_ms"])
-        profile_required_ms = max(0.0, float(row["projected_gap_ms"]))
-        frontier_required_ms = max(0.0, float(row["projected_frontier_gap_ms"]))
+        generator_ms = _first_float(row, "config_generator_ms", "generator_ms")
+        rewrite_save_ms = _first_float(row, "projected_save_ms", "projected_rewrite_save_ms")
+        generator_after_ms = generator_ms - rewrite_save_ms
+        projected_total_ms = float(row["projected_total_ms"])
+        laishere_ms = _first_float(row, "laishere_total_ms", "laishere_ms")
+        frontier_best_ms = float(row["frontier_best_ms"])
+        profile_gap_ms = _gap(
+            row,
+            "projected_total_ms",
+            "laishere_ms" if "laishere_ms" in row else "laishere_total_ms",
+            "projected_gap_ms",
+            "gap_vs_laishere_ms",
+        )
+        frontier_gap_ms = _gap(
+            row,
+            "projected_total_ms",
+            "frontier_best_ms",
+            "projected_frontier_gap_ms",
+            "gap_vs_frontier_ms",
+        )
+        profile_required_ms = max(0.0, profile_gap_ms)
+        frontier_required_ms = max(0.0, frontier_gap_ms)
         rows.append(
             {
                 "bucket": str(row["bucket"]),
-                "projected_total_after_rewrite_ms": float(row["projected_total_ms"]),
-                "laishere_profile_ms": float(row["laishere_total_ms"]),
-                "paper_frontier_best_ms": float(row["frontier_best_ms"]),
+                "projected_total_after_rewrite_ms": projected_total_ms,
+                "laishere_profile_ms": laishere_ms,
+                "paper_frontier_best_ms": frontier_best_ms,
                 "generator_after_rewrite_ms": generator_after_ms,
                 "additional_profile_save_required_ms": profile_required_ms,
                 "additional_profile_generator_speedup_required_pct": (
@@ -60,6 +103,7 @@ def build_budget(rewrite_impact: dict[str, Any]) -> dict[str, Any]:
     rows.sort(key=lambda item: int(item["bucket"].rstrip("s")))
     return {
         "rewrite_impact": str(DEFAULT_REWRITE_IMPACT),
+        "candidate_label": candidate_label,
         "rows": rows,
         "summary": {
             "irvine_buckets": len(rows),
@@ -89,12 +133,13 @@ def _fmt_pct(value: float | None) -> str:
 def render_markdown(payload: dict[str, Any]) -> str:
     """Render the budget as Markdown."""
 
+    candidate_label = str(payload.get("candidate_label") or "rewrite")
     lines = [
-        "# Strict Win Budget After Rewrite",
+        f"# Strict Win Budget After {candidate_label.title()}",
         "",
-        "This table starts from the measured HAR-post upsample rewrite candidate and",
+        f"This table starts from the measured {candidate_label} candidate and",
         "asks what additional strict speed is still required on Irvine M1. It uses",
-        "warmed profile medians only. The rewrite itself is still a projection for",
+        "warmed profile medians only. The candidate itself is still a projection for",
         "Irvine until the host is quiet enough for publishable timing.",
         "",
         "## Profile Target",
@@ -166,11 +211,12 @@ def main() -> int:
 
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--rewrite-impact", type=Path, default=DEFAULT_REWRITE_IMPACT)
+    parser.add_argument("--candidate-label", default="rewrite")
     parser.add_argument("--output", type=Path, default=DEFAULT_OUTPUT)
     parser.add_argument("--json-output", type=Path, default=DEFAULT_JSON_OUTPUT)
     args = parser.parse_args()
 
-    payload = build_budget(_load_json(args.rewrite_impact))
+    payload = build_budget(_load_json(args.rewrite_impact), candidate_label=args.candidate_label)
     payload["rewrite_impact"] = str(args.rewrite_impact)
     args.output.parent.mkdir(parents=True, exist_ok=True)
     args.output.write_text(render_markdown(payload) + "\n")

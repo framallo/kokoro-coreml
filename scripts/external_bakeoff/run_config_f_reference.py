@@ -33,6 +33,7 @@ class ConfigFBatchRunner:
         self,
         binary: Path,
         compute_units: str,
+        stage_compute_units: dict[str, str | None],
         models_dir: Path,
         inputs_dir: Path,
         hnsf_weights: Path,
@@ -41,15 +42,24 @@ class ConfigFBatchRunner:
         env = os.environ.copy()
         if use_exact_duration_models:
             env["KOKORO_USE_EXACT_DURATION_MODELS"] = "1"
+        cmd = [
+            str(binary),
+            "--models-dir", str(models_dir),
+            "--inputs-dir", str(inputs_dir),
+            "--hnsf-weights", str(hnsf_weights),
+            "--batch",
+            "--compute-units", compute_units,
+        ]
+        for flag, value in (
+            ("--duration-compute-units", stage_compute_units.get("duration")),
+            ("--f0n-compute-units", stage_compute_units.get("f0n")),
+            ("--decoder-pre-compute-units", stage_compute_units.get("decoder_pre")),
+            ("--generator-compute-units", stage_compute_units.get("generator")),
+        ):
+            if value:
+                cmd.extend([flag, value])
         self.proc = subprocess.Popen(
-            [
-                str(binary),
-                "--models-dir", str(models_dir),
-                "--inputs-dir", str(inputs_dir),
-                "--hnsf-weights", str(hnsf_weights),
-                "--batch",
-                "--compute-units", compute_units,
-            ],
+            cmd,
             stdin=subprocess.PIPE,
             stdout=subprocess.PIPE,
             text=True,
@@ -144,6 +154,10 @@ def main() -> None:
             "single-policy bakeoff cells."
         ),
     )
+    parser.add_argument("--duration-compute-units", default=None)
+    parser.add_argument("--f0n-compute-units", default=None)
+    parser.add_argument("--decoder-pre-compute-units", default=None)
+    parser.add_argument("--generator-compute-units", default=None)
     parser.add_argument("--iterations", type=int, default=5)
     parser.add_argument(
         "--preflight-runs",
@@ -183,6 +197,12 @@ def main() -> None:
         runner = ConfigFBatchRunner(
             args.binary,
             args.compute_units,
+            {
+                "duration": args.duration_compute_units,
+                "f0n": args.f0n_compute_units,
+                "decoder_pre": args.decoder_pre_compute_units,
+                "generator": args.generator_compute_units,
+            },
             args.models_dir,
             args.inputs_dir,
             args.hnsf_weights,
@@ -221,6 +241,12 @@ def main() -> None:
                             "inputs_dir": str(args.inputs_dir),
                             "hnsf_weights": str(args.hnsf_weights),
                             "compute_units": args.compute_units,
+                            "stage_compute_units": {
+                                "duration": args.duration_compute_units,
+                                "f0n": args.f0n_compute_units,
+                                "decoder_pre": args.decoder_pre_compute_units,
+                                "generator": args.generator_compute_units,
+                            },
                             "batch_mode": True,
                             "preflight_discarded_runs": args.preflight_runs,
                             "use_exact_duration_models": args.use_exact_duration_models,
@@ -250,6 +276,12 @@ def main() -> None:
                             "inputs_dir": str(args.inputs_dir),
                             "hnsf_weights": str(args.hnsf_weights),
                             "compute_units": args.compute_units,
+                            "stage_compute_units": {
+                                "duration": args.duration_compute_units,
+                                "f0n": args.f0n_compute_units,
+                                "decoder_pre": args.decoder_pre_compute_units,
+                                "generator": args.generator_compute_units,
+                            },
                             "batch_mode": True,
                             "preflight_discarded_runs": args.preflight_runs,
                             "use_exact_duration_models": args.use_exact_duration_models,
@@ -272,6 +304,12 @@ def main() -> None:
             "inputs_dir": str(args.inputs_dir),
             "hnsf_weights": str(args.hnsf_weights),
             "compute_units": args.compute_units,
+            "stage_compute_units": {
+                "duration": args.duration_compute_units,
+                "f0n": args.f0n_compute_units,
+                "decoder_pre": args.decoder_pre_compute_units,
+                "generator": args.generator_compute_units,
+            },
             "batch_mode": True,
             "preflight_discarded_runs": args.preflight_runs,
             "use_exact_duration_models": args.use_exact_duration_models,

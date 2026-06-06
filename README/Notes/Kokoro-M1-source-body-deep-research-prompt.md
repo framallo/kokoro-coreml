@@ -23,18 +23,28 @@ Current real Irvine M1 losses:
 | `10s` | `685.5 ms` | `644.9 ms` | `40.6 ms / 6.29%` |
 | `15s` | `1014.9 ms` | `990.6 ms` | `24.3 ms / 2.46%` |
 
-The HAR-post upsample rewrite is a measured strict local win and should be
-kept, but it is not enough alone. The current post-rewrite budget is tracked in
-`outputs/external_bakeoff/strict_win_budget_after_rewrite.md`. If the measured
-local package speedup transfers to Irvine, the remaining warmed profile target
+The HAR-post upsample rewrite and the `decoder_pre`/HnSF runtime overlap are
+measured strict local wins and should be kept, but they are not enough alone.
+The current post-overlap+rewrite budget is tracked in
+`outputs/external_bakeoff/strict_win_budget_after_overlap_rewrite.md`. If both
+measured local effects transfer to Irvine, the remaining warmed profile target
 still needs:
 
-| Bucket | Projected Config F after rewrite | laishere profile | Extra strict save needed |
+| Bucket | Projected Config F after overlap+rewrite | laishere profile | Extra strict save needed |
 | --- | ---: | ---: | ---: |
-| `3s` | `226.4 ms` | `195.0 ms` | `31.4 ms` |
-| `7s` | `480.6 ms` | `444.2 ms` | `36.4 ms` |
-| `10s` | `668.0 ms` | `644.9 ms` | `23.2 ms` |
-| `15s` | `993.6 ms` | `990.6 ms` | `3.0 ms` |
+| `3s` | `222.0 ms` | `195.0 ms` | `27.0 ms` |
+| `7s` | `472.2 ms` | `444.2 ms` | `28.0 ms` |
+| `10s` | `657.6 ms` | `644.9 ms` | `12.8 ms` |
+| `15s` | `976.4 ms` | `990.6 ms` | `0.0 ms` |
+
+The stricter paper-facing target is still open after overlap+rewrite:
+
+| Bucket | Paper frontier best | Extra strict save needed |
+| --- | ---: | ---: |
+| `3s` | `176.3 ms` | `45.7 ms` |
+| `7s` | `394.6 ms` | `77.6 ms` |
+| `10s` | `593.9 ms` | `63.7 ms` |
+| `15s` | `912.0 ms` | `64.4 ms` |
 
 Do not use cold compile/cache timings. Every claim must use warmed inference.
 
@@ -58,10 +68,10 @@ Authoritative frontier and target files:
 - `outputs/external_bakeoff/irvine_next_targets.md`
 - `outputs/external_bakeoff/candidate_frontier_matrix.md`
 - `outputs/external_bakeoff/remote_host_quiet_latest.md`
-- `README/Guides/apple-silicon/Kokoro-M1-paper-frontier-3s-7s-deep-research-prompt.md`
-- `README/Guides/apple-silicon/Kokoro-M1-vocoder-boundary-research-brief.md`
-- `README/Guides/apple-silicon/Kokoro-M1-graph-surface-target.md`
-- `README/Guides/apple-silicon/Kokoro-M1-kernel-partition-deep-research-prompt.md`
+- `README/Kokoro-M1-paper-frontier-3s-7s-deep-research-prompt.md`
+- `README/Kokoro-M1-vocoder-boundary-research-brief.md`
+- `README/Kokoro-M1-graph-surface-target.md`
+- `README/Kokoro-M1-kernel-partition-deep-research-prompt.md`
 - `README/Notes/performance-notes.md`
 
 The apparent MLX win was a comparison bug: cold compile/cache behavior,
@@ -77,7 +87,7 @@ laishere-like Neural Engine preferred-op counts, but it is slower. Therefore
 the target is not "more NE placement." The target is a runtime-positive graph
 boundary and synchronization pattern.
 For a focused investigation of that partition problem, hand off
-`README/Guides/apple-silicon/Kokoro-M1-kernel-partition-deep-research-prompt.md`.
+`README/Kokoro-M1-kernel-partition-deep-research-prompt.md`.
 
 The graph-surface target is also specific: first-party `GeneratorFromHar` has
 manual AdaIN lowering with `88` reductions and `96` tiles, while laishere's
@@ -91,6 +101,23 @@ rewrite`) is contract-compatible as a Swift HAR-post overlay, but was rejected
 as a production replacement because it does not beat the simpler production
 rewrite overall. Do not treat "more visible surface matching" as a sufficient
 hypothesis.
+
+## New Critical Blocker
+
+The source equation itself is solved, but the Swift HAR/STFT representation is
+not. The five-bucket source-variant refresh says
+`source_equation_is_solved=true` and `recomputed_stft_har_is_solved=false`:
+`swift_like_seeded` matches dumped Swift `har_source` at SNR `138.15-140.33 dB`
+across all buckets, but recomputing HAR/STFT from even the exact dumped source
+stays near SNR `8.11-8.23 dB`. Dumped Nyquist phase plus padded shipping HAR
+geometry repairs strict source-boundary parity, but that padded strict path
+loses the speed edge.
+
+The highest-value external guide now is narrower than "source/body": explain
+how to represent the current Swift STFT/HAR contract, or a quality-equivalent
+replacement, inside one Core ML package without reintroducing padded-geometry
+cost or an extra prediction call. Use
+`README/Kokoro-M1-HAR-STFT-contract-deep-research-prompt.md` for that handoff.
 
 ## Do Not Repeat
 
@@ -122,9 +149,9 @@ keeping the Swift input/output contract stable.
 Acceptance:
 
 - strict waveform gate passes;
-- after the upsample rewrite baseline, Irvine M1 `3s` improves by at least
-  another `31.4 ms` warmed median, or combines with measured upstream savings
-  to close the full remaining profile gap;
+- after the overlap + upsample rewrite baseline, Irvine M1 `3s` improves by at
+  least another `27.0 ms` warmed median, or combines with measured upstream
+  savings to close the full remaining profile gap;
 - M2 Studio does not materially regress.
 
 ### 2. In-Package HAR Source Consumption
@@ -170,12 +197,12 @@ Latest paper-frontier correction:
   source/body rows.
 - Irvine source/body candidates can beat several newer warmed profile rows, but
   none beats the stricter paper-facing frontier by itself.
-- Combining source/body with the measured HAR-post rewrite closes only Irvine
-  `10s` (`591.2 ms` projected versus `593.9 ms` paper row), leaves `15s`
-  `2.7 ms` short, and leaves `3s/7s` far short (`31.4 ms` and `37.4 ms`
+- Combining source/body with the measured HAR-post rewrite and runtime overlap
+  should close Irvine `10s` and `15s` if listening accepts the saved source
+  candidates, but still leaves `3s/7s` short (`27.0 ms` and `29.0 ms`
   additional saves needed).
 - For the next external research pass, use
-  `README/Guides/apple-silicon/Kokoro-M1-paper-frontier-3s-7s-deep-research-prompt.md`.
+  `README/Kokoro-M1-paper-frontier-3s-7s-deep-research-prompt.md`.
 
 Acceptance:
 
