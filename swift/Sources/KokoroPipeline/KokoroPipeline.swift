@@ -285,13 +285,14 @@ public class KokoroPipeline: KokoroModelProvider {
     ) -> [DurationModelChoice] {
         var choices: [DurationModelChoice] = []
         let fm = FileManager.default
+        let resolvedModelsDirectory = modelsDirectory.resolvingSymlinksInPath()
         func accepts(_ tokenLength: Int) -> Bool {
             guard let maxDurationTokenLength else { return true }
             return tokenLength <= maxDurationTokenLength
         }
 
         if useExactDurationModels, let urls = try? fm.contentsOfDirectory(
-            at: modelsDirectory,
+            at: resolvedModelsDirectory,
             includingPropertiesForKeys: nil
         ) {
             for url in urls {
@@ -317,7 +318,7 @@ public class KokoroPipeline: KokoroModelProvider {
 
         for tokenLength in PipelineConstants.durationTokenSizes {
             guard accepts(tokenLength) else { continue }
-            let url = modelsDirectory.appendingPathComponent("kokoro_duration_t\(tokenLength).mlpackage")
+            let url = resolvedModelsDirectory.appendingPathComponent("kokoro_duration_t\(tokenLength).mlpackage")
             if fm.fileExists(atPath: url.path) {
                 choices.append(DurationModelChoice(
                     cacheKey: "padded_t\(tokenLength)",
@@ -329,7 +330,7 @@ public class KokoroPipeline: KokoroModelProvider {
             }
         }
 
-        let legacyURL = modelsDirectory.appendingPathComponent("kokoro_duration.mlpackage")
+        let legacyURL = resolvedModelsDirectory.appendingPathComponent("kokoro_duration.mlpackage")
         if fm.fileExists(atPath: legacyURL.path),
            !choices.contains(where: { $0.cacheKey == "padded_t128" }) {
             choices.append(DurationModelChoice(

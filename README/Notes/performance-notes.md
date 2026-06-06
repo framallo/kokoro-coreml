@@ -1052,8 +1052,10 @@ compute units, N=10 warm median after three discarded preflight calls:
 The padded-duration M1 probe used a temporary checkout where `coreml` was a
 symlink. Swift `FileManager.contentsOfDirectory(at:)` did not enumerate exact
 duration packages through that symlink, even though direct package paths
-resolved. A rerun with an absolute `--models-dir` selected `exact_t44` and
-`exact_t105` correctly:
+resolved. The discovery path now resolves the models directory symlink before
+enumeration; the fix was verified on Irvine with `--models-dir coreml`, where
+the benchmark discovered exact packages and selected `exact_t44`. A rerun with
+an absolute `--models-dir` selected `exact_t44` and `exact_t105` correctly:
 
 | Input | Exact-duration wall | Duration model | HnSF | Generator | Duration | F0Ntrain | DecoderPre |
 | --- | ---: | --- | ---: | ---: | ---: | ---: | ---: |

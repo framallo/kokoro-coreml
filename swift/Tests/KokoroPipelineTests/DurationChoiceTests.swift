@@ -32,6 +32,27 @@ final class DurationChoiceTests: XCTestCase {
         XCTAssertFalse(exact.requiresAttentionMask)
     }
 
+    func testExactDurationPackagesAreDiscoveredThroughModelsDirectorySymlink() throws {
+        let dir = try makeDurationPackageDirectory()
+        let link = FileManager.default.temporaryDirectory
+            .appendingPathComponent(UUID().uuidString, isDirectory: true)
+        try FileManager.default.createSymbolicLink(
+            at: link,
+            withDestinationURL: dir
+        )
+
+        let choices = KokoroPipeline.discoverDurationChoices(
+            modelsDirectory: link,
+            useExactDurationModels: true
+        )
+
+        XCTAssertEqual(choices.map(\.cacheKey), ["padded_t32", "exact_t44", "padded_t64"])
+        XCTAssertEqual(
+            try KokoroPipeline.selectDurationChoice(choices, actualTokens: 44).cacheKey,
+            "exact_t44"
+        )
+    }
+
     func testDurationChoicesCanBeCappedForProductionWorkers() throws {
         let dir = try makeDurationPackageDirectory()
         try FileManager.default.createDirectory(
