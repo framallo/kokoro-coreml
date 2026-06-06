@@ -502,6 +502,36 @@ ops. In other words, the converter re-materializes the broadcast surface even
 when PyTorch source avoids `expand`. This source-level cleanup is not a
 production speed path.
 
+#### Style-specialized generator probe
+
+`scripts/probe_generator_style_specialization.py` tests a more aggressive
+voice-specialized graph: it bakes the `ref_s` vector from the tensor dump into
+the generator and replaces each `AdaIN1d` with fixed gamma/beta constants. The
+temporary package takes only `x_pre` and `har`, so it removes the per-inference
+style projection path. This is a benchmark/prototype tradeoff, not a drop-in
+production exporter, because it would require separate generator packages per
+voice/style.
+
+The graph does shrink materially. On the local 3s package, MIL ops dropped from
+`2207` to `1625`, removing all `linear`, `reshape`, `split`, and `tile` ops
+from the style path. Package size moved the wrong way, though: the specialized
+3s package is `315 MB` and the 7s package is `690 MB`, because the constants
+are baked into the package artifact.
+
+| Machine | Input | Fused median | Style-specialized median | Speedup vs fused | Parity vs fused | Decision |
+| --- | --- | ---: | ---: | ---: | --- | --- |
+| m2-studio | 3s | 31.3 ms | 31.9 ms | -1.98% | corr 0.999994, SNR 49.36 dB | reject |
+| m2-studio | 7s | 63.9 ms | 64.2 ms | -0.50% | corr 0.999995, SNR 50.65 dB | reject |
+| m2-air | 3s | 120.8 ms | 123.0 ms | -1.82% | corr 0.999994, SNR 49.73 dB | reject |
+| irvine-m1 | 3s | 167.8 ms | 170.8 ms | -1.79% | corr 0.999994, SNR 49.68 dB | reject |
+
+The result is important: deleting style-projection ops and tile ops from the
+MIL graph did not make prediction faster on any tested Mac, including the two
+machines where Config F still trails laishere's chain-only short rows. Core ML
+was apparently already handling the dynamic style path efficiently enough that
+constant-folding it is not a speed path. Do not pursue per-voice generator
+packages for performance without a new compiler/runtime reason.
+
 #### HnSF vDSP optimization
 
 Current `main` vectorizes the Swift HnSF STFT path with cached 20-point DFT

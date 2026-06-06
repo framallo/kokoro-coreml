@@ -246,6 +246,14 @@ sudo powermetrics -i 1000 --samplers ane
   to the shipping 3s fused package (`2207` total ops and `96` `tile` ops), so
   Core ML re-materializes the broadcast surface. This does not remove the
   AdaIN memory movement problem.
+- **Style-specialized generator rejected:** `scripts/probe_generator_style_specialization.py`
+  bakes the dump's `ref_s` into the generator and replaces all `AdaIN1d`
+  projections with fixed gamma/beta constants. The 3s MIL graph shrank from
+  `2207` to `1625` ops and removed all `linear`/`reshape`/`split`/`tile` ops,
+  but latency got worse on every tested Mac: M2 Studio `31.3 ms` fused vs
+  `31.9 ms` specialized, M2 Air `120.8 ms` vs `123.0 ms`, and Irvine M1
+  `167.8 ms` vs `170.8 ms`. It also bloats artifacts (`315 MB` for 3s,
+  `690 MB` for 7s). Per-voice generator packages are not a speed path.
 - **Per-stage generator split rejected as a production split and useful as a
   profiler:** `scripts/probe_generator_stage_split.py` splits the current
   static HAR-post generator into noise, first upsample/resblock stage, and
