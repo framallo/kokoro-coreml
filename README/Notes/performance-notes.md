@@ -192,6 +192,14 @@ reports `passcodeRequired: true` and `unlockedSinceBoot: true`. The phone is
 accessible to the machine, but the runner cannot execute until the physical
 device is unlocked.
 
+Fresh launch check on 2026-06-06 at 04:08 local time: CoreDevice still reports
+the iPhone as `available (paired)` over wired transport, with Developer Mode
+enabled and launch capability present. Launching the already installed
+`com.kokoro.externalbakeoff.ConfigFIOSRunnerManual` again failed with
+`RequestDenied ... Locked` and `Unable to launch ... because the device was
+not, or could not be, unlocked`. The host can see and talk to the phone; the
+only current Config F iPhone execution blocker is the physical lock state.
+
 Whisper, ASR, VAD, playback, and echo-demo dependencies are not part of this
 bakeoff boundary. The iOS runner is intentionally Kokoro TTS only.
 
@@ -1698,6 +1706,15 @@ around `4` on the fanless Air, with `mds_stores` at about `100%` CPU,
 is a polluted benchmark window, useful only as a warning: before replacing any
 M2 Air frontier row, collect a low-load run or explicitly pause competing
 desktop/indexing work.
+
+Fresh remote-load check on 2026-06-06 at 04:09 local time: M2 Air still had load
+averages around `3.8/3.9/4.1`, with `mds_stores`, `mediaanalysisd`, and
+`mediaanalysisd-access` each around `60%` CPU. Irvine M1 still had load averages
+around `3.2/3.2/3.3`, with `mediaanalysisd` near `100%` CPU and `mds_stores`
+near `47%`. Noninteractive `killall` did not keep those OS daemons down, and
+`sudo -n mdutil -a -i off` failed with `sudo: a password is required` on both
+hosts. Do not promote fresh lower-end Mac rows until the indexing/mediaanalysis
+load is actually quieted.
 
 #### Fused HnSF merge probe
 
