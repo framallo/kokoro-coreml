@@ -888,12 +888,14 @@ The first useful M1 placement result changes the explanation for laishere's
 Irvine advantage. On Irvine M1, our shipping 3s HAR-post generator loaded with
 `cpuAndGPU` is GPU-preferred for all non-constant estimated cost
 (`gpu=100%`). Loading the same generator with `.all` still does not expose a
-Neural Engine-preferred generator plan. By contrast, laishere's public
-`KokoroVocoder.mlpackage` loaded with `.all` has a mixed plan: estimated cost is
-`56.6%` Neural Engine, `35.3%` GPU, and `4.5%` CPU. Its `conv`, `add`, `mul`,
-and `instance_norm` families are mostly Neural Engine-preferred, while
-`conv_transpose` remains mixed and `cos` falls to CPU/GPU. Forcing laishere's
-vocoder to `cpuAndGPU` removes that NE placement and makes it a GPU-only plan.
+Neural Engine-preferred generator plan. By contrast, laishere's public adapter
+loads `KokoroVocoder.mlpackage` with `CPU_AND_NE`, and that exact policy has a
+mixed Irvine M1 plan: estimated cost is `47.5%` Neural Engine and `49.6%` CPU
+(`unknown` ops are constants/control with `0` estimated cost). Its `conv`,
+`add`, `mul`, and `instance_norm` families are mostly Neural Engine-preferred,
+while `conv_transpose` and `cos` fall mostly or entirely to CPU. Forcing
+laishere's vocoder to `cpuAndGPU` removes that NE placement and makes it a
+GPU-only plan.
 So the current M1 root-cause hypothesis is no longer "MLX is faster" or
 "laishere has lower Python overhead"; it is that laishere's different iOS17
 vocoder boundary/operator surface unlocks partial NE placement on M1, while our
