@@ -479,6 +479,42 @@ Studio, `.all` merely ties `cpuAndGPU`. Forcing CPU+ANE is catastrophic even at
 faster; it proves our current fused generator is the main place where a
 same-boundary optimization could move the full-pipeline table.
 
+#### Python/Core ML host-path probe
+
+`scripts/check_coreml_generator_from_dump.py` now also supports warmed timing
+from Python/coremltools against the same dumped generator tensors:
+
+```bash
+uv run --no-sync python scripts/check_coreml_generator_from_dump.py \
+  --tensor-dump outputs/generator_isolation/dumps/3s \
+  --package coreml/kokoro_decoder_har_post_3s.mlpackage \
+  --compute-units cpuAndGPU \
+  --warmup 3 \
+  --iterations 10 \
+  --write-json outputs/generator_isolation/results/python_generator_3s_cpuAndGPU.json \
+  --fail-on-difference
+```
+
+This tests whether laishere's Python/Core ML path is faster because Swift
+`MLMultiArray` or feature-provider plumbing is expensive. The answer is no for
+the validated short-bucket boundary. Values are N=10 medians after three
+discarded warmups.
+
+| Machine | Input | Swift generator isolation | Python/coremltools | Parity | Decision |
+| --- | --- | ---: | ---: | --- | --- |
+| m2-studio | 3s | 27.2 ms | 54.2 ms | pass, corr 0.999996, SNR 51.60 dB | reject host-path explanation |
+| m2-studio | 7s | 59.5 ms | 69.2 ms | pass, corr 1.000000, SNR 80.90 dB | reject host-path explanation |
+| irvine-m1 | 3s | 168.9 ms | 167.9 ms | pass, corr 0.999992, SNR 48.31 dB | reject host-path explanation |
+| irvine-m1 | 7s | 384.7 ms | 384.6 ms | pass, corr 0.999997, SNR 52.23 dB | reject host-path explanation |
+
+The Irvine numbers are especially important because that is where laishere
+still beats Config F at 3s/7s/10s/15s. Python/coremltools lands on the same
+warm generator timing as Swift there, so the remaining gap is in the package
+surface/model contract/runtime scheduling, not in Swift host overhead. The
+10s/15s/30s Python runs produced timings but failed parity against the current
+local dumps, so they are recorded only as invalid evidence until the dump and
+package pair is refreshed.
+
 #### Exact generator geometry probe
 
 `scripts/probe_generator_exact_geometry.py` tests a tempting shortcut: export
