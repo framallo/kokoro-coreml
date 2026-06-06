@@ -1005,6 +1005,7 @@ Cross-machine `3s` results:
 | m2-air CPU+GPU | 123.7 ms | 138.8 ms | noise 52.2 ms, body 84.4 ms, tail 2.1 ms | corr 0.999991, SNR 47.70 dB | reject |
 | irvine-m1 CPU+ANE | 176.3 ms | 314.6 ms | noise 75.2 ms, body 235.5 ms, tail 3.9 ms | corr 0.999907, SNR 37.69 dB | reject |
 | irvine-m1 CPU+GPU | 174.6 ms | 199.3 ms | noise 74.9 ms, body 119.8 ms, tail 4.8 ms | corr 0.999991, SNR 47.72 dB | reject |
+| irvine-m1 CPU+GPU, 7s | 396.9 ms | 445.7 ms | noise 173.6 ms, body 264.6 ms, tail 7.7 ms | corr 0.999991, SNR 47.82 dB | reject; exact losing bucket also slows down |
 
 Local long-bucket `har_source -> STFT/noise_convs` split results:
 
@@ -1036,11 +1037,11 @@ semantics finding: fp32 phase formulas reduce the phase-induced waveform error,
 but they do not close the raw generator sensitivity enough for production.
 
 This closes the direct "copy laishere's decoder+vocoder split boundary" path for
-our current Swift dump contract on every tested Mac. The remaining laishere
-advantage on Irvine M1 short/medium rows is not explained by this boundary
-alone. It must come from laishere's full runtime/package details, a
-hardware-specific Core ML compile plan, or work reduction outside the reproduced
-boundary.
+our current Swift dump contract on every tested Mac, including the exact Irvine
+M1 `7s` losing bucket. The remaining laishere advantage on Irvine M1
+short/medium rows is not explained by this boundary alone. It must come from
+laishere's full runtime/package details, a hardware-specific Core ML compile
+plan, or work reduction outside the reproduced boundary.
 
 #### F0-noise exact-shape reuse probe
 
