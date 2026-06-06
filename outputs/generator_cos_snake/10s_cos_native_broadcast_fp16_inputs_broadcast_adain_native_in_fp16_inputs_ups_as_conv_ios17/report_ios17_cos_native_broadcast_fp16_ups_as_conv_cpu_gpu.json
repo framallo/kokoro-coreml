@@ -1,0 +1,195 @@
+{
+  "benchmark": {
+    "compute_units": "cpuAndGPU",
+    "first_predict_ms": {
+      "cos": 1112.4002499273047,
+      "fused": 183.6199159733951
+    },
+    "iterations": 10,
+    "metrics": {
+      "cos_vs_dump_full": {
+        "candidate_samples": 240000,
+        "correlation": 0.9999946707284265,
+        "cosine_similarity": 0.9999952891240551,
+        "max_abs_error": 0.0025634765625,
+        "mean_abs_error": 9.009021719296774e-05,
+        "reference_samples": 240000,
+        "rmse": 0.00017694093149372148,
+        "samples_compared": 240000,
+        "snr_db": 50.258487087220814
+      },
+      "cos_vs_dump_trimmed": {
+        "candidate_samples": 230400,
+        "correlation": 0.9786272990600171,
+        "cosine_similarity": 0.9811339536027363,
+        "max_abs_error": 0.253173828125,
+        "mean_abs_error": 0.0012596153290770937,
+        "reference_samples": 230400,
+        "rmse": 0.01135740679423404,
+        "samples_compared": 230400,
+        "snr_db": 14.100163478172838
+      },
+      "cos_vs_fused_full": {
+        "candidate_samples": 240000,
+        "correlation": 0.9999946707284265,
+        "cosine_similarity": 0.9999952891240551,
+        "max_abs_error": 0.0025634765625,
+        "mean_abs_error": 9.009021719296774e-05,
+        "reference_samples": 240000,
+        "rmse": 0.00017694093149372148,
+        "samples_compared": 240000,
+        "snr_db": 50.258487087220814
+      },
+      "cos_vs_fused_trimmed": {
+        "candidate_samples": 230400,
+        "correlation": 0.9999946668026666,
+        "cosine_similarity": 0.9999953025655844,
+        "max_abs_error": 0.0025634765625,
+        "mean_abs_error": 9.29110432561073e-05,
+        "reference_samples": 230400,
+        "rmse": 0.00018007142218304676,
+        "samples_compared": 230400,
+        "snr_db": 50.27087199385727
+      },
+      "fused_vs_dump_full": {
+        "candidate_samples": 240000,
+        "correlation": 0.9999999999999999,
+        "cosine_similarity": 1.0,
+        "max_abs_error": 0.0,
+        "mean_abs_error": 0.0,
+        "reference_samples": 240000,
+        "rmse": 0.0,
+        "samples_compared": 240000,
+        "snr_db": 149.0171656900302
+      },
+      "fused_vs_dump_trimmed": {
+        "candidate_samples": 230400,
+        "correlation": 0.9786301641066242,
+        "cosine_similarity": 0.9811364378399404,
+        "max_abs_error": 0.2529296875,
+        "mean_abs_error": 0.0011687855154530493,
+        "reference_samples": 230400,
+        "rmse": 0.011356981807147335,
+        "samples_compared": 230400,
+        "snr_db": 14.10048850483307
+      }
+    },
+    "speedup_vs_fused_pct": 3.564230589129863,
+    "warm_predict_median_ms": {
+      "cos": 70.3712499816902,
+      "fused": 72.9721455136314
+    },
+    "warm_predict_times_ms": {
+      "cos": [
+        70.47145802062005,
+        70.41041599586606,
+        70.43299998622388,
+        70.77137508895248,
+        70.20495797041804,
+        70.38766599725932,
+        70.2896669972688,
+        70.35483396612108,
+        70.2928330283612,
+        70.18649997189641
+      ],
+      "fused": [
+        72.88225006777793,
+        73.12687498051673,
+        73.00637499429286,
+        73.17820796743035,
+        73.54250003118068,
+        73.1740000192076,
+        72.90116604417562,
+        72.91541702579707,
+        72.93791603296995,
+        72.93033297173679
+      ]
+    },
+    "warmup": 3
+  },
+  "broadcast_adain": true,
+  "cos_package": "outputs/generator_cos_snake/10s_cos_native_broadcast_fp16_inputs_broadcast_adain_native_in_fp16_inputs_ups_as_conv_ios17/kokoro_generator_cos_snake_10s_cos_native_broadcast_fp16_inputs_broadcast_adain_native_in_fp16_inputs_ups_as_conv_ios17.mlpackage",
+  "cos_snake": true,
+  "deployment_target": "ios17",
+  "export": {
+    "broadcast_adain": true,
+    "cos_snake": true,
+    "deployment_target": "ios17",
+    "har_shape": [
+      1,
+      22,
+      96001
+    ],
+    "har_time": null,
+    "input_dtype": "fp16",
+    "input_shape_mode": "fixed",
+    "linear_quantize": null,
+    "native_instance_norm_adain": true,
+    "package": "outputs/generator_cos_snake/10s_cos_native_broadcast_fp16_inputs_broadcast_adain_native_in_fp16_inputs_ups_as_conv_ios17/kokoro_generator_cos_snake_10s_cos_native_broadcast_fp16_inputs_broadcast_adain_native_in_fp16_inputs_ups_as_conv_ios17.mlpackage",
+    "palettize": false,
+    "precision": "fp16",
+    "ref_s_shape": [
+      1,
+      256
+    ],
+    "removed_dropouts": 0,
+    "rewrite_ups_conv_transpose": true,
+    "rewritten_ups_conv_transpose": 2,
+    "toolchain": {
+      "coremltools": "8.3.0",
+      "numpy": "1.26.4",
+      "torch": "2.6.0"
+    },
+    "traced_samples": 240000,
+    "x_pre_shape": [
+      1,
+      512,
+      800
+    ]
+  },
+  "fused_package": "coreml/kokoro_decoder_har_post_10s.mlpackage",
+  "har_time": null,
+  "input_dtype": "fp16",
+  "input_shape_mode": "fixed",
+  "linear_quantize": null,
+  "manifest_metadata": {
+    "bucket_seconds": 10,
+    "canonical_duration_s": 9.625,
+    "decoder_frame_count": 400,
+    "duration_model": "exact_t156",
+    "duration_model_allows_padding": false,
+    "duration_token_length": 156,
+    "executable": "kokoro-bench",
+    "full_f0_len": 800,
+    "har_expected_time": 96001,
+    "hnsf_reference_command": "uv run --no-sync python scripts/validate_hnsf_swift.py generate",
+    "input_key": "10s",
+    "natural_frames": 384,
+    "num_tokens": 156,
+    "observed_audio_duration_s": 9.6,
+    "producer": "swift",
+    "seed": 42,
+    "speed": 1,
+    "t_frames": 400,
+    "text": "At the edge of the harbor, the engineer watched the status display while the model warmed, measured, and returned clean audio before the next request arrived.",
+    "trim_len": 230400,
+    "voice": "af_heart",
+    "x_pre_expected_time": 800
+  },
+  "native_instance_norm_adain": true,
+  "palettize": false,
+  "passes": true,
+  "report": "outputs/generator_cos_snake/10s_cos_native_broadcast_fp16_inputs_broadcast_adain_native_in_fp16_inputs_ups_as_conv_ios17/report_ios17_cos_native_broadcast_fp16_ups_as_conv_cpu_gpu.json",
+  "rewrite_ups_conv_transpose": true,
+  "tensor_dump": "outputs/generator_isolation/dumps/10s",
+  "thresholds": {
+    "max_abs_error": 0.01,
+    "min_corr": 0.99,
+    "min_snr": 35.0
+  },
+  "toolchain": {
+    "coremltools": "8.3.0",
+    "numpy": "1.26.4",
+    "torch": "2.6.0"
+  }
+}

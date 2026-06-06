@@ -85,6 +85,7 @@ Saved Irvine M1 `3s` strict-equivalent results:
 | Fused native-IN + fp16 inputs | local `3s +0.12%`; `88 -> 0` reductions, `44` instance_norm, still `96` tiles | Partial surface repair, not material. |
 | Fused native-IN + broadcast + fp16 inputs | local `3s +0.08%`; `88 -> 0` reductions, `96 -> 0` tiles, `44` instance_norm | Near-surface match but no material speed win. |
 | Fused native-IN + broadcast + fp16 + pal8 | local `3s -2.83%`; `101` LUT ops, no reductions/tiles | Full visible surface match still loses and reduces quality margin. |
+| Fused cos-Snake + native-IN + broadcast + fp16 + upsample ConvT rewrite | local `3s +4.45%`, `7s +3.42%`, `10s +3.56%`, `15s +3.52%`, `30s +3.24%` | Strict local win; promote to Irvine when quiet. |
 | HAR-source fused strict path | `-22.9 ms` CPU+GPU, `-163.8 ms` CPU+NE | Source/STFT boundary not a win. |
 
 Do not spend research budget on another broad split of the current
@@ -144,6 +145,9 @@ Research targets:
 - Can native InstanceNorm, broadcast AdaIN, cos Snake, HAR trim, and residual
   scale changes be fused into one `GeneratorFromHar` package without changing
   the externally visible boundary?
+- Can the zero-insert plus `conv1d` upsample rewrite replace main
+  `ConvTranspose1d` layers in the production exporter and preserve the current
+  local `3.2-4.5%` strict win on Irvine M1?
 - Can the graph be rewritten so M1 chooses useful NE partitions without
   crossing CPU/NE/GPU boundaries repeatedly?
 - Can layout be changed to reduce ANE padding or memory movement while keeping

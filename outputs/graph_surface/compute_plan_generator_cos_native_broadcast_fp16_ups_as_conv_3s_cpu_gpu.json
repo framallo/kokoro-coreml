@@ -1,0 +1,218 @@
+{
+  "compiledModel" : "\/var\/folders\/36\/wpt031kd2j17_6c21wnwxmmw0000gs\/T\/kokoro_generator_cos_snake_3s_cos_native_broadcast_fp16_inputs_broadcast_adain_native_in_fp16_inputs_ups_as_conv_ios17_FC8651D6-E638-4418-B5F0-D79BF3A0C402.mlmodelc",
+  "computeUnits" : "cpuAndGPU",
+  "costWeightByPreferredDevice" : {
+    "gpu" : 1.0000000000000024,
+    "unknown" : 0
+  },
+  "model" : "\/Users\/mm\/Documents\/GitHub\/kokoro-coreml\/outputs\/generator_cos_snake\/3s_cos_native_broadcast_fp16_inputs_broadcast_adain_native_in_fp16_inputs_ups_as_conv_ios17\/kokoro_generator_cos_snake_3s_cos_native_broadcast_fp16_inputs_broadcast_adain_native_in_fp16_inputs_ups_as_conv_ios17.mlpackage",
+  "operationCount" : 1651,
+  "operations" : {
+    "const" : {
+      "costWeight" : 0,
+      "count" : 917,
+      "preferredDevices" : {
+        "unknown" : 917
+      },
+      "supportedDevices" : {
+        "unknown" : 917
+      }
+    },
+    "ios17.add" : {
+      "costWeight" : 0.13723076897257994,
+      "count" : 222,
+      "preferredDevices" : {
+        "gpu" : 222
+      },
+      "supportedDevices" : {
+        "cpu" : 222,
+        "gpu" : 222
+      }
+    },
+    "ios17.cast" : {
+      "costWeight" : 0.010896888583466905,
+      "count" : 2,
+      "preferredDevices" : {
+        "gpu" : 2
+      },
+      "supportedDevices" : {
+        "cpu" : 2,
+        "gpu" : 2
+      }
+    },
+    "ios17.conv" : {
+      "costWeight" : 0.49394575706796123,
+      "count" : 53,
+      "preferredDevices" : {
+        "gpu" : 53
+      },
+      "supportedDevices" : {
+        "cpu" : 53,
+        "gpu" : 53
+      }
+    },
+    "ios17.conv_transpose" : {
+      "costWeight" : 2.3288792784004319e-05,
+      "count" : 2,
+      "preferredDevices" : {
+        "gpu" : 2
+      },
+      "supportedDevices" : {
+        "cpu" : 2,
+        "gpu" : 2
+      }
+    },
+    "ios17.cos" : {
+      "costWeight" : 0.072802509004043128,
+      "count" : 49,
+      "preferredDevices" : {
+        "gpu" : 49
+      },
+      "supportedDevices" : {
+        "cpu" : 49,
+        "gpu" : 49
+      }
+    },
+    "ios17.exp" : {
+      "costWeight" : 0.00015608064619750396,
+      "count" : 1,
+      "preferredDevices" : {
+        "gpu" : 1
+      },
+      "supportedDevices" : {
+        "cpu" : 1,
+        "gpu" : 1
+      }
+    },
+    "ios17.expand_dims" : {
+      "costWeight" : 0.00072643598607286192,
+      "count" : 2,
+      "preferredDevices" : {
+        "gpu" : 2
+      },
+      "supportedDevices" : {
+        "cpu" : 2,
+        "gpu" : 2
+      }
+    },
+    "ios17.instance_norm" : {
+      "costWeight" : 0.067803304363544897,
+      "count" : 44,
+      "preferredDevices" : {
+        "gpu" : 44
+      },
+      "supportedDevices" : {
+        "cpu" : 44,
+        "gpu" : 44
+      }
+    },
+    "ios17.leaky_relu" : {
+      "costWeight" : 0.0025426481271148276,
+      "count" : 3,
+      "preferredDevices" : {
+        "gpu" : 3
+      },
+      "supportedDevices" : {
+        "cpu" : 3,
+        "gpu" : 3
+      }
+    },
+    "ios17.linear" : {
+      "costWeight" : 9.9797892527534552e-05,
+      "count" : 48,
+      "preferredDevices" : {
+        "gpu" : 48
+      },
+      "supportedDevices" : {
+        "cpu" : 48,
+        "gpu" : 48
+      }
+    },
+    "ios17.mul" : {
+      "costWeight" : 0.19492128431020581,
+      "count" : 196,
+      "preferredDevices" : {
+        "gpu" : 196
+      },
+      "supportedDevices" : {
+        "cpu" : 196,
+        "gpu" : 196
+      }
+    },
+    "ios17.reshape" : {
+      "costWeight" : 0.0048612020803960251,
+      "count" : 50,
+      "preferredDevices" : {
+        "gpu" : 50
+      },
+      "supportedDevices" : {
+        "cpu" : 50,
+        "gpu" : 50
+      }
+    },
+    "ios17.sin" : {
+      "costWeight" : 0.00031216129239500793,
+      "count" : 2,
+      "preferredDevices" : {
+        "gpu" : 2
+      },
+      "supportedDevices" : {
+        "cpu" : 2,
+        "gpu" : 2
+      }
+    },
+    "ios17.slice_by_index" : {
+      "costWeight" : 0.0090117217172881233,
+      "count" : 8,
+      "preferredDevices" : {
+        "gpu" : 8
+      },
+      "supportedDevices" : {
+        "cpu" : 8,
+        "gpu" : 8
+      }
+    },
+    "ios17.sub" : {
+      "costWeight" : 5.1553666384309068e-05,
+      "count" : 1,
+      "preferredDevices" : {
+        "gpu" : 1
+      },
+      "supportedDevices" : {
+        "cpu" : 1,
+        "gpu" : 1
+      }
+    },
+    "pad" : {
+      "costWeight" : 0.0046008349776026618,
+      "count" : 3,
+      "preferredDevices" : {
+        "gpu" : 3
+      },
+      "supportedDevices" : {
+        "cpu" : 3,
+        "gpu" : 3
+      }
+    },
+    "split" : {
+      "costWeight" : 1.376251943417271e-05,
+      "count" : 48,
+      "preferredDevices" : {
+        "gpu" : 48
+      },
+      "supportedDevices" : {
+        "cpu" : 48,
+        "gpu" : 48
+      }
+    }
+  },
+  "preferredDeviceCounts" : {
+    "gpu" : 734,
+    "unknown" : 917
+  },
+  "supportedDeviceCounts" : {
+    "cpu" : 734,
+    "gpu" : 734,
+    "unknown" : 917
+  }
+}

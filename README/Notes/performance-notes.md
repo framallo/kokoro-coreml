@@ -4447,6 +4447,36 @@ cost weight `1.0`). Therefore the remaining M1 loss is not solved by removing
 and
 `outputs/graph_surface/compute_plan_generator_cos_native_broadcast_fp16_3s_cpu_gpu.json`.
 
+Rewriting the two main generator upsample `ConvTranspose1d` layers as
+zero-insertion plus normal `conv1d` is the first strict local optimization in
+this sequence with material warmed wins across all runtime buckets. The probe
+uses cos-Snake, native InstanceNorm AdaIN, broadcast AdaIN, fp16 inputs, iOS17,
+and `--rewrite-ups-conv-transpose`. Local M2 Studio CPU+GPU results:
+
+| Bucket | Fused | Candidate | Speedup | Corr | SNR | Max abs |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: |
+| 3s | 26.375 ms | 25.203 ms | 4.45% | 0.999994 | 49.65 dB | 0.00217 |
+| 7s | 53.897 ms | 52.053 ms | 3.42% | 0.999995 | 50.74 dB | 0.00208 |
+| 10s | 72.972 ms | 70.371 ms | 3.56% | 0.999995 | 50.27 dB | 0.00256 |
+| 15s | 106.084 ms | 102.349 ms | 3.52% | 0.999995 | 50.40 dB | 0.00244 |
+| 30s | 204.624 ms | 197.992 ms | 3.24% | 0.999995 | 50.37 dB | 0.00244 |
+
+The 3s graph surface changes `conv_transpose 4 -> 2` and `conv 51 -> 53`
+without changing the external `GeneratorFromHar` boundary. `MLComputePlan`
+shows this remains a GPU-path optimization, not an ANE unlock:
+CPU+GPU has `734` GPU-preferred ops and GPU cost weight `1.0`, while CPU+NE has
+`0` NE-preferred ops and `0` NE cost weight. Promote this candidate to Irvine
+M1 timing when the host is quiet enough. Reports:
+`outputs/generator_cos_snake/3s_cos_native_broadcast_fp16_inputs_broadcast_adain_native_in_fp16_inputs_ups_as_conv_ios17/report_ios17_cos_native_broadcast_fp16_ups_as_conv_cpu_gpu.json`,
+`outputs/generator_cos_snake/7s_cos_native_broadcast_fp16_inputs_broadcast_adain_native_in_fp16_inputs_ups_as_conv_ios17/report_ios17_cos_native_broadcast_fp16_ups_as_conv_cpu_gpu.json`,
+`outputs/generator_cos_snake/10s_cos_native_broadcast_fp16_inputs_broadcast_adain_native_in_fp16_inputs_ups_as_conv_ios17/report_ios17_cos_native_broadcast_fp16_ups_as_conv_cpu_gpu.json`,
+`outputs/generator_cos_snake/15s_cos_native_broadcast_fp16_inputs_broadcast_adain_native_in_fp16_inputs_ups_as_conv_ios17/report_ios17_cos_native_broadcast_fp16_ups_as_conv_cpu_gpu.json`,
+`outputs/generator_cos_snake/30s_cos_native_broadcast_fp16_inputs_broadcast_adain_native_in_fp16_inputs_ups_as_conv_ios17/report_ios17_cos_native_broadcast_fp16_ups_as_conv_cpu_gpu.json`,
+`outputs/graph_surface/fused_cos_native_broadcast_fp16_ups_as_conv_3s.json`,
+`outputs/graph_surface/compute_plan_generator_cos_native_broadcast_fp16_ups_as_conv_3s_cpu_gpu.json`,
+and
+`outputs/graph_surface/compute_plan_generator_cos_native_broadcast_fp16_ups_as_conv_3s_cpu_ne.json`.
+
 ---
 
 ## Bakeoff v5: Corrected benchmark (3s-30s) on M2 Ultra

@@ -272,6 +272,63 @@ does not unlock ANE placement for the fused HAR-post package. The remaining M1
 loss is still a placement/layout/boundary problem, not a single visible op-class
 problem.
 
+## Latest Strict Positive Candidate
+
+Rewriting the two main generator upsample `ConvTranspose1d` layers as
+zero-insertion plus normal `conv1d`, while keeping cos-Snake, native
+`instance_norm`, broadcast AdaIN, fp16 inputs, and iOS17 export, is the first
+strict local candidate in this sequence with a material warmed CPU+GPU win
+across all runtime buckets:
+
+```bash
+uv run --no-sync python scripts/probe_generator_cos_snake.py \
+  --native-instance-norm-adain \
+  --broadcast-adain \
+  --input-dtype fp16 \
+  --rewrite-ups-conv-transpose \
+  --deployment-target ios17 \
+  --label 3s_cos_native_broadcast_fp16_inputs \
+  --report-name report_ios17_cos_native_broadcast_fp16_ups_as_conv_cpu_gpu.json \
+  --warmup 3 \
+  --iterations 10
+```
+
+Local M2 Studio CPU+GPU results:
+
+| Bucket | Strict | Fused | Candidate | Speedup | Corr | SNR | Max abs |
+| --- | --- | ---: | ---: | ---: | ---: | ---: | ---: |
+| 3s | yes | 26.375 ms | 25.203 ms | 4.45% | 0.999994 | 49.65 dB | 0.00217 |
+| 7s | yes | 53.897 ms | 52.053 ms | 3.42% | 0.999995 | 50.74 dB | 0.00208 |
+| 10s | yes | 72.972 ms | 70.371 ms | 3.56% | 0.999995 | 50.27 dB | 0.00256 |
+| 15s | yes | 106.084 ms | 102.349 ms | 3.52% | 0.999995 | 50.40 dB | 0.00244 |
+| 30s | yes | 204.624 ms | 197.992 ms | 3.24% | 0.999995 | 50.37 dB | 0.00244 |
+
+3s graph and placement:
+
+- graph surface: `1629 -> 1651` ops versus the prior cos/native/broadcast/fp16
+  candidate, `conv_transpose 4 -> 2`, `conv 51 -> 53`, `44` native
+  `instance_norm`, `0` reductions, `0` tiles;
+- CPU+GPU placement: `734` GPU-preferred ops, `917` unknown, GPU cost weight
+  `1.0`;
+- CPU+NE placement: `733` CPU-preferred ops, `0` NE-preferred ops,
+  `918` unknown, `0` NE cost weight.
+
+Reports:
+
+- `outputs/generator_cos_snake/3s_cos_native_broadcast_fp16_inputs_broadcast_adain_native_in_fp16_inputs_ups_as_conv_ios17/report_ios17_cos_native_broadcast_fp16_ups_as_conv_cpu_gpu.json`
+- `outputs/generator_cos_snake/7s_cos_native_broadcast_fp16_inputs_broadcast_adain_native_in_fp16_inputs_ups_as_conv_ios17/report_ios17_cos_native_broadcast_fp16_ups_as_conv_cpu_gpu.json`
+- `outputs/generator_cos_snake/10s_cos_native_broadcast_fp16_inputs_broadcast_adain_native_in_fp16_inputs_ups_as_conv_ios17/report_ios17_cos_native_broadcast_fp16_ups_as_conv_cpu_gpu.json`
+- `outputs/generator_cos_snake/15s_cos_native_broadcast_fp16_inputs_broadcast_adain_native_in_fp16_inputs_ups_as_conv_ios17/report_ios17_cos_native_broadcast_fp16_ups_as_conv_cpu_gpu.json`
+- `outputs/generator_cos_snake/30s_cos_native_broadcast_fp16_inputs_broadcast_adain_native_in_fp16_inputs_ups_as_conv_ios17/report_ios17_cos_native_broadcast_fp16_ups_as_conv_cpu_gpu.json`
+- `outputs/graph_surface/fused_cos_native_broadcast_fp16_ups_as_conv_3s.json`
+- `outputs/graph_surface/compute_plan_generator_cos_native_broadcast_fp16_ups_as_conv_3s_cpu_gpu.json`
+- `outputs/graph_surface/compute_plan_generator_cos_native_broadcast_fp16_ups_as_conv_3s_cpu_ne.json`
+
+Decision: promote to Irvine M1 timing when the machine is quiet. This is not an
+ANE unlock and will not by itself prove the paper claim, but it is a real
+strict GPU-path optimization and the first local signal large enough to justify
+remote timing.
+
 ## Deep Research Request
 
 A useful external deep-research guide would be narrower than "Core ML

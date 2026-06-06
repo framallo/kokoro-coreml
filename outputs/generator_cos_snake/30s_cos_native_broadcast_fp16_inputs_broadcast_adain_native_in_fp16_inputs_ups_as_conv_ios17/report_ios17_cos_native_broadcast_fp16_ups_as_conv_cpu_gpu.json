@@ -1,0 +1,195 @@
+{
+  "benchmark": {
+    "compute_units": "cpuAndGPU",
+    "first_predict_ms": {
+      "cos": 735.373624949716,
+      "fused": 323.4904169803485
+    },
+    "iterations": 10,
+    "metrics": {
+      "cos_vs_dump_full": {
+        "candidate_samples": 720000,
+        "correlation": 0.9999947883234978,
+        "cosine_similarity": 0.999995377786905,
+        "max_abs_error": 0.00244140625,
+        "mean_abs_error": 8.77189705769221e-05,
+        "reference_samples": 720000,
+        "rmse": 0.00017279150487441568,
+        "samples_compared": 720000,
+        "snr_db": 50.3381988415449
+      },
+      "cos_vs_dump_trimmed": {
+        "candidate_samples": 657000,
+        "correlation": 0.982896080635565,
+        "cosine_similarity": 0.9848926757017634,
+        "max_abs_error": 0.44873046875,
+        "mean_abs_error": 0.0009592319268756469,
+        "reference_samples": 657000,
+        "rmse": 0.010234934488675853,
+        "samples_compared": 657000,
+        "snr_db": 15.091695289494309
+      },
+      "cos_vs_fused_full": {
+        "candidate_samples": 720000,
+        "correlation": 0.9999947883234978,
+        "cosine_similarity": 0.999995377786905,
+        "max_abs_error": 0.00244140625,
+        "mean_abs_error": 8.77189705769221e-05,
+        "reference_samples": 720000,
+        "rmse": 0.00017279150487441568,
+        "samples_compared": 720000,
+        "snr_db": 50.3381988415449
+      },
+      "cos_vs_fused_trimmed": {
+        "candidate_samples": 657000,
+        "correlation": 0.9999947929682306,
+        "cosine_similarity": 0.9999954084811326,
+        "max_abs_error": 0.00244140625,
+        "mean_abs_error": 9.319432077523961e-05,
+        "reference_samples": 657000,
+        "rmse": 0.00017915372136456914,
+        "samples_compared": 657000,
+        "snr_db": 50.36720934853627
+      },
+      "fused_vs_dump_full": {
+        "candidate_samples": 720000,
+        "correlation": 0.9999999999999999,
+        "cosine_similarity": 1.0,
+        "max_abs_error": 0.0,
+        "mean_abs_error": 0.0,
+        "reference_samples": 720000,
+        "rmse": 0.0,
+        "samples_compared": 720000,
+        "snr_db": 153.66197154613292
+      },
+      "fused_vs_dump_trimmed": {
+        "candidate_samples": 657000,
+        "correlation": 0.9829011258314642,
+        "cosine_similarity": 0.9848970950646133,
+        "max_abs_error": 0.44921875,
+        "mean_abs_error": 0.0008685913741464866,
+        "reference_samples": 657000,
+        "rmse": 0.010232672147812313,
+        "samples_compared": 657000,
+        "snr_db": 15.093615440051572
+      }
+    },
+    "speedup_vs_fused_pct": 3.2412465903573304,
+    "warm_predict_median_ms": {
+      "cos": 197.9918124852702,
+      "fused": 204.62418696843088
+    },
+    "warm_predict_times_ms": {
+      "cos": [
+        198.19841592106968,
+        198.0108330026269,
+        198.0649170000106,
+        198.12191603705287,
+        197.89495901204646,
+        197.80874997377396,
+        197.9727919679135,
+        197.92800000868738,
+        198.12466704752296,
+        197.9602079372853
+      ],
+      "fused": [
+        204.76016693282872,
+        204.98433394823223,
+        204.54183302354068,
+        204.70737502910197,
+        204.53916606493294,
+        204.53245798125863,
+        204.7039580065757,
+        204.54441593028605,
+        204.46329098194838,
+        204.84383404254913
+      ]
+    },
+    "warmup": 3
+  },
+  "broadcast_adain": true,
+  "cos_package": "outputs/generator_cos_snake/30s_cos_native_broadcast_fp16_inputs_broadcast_adain_native_in_fp16_inputs_ups_as_conv_ios17/kokoro_generator_cos_snake_30s_cos_native_broadcast_fp16_inputs_broadcast_adain_native_in_fp16_inputs_ups_as_conv_ios17.mlpackage",
+  "cos_snake": true,
+  "deployment_target": "ios17",
+  "export": {
+    "broadcast_adain": true,
+    "cos_snake": true,
+    "deployment_target": "ios17",
+    "har_shape": [
+      1,
+      22,
+      288001
+    ],
+    "har_time": null,
+    "input_dtype": "fp16",
+    "input_shape_mode": "fixed",
+    "linear_quantize": null,
+    "native_instance_norm_adain": true,
+    "package": "outputs/generator_cos_snake/30s_cos_native_broadcast_fp16_inputs_broadcast_adain_native_in_fp16_inputs_ups_as_conv_ios17/kokoro_generator_cos_snake_30s_cos_native_broadcast_fp16_inputs_broadcast_adain_native_in_fp16_inputs_ups_as_conv_ios17.mlpackage",
+    "palettize": false,
+    "precision": "fp16",
+    "ref_s_shape": [
+      1,
+      256
+    ],
+    "removed_dropouts": 0,
+    "rewrite_ups_conv_transpose": true,
+    "rewritten_ups_conv_transpose": 2,
+    "toolchain": {
+      "coremltools": "8.3.0",
+      "numpy": "1.26.4",
+      "torch": "2.6.0"
+    },
+    "traced_samples": 720000,
+    "x_pre_shape": [
+      1,
+      512,
+      2400
+    ]
+  },
+  "fused_package": "coreml/kokoro_decoder_har_post_30s.mlpackage",
+  "har_time": null,
+  "input_dtype": "fp16",
+  "input_shape_mode": "fixed",
+  "linear_quantize": null,
+  "manifest_metadata": {
+    "bucket_seconds": 30,
+    "canonical_duration_s": 27.375,
+    "decoder_frame_count": 1200,
+    "duration_model": "exact_t476",
+    "duration_model_allows_padding": false,
+    "duration_token_length": 476,
+    "executable": "kokoro-bench",
+    "full_f0_len": 2400,
+    "har_expected_time": 288001,
+    "hnsf_reference_command": "uv run --no-sync python scripts/validate_hnsf_swift.py generate",
+    "input_key": "30s",
+    "natural_frames": 1095,
+    "num_tokens": 476,
+    "observed_audio_duration_s": 27.375,
+    "producer": "swift",
+    "seed": 42,
+    "speed": 1,
+    "t_frames": 1200,
+    "text": "When the last train departed that evening, the platform fell silent. The old stationmaster locked the ticket office with trembling hands, running his fingers along the worn counter where countless journeys had begun. Outside, autumn wind scattered golden leaves across the empty tracks. He had spent forty years here, watching the world rush past in a blur of faces and farewells. The station would stand a while longer, its clock still ticking, its roof sheltering the pigeons.",
+    "trim_len": 657000,
+    "voice": "af_heart",
+    "x_pre_expected_time": 2400
+  },
+  "native_instance_norm_adain": true,
+  "palettize": false,
+  "passes": true,
+  "report": "outputs/generator_cos_snake/30s_cos_native_broadcast_fp16_inputs_broadcast_adain_native_in_fp16_inputs_ups_as_conv_ios17/report_ios17_cos_native_broadcast_fp16_ups_as_conv_cpu_gpu.json",
+  "rewrite_ups_conv_transpose": true,
+  "tensor_dump": "outputs/generator_isolation/dumps/30s",
+  "thresholds": {
+    "max_abs_error": 0.01,
+    "min_corr": 0.99,
+    "min_snr": 35.0
+  },
+  "toolchain": {
+    "coremltools": "8.3.0",
+    "numpy": "1.26.4",
+    "torch": "2.6.0"
+  }
+}

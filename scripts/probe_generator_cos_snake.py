@@ -160,6 +160,66 @@ def _patch_native_instance_norm_adain(broadcast_adain: bool) -> None:
     AdaIN1d.forward = _native_instance_norm_forward
 
 
+def _zero_insert_1d(x: Any, stride: int, output_padding: int) -> Any:
+    """Return ``x`` with zeros inserted between adjacent time samples."""
+
+    import torch.nn.functional as F
+
+    if stride <= 1:
+        return x
+    expanded = F.pad(x.unsqueeze(-1), (0, stride - 1)).reshape(
+        x.shape[0],
+        x.shape[1],
+        x.shape[2] * stride,
+    )
+    target = (int(x.shape[2]) - 1) * stride + 1 + output_padding
+    if int(expanded.shape[2]) == target:
+        return expanded
+    if int(expanded.shape[2]) > target:
+        return expanded[:, :, :target]
+    return F.pad(expanded, (0, target - int(expanded.shape[2])))
+
+
+def _make_zero_insert_conv_transpose1d(original: Any) -> Any:
+    """Create a ConvTranspose1d-equivalent module using zero insertion plus conv1d."""
+
+    import torch.nn as nn
+    import torch.nn.functional as F
+
+    if int(original.groups) != 1:
+        raise ValueError("zero-insert rewrite currently supports groups=1 only")
+
+    class ZeroInsertConvTranspose1d(nn.Module):
+        """Wrap one loaded ConvTranspose1d while preserving its materialized weights."""
+
+        def __init__(self, wrapped: Any) -> None:
+            super().__init__()
+            self.wrapped = wrapped
+            self.stride_value = int(wrapped.stride[0])
+            self.padding_value = int(wrapped.padding[0])
+            self.output_padding_value = int(wrapped.output_padding[0])
+            self.kernel_value = int(wrapped.kernel_size[0])
+            self.conv_padding = self.kernel_value - 1 - self.padding_value
+
+        def forward(self, x: Any) -> Any:
+            upsampled = _zero_insert_1d(x, self.stride_value, self.output_padding_value)
+            weight = self.wrapped.weight.permute(1, 0, 2).flip(-1)
+            return F.conv1d(upsampled, weight, self.wrapped.bias, padding=self.conv_padding)
+
+    return ZeroInsertConvTranspose1d(original)
+
+
+def _rewrite_generator_ups_conv_transpose(gen_from_har: Any) -> int:
+    """Rewrite main generator ConvTranspose1d upsamples to zero-insert conv1d."""
+
+    gen = gen_from_har.generator
+    rewritten = 0
+    for index, upsample in enumerate(gen.ups):
+        gen.ups[index] = _make_zero_insert_conv_transpose1d(upsample)
+        rewritten += 1
+    return rewritten
+
+
 def _trim_or_pad_last_dim(array: np.ndarray, length: int | None) -> np.ndarray:
     """Return ``array`` with its last dimension cropped or zero-padded."""
 
@@ -273,6 +333,7 @@ def _export_package(
     input_shape_mode: str,
     input_dtype: str,
     har_time: int | None,
+    rewrite_ups_conv_transpose: bool,
 ) -> dict[str, Any]:
     import coremltools as ct
     import torch
@@ -293,6 +354,9 @@ def _export_package(
 
     kmodel = _load_kmodel()
     gen_from_har = GeneratorFromHar(kmodel.decoder.generator).eval()
+    rewritten_ups = 0
+    if rewrite_ups_conv_transpose:
+        rewritten_ups = _rewrite_generator_ups_conv_transpose(gen_from_har)
     removed_dropouts = remove_dropout(gen_from_har)
 
     x_pre = torch.zeros(x_pre_shape, dtype=torch.float32)
@@ -340,6 +404,8 @@ def _export_package(
         "x_pre_shape": list(x_pre_shape),
         "ref_s_shape": list(ref_s_shape),
         "har_shape": list(har_shape),
+        "rewrite_ups_conv_transpose": bool(rewrite_ups_conv_transpose),
+        "rewritten_ups_conv_transpose": rewritten_ups,
     }
 
 
@@ -447,6 +513,8 @@ def run(args: argparse.Namespace) -> dict[str, Any]:
         label = f"{label}_{args.input_shape_mode}_inputs"
     if args.input_dtype.lower() not in {"fp32", "float32"}:
         label = f"{label}_{args.input_dtype.lower()}_inputs"
+    if args.rewrite_ups_conv_transpose:
+        label = f"{label}_ups_as_conv"
     if args.deployment_target.lower() != "macos13":
         label = f"{label}_{args.deployment_target.lower()}"
     if args.har_time is not None:
@@ -476,6 +544,7 @@ def run(args: argparse.Namespace) -> dict[str, Any]:
             args.input_shape_mode,
             args.input_dtype,
             args.har_time,
+            args.rewrite_ups_conv_transpose,
         )
 
     benchmark = _benchmark(args, tensors, cos_package)
@@ -503,6 +572,7 @@ def run(args: argparse.Namespace) -> dict[str, Any]:
         "input_shape_mode": args.input_shape_mode,
         "input_dtype": args.input_dtype,
         "har_time": args.har_time,
+        "rewrite_ups_conv_transpose": bool(args.rewrite_ups_conv_transpose),
         "export": export_report,
         "benchmark": benchmark,
         "thresholds": {
@@ -581,6 +651,11 @@ def main() -> None:
         type=int,
         default=None,
         help="Optional candidate HAR axis length. Baseline still uses the full shipping HAR input.",
+    )
+    parser.add_argument(
+        "--rewrite-ups-conv-transpose",
+        action="store_true",
+        help="Rewrite main generator ConvTranspose1d upsamples as zero insertion plus conv1d before export.",
     )
     parser.add_argument(
         "--precision",
