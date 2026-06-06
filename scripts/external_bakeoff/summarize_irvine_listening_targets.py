@@ -35,8 +35,8 @@ def _candidate_rows(summary: dict[str, Any]) -> list[dict[str, Any]]:
     return [row for row in rows if row.get("machine") == "irvine-m1"]
 
 
-def _provenance_index(patterns: list[str]) -> dict[tuple[str, str], dict[str, Any]]:
-    index: dict[tuple[str, str], dict[str, Any]] = {}
+def _provenance_index(patterns: list[str]) -> dict[tuple[str, str], list[dict[str, Any]]]:
+    index: dict[tuple[str, str], list[dict[str, Any]]] = {}
     for pattern in patterns:
         for match in glob.glob(pattern, recursive=True):
             path = Path(match)
@@ -49,7 +49,7 @@ def _provenance_index(patterns: list[str]) -> dict[tuple[str, str], dict[str, An
             bucket = Path(tensor_dump).name if tensor_dump else label.split("_", 1)[0]
             if label and bucket:
                 payload["provenance_path"] = str(path)
-                index[(bucket, label)] = payload
+                index.setdefault((bucket, label), []).append(payload)
     return index
 
 
@@ -75,10 +75,17 @@ def _best_candidate_for_bucket(rows: list[dict[str, Any]], bucket: str, preferre
     return candidates[0] if candidates else None
 
 
+def _select_artifact(artifacts: list[dict[str, Any]], timing_source_report: str) -> dict[str, Any] | None:
+    for artifact in artifacts:
+        if str(artifact.get("source_report") or "") == timing_source_report:
+            return artifact
+    return artifacts[0] if artifacts else None
+
+
 def summarize_listening_targets(
     next_targets: dict[str, Any],
     candidate_summary: dict[str, Any],
-    provenance: dict[tuple[str, str], dict[str, Any]],
+    provenance: dict[tuple[str, str], list[dict[str, Any]]],
     decisions: dict[tuple[str, str], dict[str, str]],
 ) -> dict[str, Any]:
     """Return Irvine cells with speed rows and no-ASR listening links."""
@@ -92,7 +99,8 @@ def summarize_listening_targets(
         if not candidate:
             rows.append({"bucket": bucket, "status": "missing-speed-candidate"})
             continue
-        artifact = provenance.get((bucket, str(candidate["label"])))
+        timing_source_report = str(candidate.get("report") or "")
+        artifact = _select_artifact(provenance.get((bucket, str(candidate["label"])), []), timing_source_report)
         decision = {}
         if artifact:
             decision = decisions.get((str(candidate["label"]), str(artifact.get("source_report") or "")), {})
@@ -106,7 +114,7 @@ def summarize_listening_targets(
                 "baseline_ms": candidate.get("baseline_ms"),
                 "corr": candidate.get("corr"),
                 "snr_db": candidate.get("snr_db"),
-                "timing_source_report": candidate.get("report"),
+                "timing_source_report": timing_source_report,
                 "listening_source_report": None if artifact is None else artifact.get("source_report"),
                 "listening_candidate_wav": None if artifact is None else (artifact.get("wavs") or {}).get("candidate"),
                 "listening_review": None if artifact is None else artifact.get("review"),
@@ -114,7 +122,7 @@ def summarize_listening_targets(
                 "human_decision": decision.get("human_decision") or "",
                 "decision_notes": decision.get("notes") or "",
                 "exact_timing_report_has_listening_artifact": (
-                    artifact is not None and str(candidate.get("report") or "") == str(artifact.get("source_report") or "")
+                    artifact is not None and timing_source_report == str(artifact.get("source_report") or "")
                 ),
             }
         )
