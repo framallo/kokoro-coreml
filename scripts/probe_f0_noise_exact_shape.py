@@ -129,7 +129,38 @@ def _patch_native_instance_norm_adain() -> None:
         AdaIN1d.forward = _patched_forward
 
 
-def _make_f0_noise_module(generator: Any, phase_mode: str):
+def _swift_uniform01(seed: int, count: int) -> np.ndarray:
+    """Return Swift-style 24-bit uniform floats in ``[0, 1)``."""
+
+    state = np.uint64(seed)
+    values = np.empty(count, dtype=np.uint64)
+    for idx in range(count):
+        state = np.uint64(state ^ np.uint64(state << np.uint64(13)))
+        state = np.uint64(state ^ np.uint64(state >> np.uint64(7)))
+        state = np.uint64(state ^ np.uint64(state << np.uint64(17)))
+        values[idx] = state
+    masked = (values & np.uint64(0xFFFFFF)).astype(np.float32)
+    return masked / np.float32(0xFFFFFF)
+
+
+def _swift_gaussian(seed: int, count: int) -> np.ndarray:
+    """Return Gaussian noise matching Swift ``generateGaussianNoise``."""
+
+    pair_count = (count + 1) // 2
+    uniforms = _swift_uniform01(seed, pair_count * 2)
+    out = np.empty(pair_count * 2, dtype=np.float32)
+    tiny = np.finfo(np.float32).eps
+    for pair in range(pair_count):
+        u1 = max(tiny, float(uniforms[2 * pair]))
+        u2 = float(uniforms[2 * pair + 1])
+        radius = math.sqrt(-2.0 * math.log(u1))
+        theta = 2.0 * math.pi * u2
+        out[2 * pair] = np.float32(radius * math.cos(theta))
+        out[2 * pair + 1] = np.float32(radius * math.sin(theta))
+    return out[:count]
+
+
+def _make_f0_noise_module(generator: Any, phase_mode: str, source_mode: str, seed: int, f0_len: int):
     """Return ``F0 + style -> x_source_*`` module using first-party weights."""
 
     import torch
@@ -197,6 +228,58 @@ def _make_f0_noise_module(generator: Any, phase_mode: str):
             sine_merge = self.l_tanh(self.l_linear(sine_wavs))
             noise = torch.zeros_like(uv) * self.sine_amp / 3.0
             return sine_merge, noise, uv
+
+    class _CoreMLSwiftLikeSourceModule(nn.Module):
+        """Vectorized Swift HarmonicSource equivalent for fixed-shape export."""
+
+        def __init__(self, original: Any, length: int, fixed_seed: int):
+            super().__init__()
+            sine = original.l_sin_gen
+            self.sine_amp = sine.sine_amp
+            self.noise_std = sine.noise_std
+            self.sampling_rate = sine.sampling_rate
+            self.voiced_threshold = sine.voiced_threshold
+            self.upsample_scale = int(sine.upsample_scale)
+            self.dim = int(sine.harmonic_num + 1)
+            self.length = int(length)
+            self.down_len = max(1, (self.length + self.upsample_scale - 1) // self.upsample_scale)
+            self.up_len = self.down_len * self.upsample_scale
+            self.l_linear = original.l_linear
+            self.l_tanh = original.l_tanh
+            self.register_buffer(
+                "harmonics",
+                torch.arange(1, self.dim + 1, dtype=torch.float32).view(1, 1, self.dim),
+            )
+            initials = np.zeros((self.dim,), dtype=np.float32)
+            if self.dim > 1:
+                initials[1:] = _swift_uniform01(fixed_seed, self.dim - 1)
+            self.register_buffer("initial_phase", torch.from_numpy(initials).view(1, 1, self.dim))
+            gaussian = _swift_gaussian(fixed_seed, self.dim * self.length).reshape(self.dim, self.length).T
+            self.register_buffer("gaussian", torch.from_numpy(gaussian).view(1, self.length, self.dim))
+
+        def forward(self, f0: Any):
+            rad = torch.remainder(f0 * self.harmonics / self.sampling_rate, 1.0)
+            rad = rad.clone()
+            rad[:, 0:1, :] = rad[:, 0:1, :] + self.initial_phase
+            rad_ds = F.interpolate(
+                rad.transpose(1, 2),
+                size=self.down_len,
+                mode="linear",
+                align_corners=False,
+            ).transpose(1, 2)
+            phase_scaled = torch.cumsum(rad_ds, dim=1) * (2.0 * math.pi * float(self.upsample_scale))
+            phase_up = F.interpolate(
+                phase_scaled.transpose(1, 2),
+                size=self.up_len,
+                mode="linear",
+                align_corners=False,
+            ).transpose(1, 2)
+            sines = torch.sin(phase_up[:, : self.length, :]) * self.sine_amp
+            uv = (f0 > self.voiced_threshold).to(dtype=f0.dtype)
+            noise_amp = uv * self.noise_std + (1.0 - uv) * self.sine_amp / 3.0
+            sine_waves = sines * uv + self.gaussian * noise_amp
+            sine_merge = self.l_tanh(self.l_linear(sine_waves))
+            return sine_merge, self.gaussian * noise_amp, uv
 
     class _CoreMLForwardSTFT(nn.Module):
         """Forward STFT via fixed Conv1d kernels."""
@@ -274,7 +357,12 @@ def _make_f0_noise_module(generator: Any, phase_mode: str):
         def __init__(self, gen: Any):
             super().__init__()
             self.f0_upsamp = gen.f0_upsamp
-            self.m_source = _CoreMLSourceModule(gen.m_source)
+            if source_mode == "current":
+                self.m_source = _CoreMLSourceModule(gen.m_source)
+            elif source_mode == "swift_like":
+                self.m_source = _CoreMLSwiftLikeSourceModule(gen.m_source, f0_len * 300, seed)
+            else:
+                raise RuntimeError(f"unsupported source_mode: {source_mode}")
             fwd_stft = CustomSTFT(
                 filter_length=gen.stft.filter_length,
                 hop_length=gen.stft.hop_length,
@@ -361,7 +449,8 @@ def _export_packages(
     n_pred = torch.zeros(n_shape, dtype=torch.float32)
     style = torch.zeros(style_shape, dtype=torch.float32)
 
-    noise = _make_f0_noise_module(gen, args.phase_mode)
+    seed = int(args.seed if args.seed is not None else args.seed_from_manifest)
+    noise = _make_f0_noise_module(gen, args.phase_mode, args.source_mode, seed, int(f0_shape[-1]))
     noise_removed_dropouts = remove_dropout(noise)
     with torch.no_grad():
         traced_noise = torch.jit.trace(noise, (f0, style), strict=False, check_trace=False)
@@ -455,6 +544,8 @@ def _export_packages(
         "toolchain": _toolchain_report(),
         "deployment_target": args.deployment_target,
         "phase_mode": args.phase_mode,
+        "source_mode": args.source_mode,
+        "seed": seed,
         "noise_package": str(noise_package),
         "body_package": str(body_package),
         "tail_package": str(tail_package),
@@ -649,6 +740,7 @@ def _benchmark(
 
 def run(args: argparse.Namespace) -> dict[str, Any]:
     manifest, tensors = load_tensor_dump(args.tensor_dump)
+    args.seed_from_manifest = int(manifest.get("metadata", {}).get("seed", 42))
     required = [
         "asr_padded",
         "f0_padded",
@@ -676,6 +768,8 @@ def run(args: argparse.Namespace) -> dict[str, Any]:
         label = f"{label}_body_pal"
     if args.native_instance_norm:
         label = f"{label}_native_in"
+    if args.source_mode != "current":
+        label = f"{label}_{args.source_mode}"
 
     work_dir = args.output_dir / label
     noise_package = work_dir / f"kokoro_f0_noise_{label}.mlpackage"
@@ -768,6 +862,8 @@ def main() -> None:
     parser.add_argument("--tail-precision", default="fp32", choices=("fp16", "float16", "fp32", "float32"))
     parser.add_argument("--deployment-target", default="macos13", choices=("macos13", "ios16", "ios17"))
     parser.add_argument("--phase-mode", default="atan2", choices=("atan2", "acos", "atan_manual", "atan_swift"))
+    parser.add_argument("--source-mode", default="current", choices=("current", "swift_like"))
+    parser.add_argument("--seed", type=int, default=None)
     parser.add_argument("--decoder-pre-compute-units", default="cpuAndNeuralEngine")
     parser.add_argument("--fused-compute-units", default="cpuAndGPU")
     parser.add_argument("--noise-compute-units", default="all")

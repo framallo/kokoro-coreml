@@ -3420,6 +3420,31 @@ flexible output metadata behavior, or laishere's exact upstream F0/source tensor
 contract. The branch is still not production-eligible because the PyTorch
 F0-source formulation itself diverges from the current HAR/HnSF output.
 
+#### Swift-like source export probe
+
+`scripts/probe_f0_noise_exact_shape.py` now also supports
+`--source-mode swift_like`. This keeps the same first-party F0-source package
+boundary but replaces the simplified Core ML-friendly source with a vectorized
+fixed-shape version of Swift `HarmonicSource`, including precomputed Swift RNG
+initial phases and Gaussian noise as package constants.
+
+The cheap source-only gate was encouraging: a Torch fp32 vectorization of the
+Swift source matched dumped `har_source` at SNR `64.41 dB` for 3s and
+`50.53 dB` for 7s. However, the full source->STFT->noise->body->tail branch
+still fails after recomputing STFT/noise tensors:
+
+| Machine | Variant | Baseline stack | Candidate stack | Candidate noise | Candidate body | Corr | SNR | Decision |
+| --- | --- | ---: | ---: | ---: | ---: | ---: | ---: | --- |
+| m2-studio | Swift-like source + native InstanceNorm | 31.80 ms | 34.74 ms | 6.62 ms | 27.16 ms | 0.215731 | 0.34 dB | reject; Core ML source/noise output diverges |
+
+The report's PyTorch candidate is much better than Core ML but still below the
+strict gate (`corr 0.988115`, SNR `16.68 dB`). This means the remaining quality
+loss is not just the simplified source equation. Recomputing STFT/noise tensors
+from source is itself not equivalent to the dumped Swift HAR tensor under the
+current traceable STFT/phase path. This closes the "just export Swift-like
+source" path unless the STFT/phase representation is changed or the runtime
+passes the already-built Swift HAR/source tensor across the boundary.
+
 Rendered a no-ASR listening pack for the 3s and 7s cos/residual speed branch at
 `outputs/f0_source_listening/cos_resblock_speed_branch/README.md`. Both
 candidates are `needs_listening` with no waveform-health reject reasons. This
