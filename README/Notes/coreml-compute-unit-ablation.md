@@ -359,6 +359,15 @@ sudo powermetrics -i 1000 --samplers ane
   so the issue is inherent source-path drift rather than Core ML conversion
   drift. Next work must recover or validate audio quality before any runtime
   integration.
+- **F0-source candidates are listening-ready but not approved:** `scripts/create_f0_source_listening_pack.py`
+  renders saved F0-source probe reports into WAVs, waveform plots, quality
+  reports, and fillable listening reviews without ASR/Whisper. The local 3s
+  natural and padded F0-source candidates both pass the machine waveform-health
+  gate as `needs_listening`, not `reject_without_listening`, but strict waveform
+  parity still rejects them (natural candidate vs baseline corr `0.814034`, SNR
+  `5.08 dB`; padded corr `0.931895`, SNR `9.19 dB`). Treat this as a human
+  listening gate or source-formulation research path, not a runtime integration
+  approval.
 - **HAR input-tail trimming is too small:** `scripts/probe_generator_har_input_trim.py`
   keeps the bucketed `x_pre` shape and current Swift HAR source, but exports a
   temporary `GeneratorFromHar` with a shorter static `har` axis. The aggressive

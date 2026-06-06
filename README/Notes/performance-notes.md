@@ -747,6 +747,39 @@ match the current Swift HnSF/HAR source closely enough, or prove through
 listening review that the different source is acceptable. Until then, this is a
 research target rather than a production replacement.
 
+#### F0-source listening pack
+
+`scripts/create_f0_source_listening_pack.py` turns saved
+`probe_f0_noise_exact_shape.py` reports into reviewable WAV artifacts without
+re-exporting packages and without ASR/Whisper. It renders the Swift dump
+reference, checked-in baseline Core ML path, and F0-source candidate on the same
+tensor dump, then runs the repo's objective waveform-health gate and writes a
+fillable listening review.
+
+Local generated pack:
+
+```bash
+uv run --no-sync python scripts/create_f0_source_listening_pack.py \
+  --report \
+  outputs/f0_noise_exact_shape/3s_natural_asr_cos_rsqrt/report_f0_noise_exact_3s_local.json \
+  outputs/f0_noise_exact_shape/3s_cos_rsqrt/report_f0_noise_padded_3s_local.json \
+  --plots
+```
+
+Output index: `outputs/f0_source_listening/README.md`.
+
+| Candidate | Waveform health gate | Candidate vs baseline | Review WAV |
+| --- | --- | --- | --- |
+| natural `asr=112`, `F0=224` | `needs_listening` | corr 0.814034, SNR 5.08 dB, max 0.43998 | `outputs/f0_source_listening/3s_natural_asr_cos_rsqrt/wav/3s_natural_asr_cos_rsqrt_candidate.wav` |
+| padded `asr=120`, `F0=240` | `needs_listening` | corr 0.931895, SNR 9.19 dB, max 0.23766 | `outputs/f0_source_listening/3s_cos_rsqrt/wav/3s_cos_rsqrt_candidate.wav` |
+
+Interpretation: strict tensor parity still rejects both candidates, but the
+machine audio-health gate does not reject them as silence, clipping, or broken
+spectral content. The exact-shape F0-source path is now a human-listening
+question, not an automatic machine reject. It is still not production-approved
+until listening decisions accept the different source character or a
+quality-preserving source formulation closes the metric gap.
+
 #### HAR input-trim probe
 
 `scripts/probe_generator_har_input_trim.py` tests a lower-risk variant of the
