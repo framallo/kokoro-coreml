@@ -1023,6 +1023,38 @@ laishere noise+vocoder+tail at `145.1 ms` and `340.4 ms`. Future lower-end Mac
 work should target that combined source/vocoder contract, not duration, F0,
 decoder-pre, compute-unit policy, or generic compression.
 
+#### Fused HnSF merge probe
+
+Rejected path: fusing the HnSF 9-to-1 linear merge into the harmonic loop
+slightly reduced the isolated HnSF stage in some local runs, but it did not
+improve warm full-pipeline inference. The probe kept the seeded Swift source
+contract, pre-generated the same Gaussian-noise layout, and accumulated each
+weighted harmonic directly into the merged source instead of materializing the
+`9 * L` sine/noise matrix for `vDSP_mmul`. The experimental runtime flag was
+removed after measurement to avoid carrying dead complexity.
+
+Local M2 Ultra, exact duration packages, staged compute units, N=10 warm median
+after three discarded preflight calls:
+
+| Input | Baseline wall | Fused wall | Wall delta | Baseline HnSF | Fused HnSF | Decision |
+| --- | ---: | ---: | ---: | ---: | ---: | --- |
+| 3s | 56.42 ms | 60.16 ms | -3.74 ms | 10.86 ms | 9.65 ms | reject; wall slower |
+| 7s | 107.69 ms | 108.60 ms | -0.91 ms | 24.93 ms | 23.09 ms | reject; wall neutral/slower |
+
+Irvine M1, paired padded-duration artifact set available on that host, staged
+compute units, N=10 warm median after three discarded preflight calls:
+
+| Input | Baseline wall | Fused wall | Wall delta | Baseline HnSF | Fused HnSF | Baseline generator | Fused generator | Decision |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | --- |
+| 3s | 295.94 ms | 299.34 ms | -3.40 ms | 11.24 ms | 10.72 ms | 166.59 ms | 166.27 ms | reject; wall slower |
+| 7s | 642.97 ms | 640.37 ms | +2.61 ms | 25.96 ms | 26.16 ms | 383.50 ms | 383.07 ms | reject; tiny, noisy wall win |
+
+Conclusion: after the vDSP HnSF work, exact Swift HnSF is not large enough to
+close the lower-end Mac gap. On Irvine M1, the paired run shows generator
+predict at roughly `167 ms` for 3s and `383 ms` for 7s, while HnSF is only
+`11 ms` and `26 ms`. The next quality-safe speed work should attack the
+generator/vocoder graph boundary, not further Swift source micro-optimizations.
+
 #### HAR input-trim probe
 
 `scripts/probe_generator_har_input_trim.py` tests a lower-risk variant of the
