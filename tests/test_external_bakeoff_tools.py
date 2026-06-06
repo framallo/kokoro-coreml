@@ -1609,3 +1609,26 @@ def test_completion_verifier_loads_result_payloads_and_preflight(tmp_path):
     assert ("m2-studio", "config-f-reference", "3s") in records
     assert preflight and not preflight["ok"]
     assert preflight_errors == ["iOS preflight not ready: DEVELOPMENT_TEAM is unset"]
+
+
+def test_completion_verifier_accepts_manual_config_f_ios_install(tmp_path):
+    results_dir = tmp_path / "results"
+    results_dir.mkdir()
+    (results_dir / "ios_runner_preflight_latest.json").write_text("")
+    (results_dir / "config_f_ios_manual_install_latest.json").write_text(
+        json.dumps(
+            {
+                "ok": True,
+                "bundle_id": "com.kokoro.externalbakeoff.ConfigFIOSRunnerManual",
+                "device_udid": "00008101-001134561A0A001E",
+                "launch_ok": False,
+                "launch_blocker": "device_locked",
+            }
+        )
+    )
+
+    preflight, preflight_errors = _check_preflight(results_dir)
+
+    assert preflight and preflight["ok"]
+    assert preflight["bundle_id"] == "com.kokoro.externalbakeoff.ConfigFIOSRunnerManual"
+    assert preflight_errors == []

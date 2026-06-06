@@ -200,6 +200,18 @@ enabled and launch capability present. Launching the already installed
 not, or could not be, unlocked`. The host can see and talk to the phone; the
 only current Config F iPhone execution blocker is the physical lock state.
 
+Fresh install check on 2026-06-06 at 05:17 local time: the iPhone is still
+visible as `Matt's iPhone`, `available (paired)`, model `iPhone13,3`, UDID
+`00008101-001134561A0A001E`, iOS `26.5`. The wildcard provisioning profile
+includes that UDID, and the manual direct-`swiftc` bypass again built, signed,
+and installed an `882M` `ConfigFIOSRunner.app` as
+`com.kokoro.externalbakeoff.ConfigFIOSRunnerManual`. Launch still failed before
+app startup with `FBSOpenApplicationServiceErrorDomain ... RequestDenied ...
+Locked`. The Soniqo iOS preflight also sees the device, but currently lacks
+`DEVELOPMENT_TEAM`, `SPEECH_SWIFT_PATH`, and a generated Xcode project. Config F
+iPhone timing remains blocked only by the physical device lock state, not by
+install/signing.
+
 Follow-up on the same pass rejected the likely host-side launch bypasses.
 `devicectl device process launch` still routes a remote app-bundle path through
 SpringBoard, so `--console --no-activate` failed with the same locked-device
@@ -4239,6 +4251,22 @@ laishere advantage is therefore not solved by a strict split of the shipped
 HAR-post generator either; it likely requires moving to a laishere-style source
 contract, proving that drift acceptable by listening review, or finding a new
 single-package optimization that preserves the exact Swift HAR contract.
+
+Style-specializing the fused generator for the fixed bakeoff voice is also not
+a speed path. `scripts/probe_generator_style_specialization.py` freezes the
+48 AdaIN style projections from the `af_heart` tensor dump, removes `ref_s` as
+a runtime input, and exports a strict HAR-post package with the same `x_pre` and
+`har` inputs. On local M2 Studio `3s`, CPU+GPU preserves quality but is slower:
+fused `26.386 ms`, style-specialized `26.766 ms` (`-1.44%`), corr `0.999994`,
+SNR `49.36 dB`, max abs `0.00238`. CPU+NE is not usable: it reports
+style-specialized `935.970 ms` vs fused `1467.920 ms`, still far slower than the
+CPU+GPU path, fails the strict max-abs gate (`0.01245`), and logs
+`ANECCompile() FAILED`. Reports:
+`outputs/generator_style_specialization/3s_style_specialized/report_cpu_gpu.json`
+and
+`outputs/generator_style_specialization/3s_style_specialized/report_cpu_ne.json`.
+Do not carry style-specialization to Irvine unless a different operator rewrite
+changes the CPU+GPU result first.
 
 ---
 

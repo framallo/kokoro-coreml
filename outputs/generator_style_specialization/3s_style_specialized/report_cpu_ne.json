@@ -1,0 +1,165 @@
+{
+  "benchmark": {
+    "compute_units": "cpuAndNeuralEngine",
+    "first_predict_ms": {
+      "fused": 1486.9756669504568,
+      "style_specialized": 962.541792076081
+    },
+    "iterations": 20,
+    "metrics": {
+      "fused_vs_dump_full": {
+        "candidate_samples": 72000,
+        "correlation": 0.9991222210232619,
+        "cosine_similarity": 0.9992010897372899,
+        "max_abs_error": 0.0341796875,
+        "mean_abs_error": 0.0010948831770155164,
+        "reference_samples": 72000,
+        "rmse": 0.00216321504075831,
+        "samples_compared": 72000,
+        "snr_db": 27.66909993209481
+      },
+      "fused_vs_dump_trimmed": {
+        "candidate_samples": 67200,
+        "correlation": 0.9991123749264954,
+        "cosine_similarity": 0.9991975864616126,
+        "max_abs_error": 0.0341796875,
+        "mean_abs_error": 0.001181065986872212,
+        "reference_samples": 67200,
+        "rmse": 0.002243610448406954,
+        "samples_compared": 67200,
+        "snr_db": 27.65173583898264
+      },
+      "style_vs_dump_full": {
+        "candidate_samples": 72000,
+        "correlation": 0.9991122738147744,
+        "cosine_similarity": 0.9991920546079417,
+        "max_abs_error": 0.0335693359375,
+        "mean_abs_error": 0.0011038871448900965,
+        "reference_samples": 72000,
+        "rmse": 0.0021742913569893292,
+        "samples_compared": 72000,
+        "snr_db": 27.62473902023494
+      },
+      "style_vs_dump_trimmed": {
+        "candidate_samples": 67200,
+        "correlation": 0.9991023903588373,
+        "cosine_similarity": 0.9991885935569388,
+        "max_abs_error": 0.0335693359375,
+        "mean_abs_error": 0.0011907107572461128,
+        "reference_samples": 67200,
+        "rmse": 0.0022549986157615327,
+        "samples_compared": 67200,
+        "snr_db": 27.60775932325942
+      },
+      "style_vs_fused_full": {
+        "candidate_samples": 72000,
+        "correlation": 0.9998275918469147,
+        "cosine_similarity": 0.999843127468638,
+        "max_abs_error": 0.012451171875,
+        "mean_abs_error": 0.0004666684062944518,
+        "reference_samples": 72000,
+        "rmse": 0.0009159049206714602,
+        "samples_compared": 72000,
+        "snr_db": 35.034165346196204
+      },
+      "style_vs_fused_trimmed": {
+        "candidate_samples": 67200,
+        "correlation": 0.9998263867051093,
+        "cosine_similarity": 0.9998431284546756,
+        "max_abs_error": 0.012451171875,
+        "mean_abs_error": 0.000499656887813693,
+        "reference_samples": 67200,
+        "rmse": 0.0009480475418292068,
+        "samples_compared": 67200,
+        "snr_db": 35.034192650833525
+      }
+    },
+    "speedup_vs_fused_pct": 36.23835090022699,
+    "warm_predict_median_ms": {
+      "fused": 1467.9204580024816,
+      "style_specialized": 935.9702914953232
+    },
+    "warm_predict_times_ms": {
+      "fused": [
+        1457.6364170061424,
+        1474.6669589076191,
+        1470.8419579546899,
+        1473.8249169895425,
+        1464.3361249472946,
+        1459.3636660138145,
+        1474.5617910521105,
+        1454.6448329929262,
+        1469.999291934073,
+        1468.0999160045758,
+        1470.0387920020148,
+        1461.0760409850627,
+        1463.3066670503467,
+        1464.9107090663165,
+        1467.7410000003874,
+        1470.151707995683,
+        1460.6998329982162,
+        1472.355082980357,
+        1458.2928330637515,
+        1475.9106669807807
+      ],
+      "style_specialized": [
+        936.8681659689173,
+        945.5742080463096,
+        940.3982920339331,
+        933.3059579366818,
+        927.8853329597041,
+        927.3104580352083,
+        935.072417021729,
+        934.6560419071466,
+        930.0798330223188,
+        937.6740420702845,
+        939.3237499753013,
+        940.0042500346899,
+        932.2335419710726,
+        933.3566669374704,
+        927.0765000255778,
+        939.4373330287635,
+        936.9048329535872,
+        938.0587079795077,
+        938.3288340177387,
+        932.3979169130325
+      ]
+    },
+    "warmup": 5
+  },
+  "export": null,
+  "fused_package": "coreml/kokoro_decoder_har_post_3s.mlpackage",
+  "manifest_metadata": {
+    "bucket_seconds": 3,
+    "canonical_duration_s": 2.8,
+    "decoder_frame_count": 120,
+    "duration_model": "padded_t64",
+    "duration_model_allows_padding": true,
+    "duration_token_length": 64,
+    "executable": "kokoro-bench",
+    "full_f0_len": 240,
+    "har_expected_time": 28801,
+    "hnsf_reference_command": "uv run --no-sync python scripts/validate_hnsf_swift.py generate",
+    "input_key": "3s",
+    "natural_frames": 112,
+    "num_tokens": 44,
+    "observed_audio_duration_s": 2.8,
+    "producer": "swift",
+    "seed": 42,
+    "speed": 1,
+    "t_frames": 120,
+    "text": "The quick brown fox jumps over the dog.",
+    "trim_len": 67200,
+    "voice": "af_heart",
+    "x_pre_expected_time": 240
+  },
+  "passes": false,
+  "report": "outputs/generator_style_specialization/3s_style_specialized/report_cpu_ne.json",
+  "style_package": "outputs/generator_style_specialization/3s_style_specialized/kokoro_generator_style_specialized_3s_style_specialized.mlpackage",
+  "tensor_dump": "outputs/generator_isolation/dumps/3s",
+  "thresholds": {
+    "max_abs_error": 0.01,
+    "min_corr": 0.99,
+    "min_snr": 35.0
+  }
+}
