@@ -249,6 +249,11 @@ SpringBoard lock denial. The machine can still see the device, but
 `com.kokoro.externalbakeoff.ConfigFIOSRunnerManual` cannot launch until the
 physical iPhone is unlocked.
 
+Fresh launch check on 2026-06-06 at 05:58 local time produced the same locked
+SpringBoard denial after CoreDevice acquired a tunnel and usage assertion.
+The iPhone remains visible and paired, but Config F iPhone timing still cannot
+run until the physical device is unlocked.
+
 Whisper, ASR, VAD, playback, and echo-demo dependencies are not part of this
 bakeoff boundary. The iOS runner is intentionally Kokoro TTS only.
 
@@ -294,6 +299,19 @@ ops and `88 -> 0` reductions with `44` native `instance_norm` ops, but still
 `96` tiles and no LUT decompression. This is not material enough for Irvine
 timing by itself; the next useful strict candidate must remove the tile
 footprint or produce a much larger local win.
+
+Fused native `instance_norm` plus broadcast AdaIN plus fp16 inputs removes the
+manual AdaIN surface but is still not material. The report at
+`outputs/generator_cos_snake/3s_native_in_broadcast_fp16_inputs_plain_broadcast_adain_native_in_fp16_inputs_ios17/report_ios17_native_broadcast_fp16_inputs_cpu_gpu.json`
+passed strict local validation with fused `26.424 ms`, candidate `26.402 ms`,
+speedup `0.08%`, corr `0.9999942588867583`, SNR `49.84 dB`, max abs
+`0.00256348`. The graph comparison
+`outputs/graph_surface/fused_native_broadcast_fp16_inputs_3s.json` shows
+`2207 -> 1533` ops, `88 -> 0` reductions, `96 -> 0` tiles, and `44` native
+`instance_norm` ops. This is the closest first-party fused graph surface to
+laishere so far, but it proves that surface similarity alone is not sufficient;
+the missing ingredient is likely runtime placement, weight decompression, or a
+different boundary/layout effect.
 
 ### Consolidated Warm Median and RTF by Platform
 

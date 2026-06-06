@@ -1,0 +1,192 @@
+{
+  "benchmark": {
+    "compute_units": "cpuAndGPU",
+    "first_predict_ms": {
+      "cos": 97.85120794549584,
+      "fused": 139.89283295813948
+    },
+    "iterations": 10,
+    "metrics": {
+      "cos_vs_dump_full": {
+        "candidate_samples": 72000,
+        "correlation": 0.9999942985927306,
+        "cosine_similarity": 0.9999948108522486,
+        "max_abs_error": 0.0025634765625,
+        "mean_abs_error": 7.325112405750486e-05,
+        "reference_samples": 72000,
+        "rmse": 0.00016851030946732313,
+        "samples_compared": 72000,
+        "snr_db": 49.83856428463912
+      },
+      "cos_vs_dump_trimmed": {
+        "candidate_samples": 67200,
+        "correlation": 0.9999904451907243,
+        "cosine_similarity": 0.9999913504699346,
+        "max_abs_error": 0.0128021240234375,
+        "mean_abs_error": 8.82058177255509e-05,
+        "reference_samples": 67200,
+        "rmse": 0.00022518895738305727,
+        "samples_compared": 67200,
+        "snr_db": 47.61974311136193
+      },
+      "cos_vs_fused_full": {
+        "candidate_samples": 72000,
+        "correlation": 0.9999942985927306,
+        "cosine_similarity": 0.9999948108522486,
+        "max_abs_error": 0.0025634765625,
+        "mean_abs_error": 7.325112405750486e-05,
+        "reference_samples": 72000,
+        "rmse": 0.00016851030946732313,
+        "samples_compared": 72000,
+        "snr_db": 49.83856428463912
+      },
+      "cos_vs_fused_trimmed": {
+        "candidate_samples": 67200,
+        "correlation": 0.9999942588867583,
+        "cosine_similarity": 0.9999948108815049,
+        "max_abs_error": 0.0025634765625,
+        "mean_abs_error": 7.842319973167918e-05,
+        "reference_samples": 67200,
+        "rmse": 0.00017442402854081572,
+        "samples_compared": 67200,
+        "snr_db": 49.83858875964667
+      },
+      "fused_vs_dump_full": {
+        "candidate_samples": 72000,
+        "correlation": 1.0,
+        "cosine_similarity": 1.0,
+        "max_abs_error": 0.0,
+        "mean_abs_error": 0.0,
+        "reference_samples": 72000,
+        "rmse": 0.0,
+        "samples_compared": 72000,
+        "snr_db": 142.9444187745472
+      },
+      "fused_vs_dump_trimmed": {
+        "candidate_samples": 67200,
+        "correlation": 0.9999961868925267,
+        "cosine_similarity": 0.9999965419206919,
+        "max_abs_error": 0.012786865234375,
+        "mean_abs_error": 9.83242506582845e-06,
+        "reference_samples": 67200,
+        "rmse": 0.0001423861832117895,
+        "samples_compared": 67200,
+        "snr_db": 51.601327941936844
+      }
+    },
+    "speedup_vs_fused_pct": 0.08223473761896835,
+    "warm_predict_median_ms": {
+      "cos": 26.40202100155875,
+      "fused": 26.423750503454357
+    },
+    "warm_predict_times_ms": {
+      "cos": [
+        26.438584085553885,
+        26.406000019051135,
+        26.35512489359826,
+        26.52491698972881,
+        26.34070790372789,
+        26.47045801859349,
+        26.37833298649639,
+        26.435292093083262,
+        26.398041984066367,
+        26.355499983765185
+      ],
+      "fused": [
+        26.49154106620699,
+        26.39662497676909,
+        26.396916015073657,
+        26.568541070446372,
+        26.351583073846996,
+        26.489583891816437,
+        26.357666007243097,
+        26.42508305143565,
+        26.42395894508809,
+        26.423542061820626
+      ]
+    },
+    "warmup": 3
+  },
+  "broadcast_adain": true,
+  "cos_package": "outputs/generator_cos_snake/3s_native_in_broadcast_fp16_inputs_plain_broadcast_adain_native_in_fp16_inputs_ios17/kokoro_generator_cos_snake_3s_native_in_broadcast_fp16_inputs_plain_broadcast_adain_native_in_fp16_inputs_ios17.mlpackage",
+  "cos_snake": false,
+  "deployment_target": "ios17",
+  "export": {
+    "broadcast_adain": true,
+    "cos_snake": false,
+    "deployment_target": "ios17",
+    "har_shape": [
+      1,
+      22,
+      28801
+    ],
+    "har_time": null,
+    "input_dtype": "fp16",
+    "input_shape_mode": "fixed",
+    "linear_quantize": null,
+    "native_instance_norm_adain": true,
+    "package": "outputs/generator_cos_snake/3s_native_in_broadcast_fp16_inputs_plain_broadcast_adain_native_in_fp16_inputs_ios17/kokoro_generator_cos_snake_3s_native_in_broadcast_fp16_inputs_plain_broadcast_adain_native_in_fp16_inputs_ios17.mlpackage",
+    "palettize": false,
+    "precision": "fp16",
+    "ref_s_shape": [
+      1,
+      256
+    ],
+    "removed_dropouts": 0,
+    "toolchain": {
+      "coremltools": "8.3.0",
+      "numpy": "1.26.4",
+      "torch": "2.6.0"
+    },
+    "traced_samples": 72000,
+    "x_pre_shape": [
+      1,
+      512,
+      240
+    ]
+  },
+  "fused_package": "coreml/kokoro_decoder_har_post_3s.mlpackage",
+  "har_time": null,
+  "input_dtype": "fp16",
+  "input_shape_mode": "fixed",
+  "linear_quantize": null,
+  "manifest_metadata": {
+    "bucket_seconds": 3,
+    "canonical_duration_s": 2.8,
+    "decoder_frame_count": 120,
+    "duration_model": "padded_t64",
+    "duration_model_allows_padding": true,
+    "duration_token_length": 64,
+    "executable": "kokoro-bench",
+    "full_f0_len": 240,
+    "har_expected_time": 28801,
+    "hnsf_reference_command": "uv run --no-sync python scripts/validate_hnsf_swift.py generate",
+    "input_key": "3s",
+    "natural_frames": 112,
+    "num_tokens": 44,
+    "observed_audio_duration_s": 2.8,
+    "producer": "swift",
+    "seed": 42,
+    "speed": 1,
+    "t_frames": 120,
+    "text": "The quick brown fox jumps over the dog.",
+    "trim_len": 67200,
+    "voice": "af_heart",
+    "x_pre_expected_time": 240
+  },
+  "native_instance_norm_adain": true,
+  "palettize": false,
+  "passes": true,
+  "report": "outputs/generator_cos_snake/3s_native_in_broadcast_fp16_inputs_plain_broadcast_adain_native_in_fp16_inputs_ios17/report_ios17_native_broadcast_fp16_inputs_cpu_gpu.json",
+  "tensor_dump": "outputs/generator_isolation/dumps/3s",
+  "thresholds": {
+    "max_abs_error": 0.01,
+    "min_corr": 0.99,
+    "min_snr": 35.0
+  },
+  "toolchain": {
+    "coremltools": "8.3.0",
+    "numpy": "1.26.4",
+    "torch": "2.6.0"
+  }
+}

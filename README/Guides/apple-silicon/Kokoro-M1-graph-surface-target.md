@@ -64,6 +64,8 @@ Do not spend more time on these as standalone probes:
 - HAR trim alone;
 - fused `GeneratorFromHar` fp16 input dtype alone;
 - fused native `instance_norm` plus fp16 input dtype without eliminating tiles;
+- fused native `instance_norm` plus broadcast AdaIN plus fp16 input dtype as a
+  standalone surface-only change;
 - adding more package boundaries.
 
 Each one has already been measured as slower, noise-sized, or quality-failing.
@@ -123,6 +125,40 @@ Result:
 Decision: partial surface repair, not material. Do not promote to Irvine by
 itself. A useful next candidate must also eliminate the tile footprint or
 otherwise create a measurable local win before remote timing.
+
+## Latest Near-Surface Match
+
+Fused native `instance_norm`, broadcast AdaIN, and fp16 input dtype was tested
+inside the same `GeneratorFromHar` package boundary:
+
+```bash
+uv run --no-sync python scripts/probe_generator_cos_snake.py \
+  --no-cos-snake \
+  --native-instance-norm-adain \
+  --broadcast-adain \
+  --input-dtype fp16 \
+  --deployment-target ios17 \
+  --label 3s_native_in_broadcast_fp16_inputs \
+  --report-name report_ios17_native_broadcast_fp16_inputs_cpu_gpu.json \
+  --warmup 3 \
+  --iterations 10
+```
+
+Result:
+
+- strict pass: corr `0.9999942588867583` vs fused trimmed, SNR `49.84 dB`,
+  max abs `0.00256348`;
+- warmed local M2 Studio CPU+GPU: fused `26.424 ms`, candidate `26.402 ms`,
+  speedup `0.08%`;
+- graph surface: `2207 -> 1533` ops, `88 -> 0` reductions, `96 -> 0` tiles,
+  `0 -> 44` native `instance_norm`, but still no LUT decompression and no
+  material local runtime gain.
+
+Decision: this is the closest first-party fused graph surface to laishere so
+far, but it proves that removing reductions and tiles is not sufficient by
+itself. Do not promote to Irvine unless combined with a change that creates a
+larger local win, changes placement, or adds laishere-like weight
+decompression without quality/runtime failure.
 
 ## Deep Research Request
 

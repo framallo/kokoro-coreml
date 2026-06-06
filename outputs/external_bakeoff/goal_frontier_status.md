@@ -34,7 +34,7 @@ Bundle: `com.kokoro.externalbakeoff.ConfigFIOSRunnerManual`.
 - no saved strict-pass candidate closes a real Irvine loss
 - 4 Irvine no-ASR listening decisions are blank
 - iPhone Config F launch blocker: device_locked
-- Irvine M1 is not quiet enough for publishable timing: load averages 2.64/2.60/2.79 with mds_stores 73.2%, mediaanalysisd 45.2%, Usage 39.5%, and WindowServer 29.8%.
+- Irvine M1 is not quiet enough for publishable timing: load averages 2.95/2.82/2.85 with mediaanalysisd 77.0% and mds_stores 38.7%.
 
 ## Next Actions
 
