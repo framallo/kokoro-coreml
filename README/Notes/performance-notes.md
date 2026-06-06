@@ -899,6 +899,16 @@ So the current M1 root-cause hypothesis is no longer "MLX is faster" or
 vocoder boundary/operator surface unlocks partial NE placement on M1, while our
 quality-safe HAR-post generator remains GPU-bound.
 
+Follow-up check: the strict-parity visible-surface candidate
+`3s_broadcast_adain_native_in_ios17` also unlocks partial NE placement on Irvine
+M1 under `.all` (`30.6%` estimated cost NE, `66.9%` GPU, `2.5%` CPU), but it is
+not a runtime win. The fresh skip-export Irvine run with `--compute-units all`
+measured fused `177.1 ms` versus candidate `318.2 ms` (`-79.7%`) while still
+passing the waveform gate. This rejects the simple next hypothesis that any
+partial NE placement of our strict HAR-post graph will beat laishere. The target
+is narrower: reproduce laishere's useful mixed plan without the synchronization
+penalty and without changing the Swift source/HAR quality contract.
+
 This answers the "how is laishere/MLX faster?" question more narrowly. MLX is
 not faster after warmed Config F correction. Laishere is not faster on M2 Studio
 and is effectively tied on M2 Air when the stage-profile boundary is rerun. The
