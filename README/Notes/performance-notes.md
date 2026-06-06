@@ -239,6 +239,11 @@ launching `com.kokoro.externalbakeoff.ConfigFIOSRunnerManual` because the
 device was locked. The device remains visible and paired; the runner still
 cannot execute until the physical phone is unlocked.
 
+Fresh launch check on 2026-06-06 at 05:52 local time again failed before app
+startup with `FBSOpenApplicationServiceErrorDomain ... RequestDenied ...
+Locked`. CoreDevice could still acquire the tunnel and usage assertion, so the
+blocker remains only the physical phone lock state.
+
 Whisper, ASR, VAD, playback, and echo-demo dependencies are not part of this
 bakeoff boundary. The iOS runner is intentionally Kokoro TTS only.
 
@@ -262,6 +267,17 @@ not reproduce laishere's warmed runtime benefit, so the remaining useful strict
 research is not another isolated flag toggle; it is a single-package surface
 that removes the manual AdaIN/tile footprint while avoiding the measured
 multi-package synchronization penalty.
+
+Fused `GeneratorFromHar` fp16 input dtype was tested directly rather than
+inferred from the split-body failures. `scripts/probe_generator_cos_snake.py`
+now supports `--input-dtype`, and
+`outputs/generator_cos_snake/3s_fused_input_dtype_plain_fp16_inputs/report_fp16_inputs_cpu_gpu.json`
+records the local result: strict pass against the fused output, fused
+`26.434 ms`, fp16-input candidate `26.453 ms`, speedup `-0.07%`, corr `1.0`,
+SNR `142.94 dB`, max abs `0`. The graph comparison
+`outputs/graph_surface/fused_fp16_inputs_3s.json` shows op count only changed
+from `2207` to `2201`, with the same `88` reductions and `96` tiles. This is
+rejected as a standalone path because it does not touch the actual bad surface.
 
 ### Consolidated Warm Median and RTF by Platform
 

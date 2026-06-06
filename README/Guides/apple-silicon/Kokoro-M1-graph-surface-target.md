@@ -62,9 +62,35 @@ Do not spend more time on these as standalone probes:
 - broadcast AdaIN alone;
 - style specialization;
 - HAR trim alone;
+- fused `GeneratorFromHar` fp16 input dtype alone;
 - adding more package boundaries.
 
 Each one has already been measured as slower, noise-sized, or quality-failing.
+
+## Latest Rejection
+
+Fused `GeneratorFromHar` fp16 input dtype was tested directly at the existing
+single-package boundary:
+
+```bash
+uv run --no-sync python scripts/probe_generator_cos_snake.py \
+  --no-cos-snake \
+  --input-dtype fp16 \
+  --label 3s_fused_input_dtype \
+  --report-name report_fp16_inputs_cpu_gpu.json \
+  --warmup 3 \
+  --iterations 10
+```
+
+Result:
+
+- strict pass: corr `1.0` vs fused trimmed, SNR `142.94 dB`, max abs `0`;
+- warmed local M2 Studio CPU+GPU: fused `26.434 ms`, fp16-input candidate
+  `26.453 ms`, speedup `-0.07%`;
+- graph surface: `2207 -> 2201` ops, but still `88` reductions and `96` tiles.
+
+Decision: reject as standalone. It does not remove the manual AdaIN/tile
+surface and is not worth Irvine timing.
 
 ## Deep Research Request
 

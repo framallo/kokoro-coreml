@@ -69,7 +69,7 @@ from scripts.compare_coreml_metadata import (
 )
 from scripts.analyze_waveform_alignment import analyze_pair
 from scripts.create_f0_source_listening_pack import _write_decisions_csv as _write_f0_decisions_csv
-from scripts.probe_generator_cos_snake import _trim_or_pad_last_dim
+from scripts.probe_generator_cos_snake import _np_dtype, _trim_or_pad_last_dim
 from scripts.summarize_f0_source_candidates import (
     collect_rows as collect_f0_candidate_rows,
     load_decisions as load_f0_candidate_decisions,
@@ -1608,6 +1608,15 @@ def test_generator_cos_snake_trim_or_pad_last_dim():
     assert padded.shape == (1, 2, 5)
     assert padded[..., :3].tolist() == arr.tolist()
     assert np.count_nonzero(padded[..., 3:]) == 0
+
+
+def test_generator_cos_snake_np_dtype_labels():
+    import numpy as np
+
+    assert _np_dtype("fp32") is np.float32
+    assert _np_dtype("float32") is np.float32
+    assert _np_dtype("fp16") is np.float16
+    assert _np_dtype("float16") is np.float16
 
 
 def test_waveform_alignment_detects_lag_and_affine_fix():

@@ -81,6 +81,7 @@ Saved Irvine M1 `3s` strict-equivalent results:
 | Native-IN style-specialized fused generator | local `3s` `+0.07 ms`; CPU+NE fails | Noise-sized, not a frontier candidate. |
 | Native-IN style-specialized fused generator + HAR trim | local `3s` `+0.06 ms` | Strict but only `0.22%`; do not promote to Irvine. |
 | Plain cos-Snake/iOS17 fused generator | local `10s -0.16%`, `15s -0.27%` | Strict but slower on remaining medium buckets. |
+| Fused `GeneratorFromHar` fp16 inputs | local `3s -0.07%`; graph still has `88` reductions and `96` tiles | Does not change the actual bad surface. |
 | HAR-source fused strict path | `-22.9 ms` CPU+GPU, `-163.8 ms` CPU+NE | Source/STFT boundary not a win. |
 
 Do not spend research budget on another broad split of the current
@@ -229,6 +230,9 @@ Do not prioritize these unless new evidence changes the premises:
 - Extending the plain cos-Snake/iOS17 fused generator to medium buckets. Local
   `10s` and `15s` are strict but slower, so do not spend Irvine timing on this
   surface by itself.
+- Fused `GeneratorFromHar` fp16 inputs. The direct single-package probe was
+  strict but slower locally and left the manual AdaIN `reduce_mean`/`tile`
+  footprint intact.
 - More broad generator noise/stage splits. The extra Core ML call boundary is
   currently more expensive than the saved graph work.
 

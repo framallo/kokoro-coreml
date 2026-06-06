@@ -180,11 +180,27 @@ def _trim_or_pad_last_dim(array: np.ndarray, length: int | None) -> np.ndarray:
     return out
 
 
-def _predict_inputs(tensors: dict[str, np.ndarray], har_time: int | None = None) -> dict[str, np.ndarray]:
+def _np_dtype(name: str) -> type[np.floating[Any]]:
+    """Return a NumPy floating dtype from a stable CLI label."""
+
+    value = name.strip().lower()
+    if value in {"fp16", "float16"}:
+        return np.float16
+    if value in {"fp32", "float32"}:
+        return np.float32
+    raise ValueError(f"unsupported dtype {name!r}")
+
+
+def _predict_inputs(
+    tensors: dict[str, np.ndarray],
+    har_time: int | None = None,
+    *,
+    dtype: type[np.floating[Any]] = np.float32,
+) -> dict[str, np.ndarray]:
     return {
-        "x_pre": tensors["x_pre_padded"].astype(np.float32),
-        "ref_s": tensors["ref_s"].astype(np.float32),
-        "har": _trim_or_pad_last_dim(tensors["har_padded"], har_time),
+        "x_pre": tensors["x_pre_padded"].astype(dtype),
+        "ref_s": tensors["ref_s"].astype(dtype),
+        "har": _trim_or_pad_last_dim(tensors["har_padded"], har_time).astype(dtype),
     }
 
 
@@ -221,6 +237,7 @@ def _input_tensor_types(
     ref_s_shape: tuple[int, ...],
     har_shape: tuple[int, ...],
     shape_mode: str,
+    dtype: type[np.floating[Any]],
 ) -> list[Any]:
     """Return TensorType declarations for the generator package export."""
 
@@ -228,17 +245,17 @@ def _input_tensor_types(
         ct.TensorType(
             name="x_pre",
             shape=_input_shape(ct, "x_pre", x_pre_shape, shape_mode),
-            dtype=np.float32,
+            dtype=dtype,
         ),
         ct.TensorType(
             name="ref_s",
             shape=_input_shape(ct, "ref_s", ref_s_shape, shape_mode),
-            dtype=np.float32,
+            dtype=dtype,
         ),
         ct.TensorType(
             name="har",
             shape=_input_shape(ct, "har", har_shape, shape_mode),
-            dtype=np.float32,
+            dtype=dtype,
         ),
     ]
 
@@ -254,6 +271,7 @@ def _export_package(
     palettize: bool,
     linear_quantize: str | None,
     input_shape_mode: str,
+    input_dtype: str,
     har_time: int | None,
 ) -> dict[str, Any]:
     import coremltools as ct
@@ -271,6 +289,7 @@ def _export_package(
     ref_s_shape = tuple(int(v) for v in tensors["ref_s"].shape)
     x_pre_shape = tuple(int(v) for v in tensors["x_pre_padded"].shape)
     har_shape = tuple(int(v) for v in _trim_or_pad_last_dim(tensors["har_padded"], har_time).shape)
+    tensor_dtype = _np_dtype(input_dtype)
 
     kmodel = _load_kmodel()
     gen_from_har = GeneratorFromHar(kmodel.decoder.generator).eval()
@@ -291,7 +310,7 @@ def _export_package(
 
     mlmodel = ct.convert(
         traced,
-        inputs=_input_tensor_types(ct, x_pre_shape, ref_s_shape, har_shape, input_shape_mode),
+        inputs=_input_tensor_types(ct, x_pre_shape, ref_s_shape, har_shape, input_shape_mode, tensor_dtype),
         outputs=[ct.TensorType(name="waveform")],
         convert_to="mlprogram",
         minimum_deployment_target=_deployment_target(ct, deployment_target),
@@ -314,6 +333,7 @@ def _export_package(
         "palettize": bool(palettize),
         "linear_quantize": linear_quantize,
         "input_shape_mode": input_shape_mode,
+        "input_dtype": input_dtype,
         "har_time": har_time,
         "removed_dropouts": removed_dropouts,
         "traced_samples": traced_samples,
@@ -339,7 +359,8 @@ def _benchmark(
     import coremltools as ct
 
     fused_inputs = _predict_inputs(tensors)
-    candidate_inputs = _predict_inputs(tensors, args.har_time)
+    candidate_input_dtype = _np_dtype(args.input_dtype)
+    candidate_inputs = _predict_inputs(tensors, args.har_time, dtype=candidate_input_dtype)
     fused = ct.models.MLModel(
         str(args.fused_package),
         compute_units=_compute_units(ct, args.compute_units),
@@ -424,6 +445,8 @@ def run(args: argparse.Namespace) -> dict[str, Any]:
         label = f"{label}_w{args.linear_quantize}"
     if args.input_shape_mode != "fixed":
         label = f"{label}_{args.input_shape_mode}_inputs"
+    if args.input_dtype.lower() not in {"fp32", "float32"}:
+        label = f"{label}_{args.input_dtype.lower()}_inputs"
     if args.deployment_target.lower() != "macos13":
         label = f"{label}_{args.deployment_target.lower()}"
     if args.har_time is not None:
@@ -451,6 +474,7 @@ def run(args: argparse.Namespace) -> dict[str, Any]:
             args.palettize,
             args.linear_quantize,
             args.input_shape_mode,
+            args.input_dtype,
             args.har_time,
         )
 
@@ -477,6 +501,7 @@ def run(args: argparse.Namespace) -> dict[str, Any]:
         "palettize": bool(args.palettize),
         "linear_quantize": args.linear_quantize,
         "input_shape_mode": args.input_shape_mode,
+        "input_dtype": args.input_dtype,
         "har_time": args.har_time,
         "export": export_report,
         "benchmark": benchmark,
@@ -544,6 +569,12 @@ def main() -> None:
         choices=("fixed", "range"),
         default="fixed",
         help="Input shape contract for x_pre/har. 'range' uses bounded RangeDim time axes.",
+    )
+    parser.add_argument(
+        "--input-dtype",
+        default="fp32",
+        choices=("fp32", "float32", "fp16", "float16"),
+        help="Candidate Core ML input dtype for x_pre/ref_s/har. Baseline remains the fused package dtype.",
     )
     parser.add_argument(
         "--har-time",
