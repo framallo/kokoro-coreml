@@ -114,6 +114,9 @@ The shortest useful formulation is:
 > without the existing split-boundary synchronization penalty or a `3s` warmed
 > regression.
 
+For the next implementation pass, use the constrained handoff prompt in
+`README/Guides/apple-silicon/Kokoro-M1-source-body-deep-research-prompt.md`.
+
 ## High-Value Directions
 
 ### 1. Single-Package Body Reshaping

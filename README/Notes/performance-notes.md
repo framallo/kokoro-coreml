@@ -225,6 +225,14 @@ can copy that file from the app data container, ingest it as
 `results_config_f_reference_ios_iphone-12-pro.json`, and regenerate the
 competitive frontier.
 
+Fresh launch check on 2026-06-06 at 05:41 local time: CoreDevice still lists
+`Matt's iPhone` as `available (paired)`. Launching
+`com.kokoro.externalbakeoff.ConfigFIOSRunnerManual` again failed with
+`FBSOpenApplicationServiceErrorDomain ... RequestDenied ... Locked` and
+`Unable to launch ... because the device was not, or could not be, unlocked`.
+The app remains installed; Config F iPhone timing is still blocked by the
+physical lock state, not by build, signing, install, or model packaging.
+
 Whisper, ASR, VAD, playback, and echo-demo dependencies are not part of this
 bakeoff boundary. The iOS runner is intentionally Kokoro TTS only.
 
