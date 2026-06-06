@@ -1099,6 +1099,21 @@ The next boundary-level probe should recreate laishere's actual
 decoder-plus-generator body against the Swift dumps, not only the narrower
 HAR-post `GeneratorFromHar` boundary.
 
+`scripts/external_bakeoff/summarize_irvine_3s_placement_target.py` captures the
+current 3s target as a durable artifact in
+`outputs/external_bakeoff/irvine_3s_placement_target.md`. The saved compute
+plans show our strict HAR-post 3s package has `0` Neural Engine-preferred ops
+under `cpuAndNeuralEngine`, while laishere's `KokoroVocoder` has `597`
+Neural Engine-preferred ops and `47.5%` estimated cost on Neural Engine. The
+same report records the strict partial-NE counterexample:
+`3s_broadcast_adain_native_in_ios17` under `.all` measured `318.2 ms` versus
+`177.1 ms`, so the implementation target is not "turn on ANE"; it is a
+runtime-positive laishere-like mixed CPU/NE body plan that preserves the Swift
+HAR/source contract without introducing the synchronization penalty. The exact
+decoder+vocoder body split already gets `599` Neural Engine-preferred ops and
+`48.7%` estimated cost on Neural Engine, so placement alone is already proven
+insufficient.
+
 #### Fused generator graph-surface probes
 
 `scripts/probe_generator_cos_snake.py` tests generator operator rewrites that

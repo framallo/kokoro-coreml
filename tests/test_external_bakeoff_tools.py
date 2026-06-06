@@ -42,6 +42,10 @@ from scripts.external_bakeoff.summarize_irvine_3s_surfaces import (
     render_markdown as render_irvine_3s_surfaces_markdown,
     summarize_surfaces as summarize_irvine_3s_surfaces,
 )
+from scripts.external_bakeoff.summarize_irvine_3s_placement_target import (
+    render_markdown as render_irvine_3s_placement_target_markdown,
+    summarize_placement_target as summarize_irvine_3s_placement_target,
+)
 from scripts.external_bakeoff.summarize_stage_gap_decomposition import (
     render_markdown as render_stage_gap_markdown,
     summarize_config_record,
@@ -1285,6 +1289,73 @@ def test_irvine_3s_surface_summary_handles_split_schema(tmp_path):
     markdown = render_irvine_3s_surfaces_markdown(summary, top=10)
     assert "Saved Irvine 3s reports only" in markdown
     assert "generator_stage_split" in markdown
+
+
+def test_irvine_3s_placement_target_rejects_compute_unit_flag_flip():
+    ours_cpu_ne = {
+        "computeUnits": "cpuAndNeuralEngine",
+        "operationCount": 2207,
+        "preferredDeviceCounts": {"cpu": 1038, "unknown": 1169},
+        "costWeightByPreferredDevice": {"cpu": 0.0, "unknown": 0.0},
+    }
+    ours_cpu_gpu = {
+        "computeUnits": "cpuAndGPU",
+        "operationCount": 2207,
+        "preferredDeviceCounts": {"gpu": 1041, "unknown": 1166},
+        "costWeightByPreferredDevice": {"gpu": 1.0, "unknown": 0.0},
+    }
+    laishere_cpu_ne = {
+        "computeUnits": "cpuAndNeuralEngine",
+        "operationCount": 1534,
+        "preferredDeviceCounts": {"cpu": 58, "neuralEngine": 597, "unknown": 879},
+        "costWeightByPreferredDevice": {"cpu": 0.496, "neuralEngine": 0.475, "unknown": 0.0},
+    }
+    exact_body_cpu_ne = {
+        "computeUnits": "cpuAndNeuralEngine",
+        "operationCount": 1546,
+        "preferredDeviceCounts": {"cpu": 64, "neuralEngine": 599, "unknown": 883},
+        "costWeightByPreferredDevice": {"cpu": 0.513, "neuralEngine": 0.487, "unknown": 0.0},
+    }
+    surfaces = {
+        "best_strict_pass": {
+            "label": "3s_har28561",
+            "delta_ms": 0.7,
+            "speedup_pct": 0.4,
+            "path": "outputs/example/report.json",
+        },
+        "rows": [
+            {
+                "label": "3s_broadcast_adain_native_in_ios17",
+                "baseline_ms": 177.1,
+                "candidate_ms": 318.2,
+                "speedup_pct": -79.7,
+                "passes": True,
+                "path": "outputs/example/partial_ne.json",
+            }
+        ],
+    }
+    residual = {"residual_after_all_known_positive_estimates_ms": 6.2}
+
+    summary = summarize_irvine_3s_placement_target(
+        ours_cpu_ne,
+        ours_cpu_gpu,
+        laishere_cpu_ne,
+        surfaces,
+        residual,
+        exact_body_cpu_ne,
+    )
+
+    assert summary["compute_unit_flag_flip_is_sufficient"] is False
+    assert summary["ours_cpu_ne_neural_engine_preferred_ops"] == 0
+    assert summary["laishere_cpu_ne_neural_engine_preferred_ops"] == 597
+    assert summary["exact_body_cpu_ne_neural_engine_preferred_ops"] == 599
+    assert summary["strict_partial_ne_counterexample"]["candidate_ms"] == 318.2
+    assert "runtime-positive" in summary["target"]
+
+    markdown = render_irvine_3s_placement_target_markdown(summary)
+    assert "A compute-unit flag flip is not sufficient" in markdown
+    assert "Partial-NE Counterexample" in markdown
+    assert "Exact Body Placement Trap" in markdown
 
 
 def test_coreml_metadata_summary_normalizes_ios_op_names():
