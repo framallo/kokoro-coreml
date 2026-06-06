@@ -3180,6 +3180,15 @@ ios17` was slower again: baseline `34.34 ms`, candidate `265.89 ms`, body
 `256.57 ms`, corr `0.930895`, SNR `9.13 dB`. Deployment target alone is not the
 missing laishere speed ingredient for this static-body probe.
 
+The laishere-style math rewrite remains speed-relevant: with `--cos-snake
+--patch-resblock-scale`, the same F0-source split is slightly faster at local
+3s (`30.63 ms` vs `30.88 ms`) and faster at local 7s (`57.03 ms` vs
+`61.26 ms`, +6.9%). It still fails strict waveform quality (`3s` corr
+`0.931895`, SNR `9.19 dB`; `7s` corr `0.962251`, SNR `11.51 dB`). This is the
+current best speed-positive source/vocoder research branch, but it is not
+production-eligible until source quality is recovered or a human listening gate
+accepts the drift.
+
 ---
 
 ## Bakeoff v5: Corrected benchmark (3s-30s) on M2 Ultra

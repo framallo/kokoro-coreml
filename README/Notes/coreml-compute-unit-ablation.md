@@ -484,6 +484,15 @@ sudo powermetrics -i 1000 --samplers ane
   `34.34 ms`, candidate `265.89 ms`, body `256.57 ms`, corr `0.930895`, SNR
   `9.13 dB`. This rejects "laishere is faster only because iOS17 lowering
   unlocks a better static body plan" for the current probe.
+- **Cos Snake + residual-scale rewrite recovers speed, not quality:** The
+  laishere-style math patch (`--cos-snake --patch-resblock-scale`) makes the
+  first-party F0-source split speed-positive again with the body on CPU+GPU:
+  local 3s padded is `30.63 ms` candidate versus `30.88 ms` baseline, and local
+  7s padded is `57.03 ms` candidate versus `61.26 ms` baseline (`+6.9%`). This
+  still fails strict quality (`3s` corr `0.931895`, SNR `9.19 dB`; `7s` corr
+  `0.962251`, SNR `11.51 dB`). Keep this as the fastest local F0-source
+  research branch, but do not integrate it until the source-quality contract is
+  fixed or a human listening gate explicitly approves it.
 
 **2026-05-17**
 
