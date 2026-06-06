@@ -22,6 +22,7 @@ laishere on Irvine M1 short and medium buckets. The live frontier is tracked by:
 - `outputs/external_bakeoff/candidate_frontier_matrix.md`
 - `outputs/external_bakeoff/remote_host_quiet_latest.md`
 - `README/Guides/apple-silicon/Kokoro-M1-graph-surface-target.md`
+- `README/Guides/apple-silicon/Kokoro-M1-kernel-partition-deep-research-prompt.md`
 
 For `irvine-m1/3s`, the warmed profile gap is:
 
@@ -132,6 +133,8 @@ The shortest useful formulation is:
 
 For the next implementation pass, use the constrained handoff prompt in
 `README/Guides/apple-silicon/Kokoro-M1-source-body-deep-research-prompt.md`.
+For a narrower external-research pass on the current M1 partition paradox, use
+`README/Guides/apple-silicon/Kokoro-M1-kernel-partition-deep-research-prompt.md`.
 The numeric post-rewrite target budget is generated at
 `outputs/external_bakeoff/strict_win_budget_after_rewrite.md`; update it after
 any new strict candidate before changing the research prompt. The candidate

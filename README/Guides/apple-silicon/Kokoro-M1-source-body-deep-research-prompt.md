@@ -58,6 +58,7 @@ Authoritative frontier and target files:
 - `outputs/external_bakeoff/remote_host_quiet_latest.md`
 - `README/Guides/apple-silicon/Kokoro-M1-vocoder-boundary-research-brief.md`
 - `README/Guides/apple-silicon/Kokoro-M1-graph-surface-target.md`
+- `README/Guides/apple-silicon/Kokoro-M1-kernel-partition-deep-research-prompt.md`
 - `README/Notes/performance-notes.md`
 
 The apparent MLX win was a comparison bug: cold compile/cache behavior,
@@ -69,6 +70,8 @@ The current strict CPU+NE body split is the main warning sign. It already gets
 laishere-like Neural Engine preferred-op counts, but it is slower. Therefore
 the target is not "more NE placement." The target is a runtime-positive graph
 boundary and synchronization pattern.
+For a focused investigation of that partition problem, hand off
+`README/Guides/apple-silicon/Kokoro-M1-kernel-partition-deep-research-prompt.md`.
 
 The graph-surface target is also specific: first-party `GeneratorFromHar` has
 manual AdaIN lowering with `88` reductions and `96` tiles, while laishere's

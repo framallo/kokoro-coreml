@@ -4595,6 +4595,13 @@ Irvine M1 has load `2.54/2.64/2.78` with `mediaanalysisd` at `83.0%` CPU and
 `mds_stores` at `107.9%` and `mediaanalysisd` at `36.2%`. Skip lower-end Mac
 frontier promotion until this gate reports `quiet=yes` for the target host.
 
+Added
+`README/Guides/apple-silicon/Kokoro-M1-kernel-partition-deep-research-prompt.md`
+as the focused external-research handoff for the remaining M1 problem: laishere
+gets a runtime-useful CPU+NE vocoder partition, while first-party strict fused
+packages either stay GPU-only or lose when split. Use it when asking an
+external agent for deeper Core ML compiler/runtime research.
+
 ---
 
 ## Bakeoff v5: Corrected benchmark (3s-30s) on M2 Ultra

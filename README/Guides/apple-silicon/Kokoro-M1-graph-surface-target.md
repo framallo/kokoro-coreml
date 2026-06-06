@@ -5,6 +5,8 @@ June 6, 2026
 This note turns the laishere-vs-first-party Core ML graph comparison into an
 implementation target. It is not a general Core ML guide. It is the current
 strict-parity frontier for making Config F faster than laishere on Irvine M1.
+For external research on the unresolved kernel/partition behavior, use
+`README/Guides/apple-silicon/Kokoro-M1-kernel-partition-deep-research-prompt.md`.
 
 ## Current Surface Delta
 
