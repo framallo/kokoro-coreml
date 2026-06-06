@@ -4584,6 +4584,13 @@ rewrite: corr `0.999994`, SNR `49.66 dB`, max abs `0.002197`. Decision: reject
 as a production candidate unless future multi-bucket evidence shows a material
 margin over the simpler rewrite. Report:
 `outputs/generator_style_specialization/3s_style_native_in_ups_as_conv_ios17/report_cpu_gpu_vs_rewrite_n30.json`.
+CPU+NE compute-plan inspection reinforces the rejection: both the production
+rewrite and style-specialized rewrite emitted the same ANE compiler failure
+prefix (`ANECCompile() FAILED`) before returning a plan, and the style package
+remained CPU-preferred (`493` CPU-preferred ops, `0` neural-engine-preferred
+ops, `384` NE-supported ops). The style package cut operation count from `2229`
+to `1171`, but did not create a laishere-like partition or runtime-positive NE
+placement.
 
 `scripts/external_bakeoff/summarize_candidate_frontier_matrix.py` now records
 the current optimization frontier at

@@ -100,8 +100,8 @@
       "strict": true
     },
     {
-      "best_signal": "local 3s +4.54% vs shipped fused, but only +0.17% versus production upsample rewrite at N=30",
-      "decision": "reject as noise-sized over the simpler production rewrite",
+      "best_signal": "local 3s +4.54% vs shipped fused, only +0.17% versus production upsample rewrite at N=30; CPU+NE still CPU-preferred after ANE compile failure",
+      "decision": "reject; noise-sized over the simpler rewrite and does not fix partitioning",
       "evidence": "outputs/generator_style_specialization/3s_style_native_in_ups_as_conv_ios17/report_cpu_gpu_vs_rewrite_n30.json",
       "family": "Style-specialized generator plus upsample rewrite",
       "next_gate": "do not promote unless multi-bucket local evidence beats production rewrite by a material margin",

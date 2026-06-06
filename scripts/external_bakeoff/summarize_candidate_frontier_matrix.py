@@ -96,11 +96,11 @@ CANDIDATES: tuple[Candidate, ...] = (
     Candidate(
         family="Style-specialized generator plus upsample rewrite",
         scope="single-package fixed-voice GeneratorFromHar with native-IN and zero-insert upsample rewrite",
-        best_signal="local 3s +4.54% vs shipped fused, but only +0.17% versus production upsample rewrite at N=30",
+        best_signal="local 3s +4.54% vs shipped fused, only +0.17% versus production upsample rewrite at N=30; CPU+NE still CPU-preferred after ANE compile failure",
         quality="strict: corr 0.999993, SNR 49.09 dB, max abs 0.002197",
         strict=True,
         production_ready=False,
-        decision="reject as noise-sized over the simpler production rewrite",
+        decision="reject; noise-sized over the simpler rewrite and does not fix partitioning",
         evidence="outputs/generator_style_specialization/3s_style_native_in_ups_as_conv_ios17/report_cpu_gpu_vs_rewrite_n30.json",
         next_gate="do not promote unless multi-bucket local evidence beats production rewrite by a material margin",
     ),
