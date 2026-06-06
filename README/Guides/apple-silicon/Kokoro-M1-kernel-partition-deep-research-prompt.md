@@ -29,6 +29,18 @@ The stricter paper frontier target still needs more. Use
 `outputs/external_bakeoff/strict_win_budget_after_rewrite.md` as the current
 numeric authority.
 
+The latest paper-frontier path is now more specific:
+
+- `outputs/external_bakeoff/irvine_paper_frontier_path.md`
+- source/body plus HAR-post rewrite closes Irvine `10s` by `+2.6 ms` if
+  listening accepts the source candidate;
+- `15s` is still `2.7 ms` short;
+- `3s` and `7s` remain the hard paper-frontier gaps, needing another `31.4 ms`
+  and `37.4 ms` after the best saved source/body plus rewrite projections.
+
+For an external research pass focused only on those hard short-bucket gaps, use
+`README/Guides/apple-silicon/Kokoro-M1-paper-frontier-3s-7s-deep-research-prompt.md`.
+
 Do not spend this research pass explaining or optimizing against MLX. The
 current generated evidence says MLX is not faster than corrected warmed Config F
 on any full-duration Mac row:
@@ -66,8 +78,11 @@ This creates the main paradox:
 ## Evidence To Read First
 
 - `outputs/external_bakeoff/candidate_frontier_matrix.md`
+- `outputs/external_bakeoff/lower_end_mac_win_gate.md`
+- `outputs/external_bakeoff/irvine_paper_frontier_path.md`
 - `outputs/external_bakeoff/irvine_3s_placement_target.md`
 - `outputs/external_bakeoff/strict_win_budget_after_rewrite.md`
+- `README/Guides/apple-silicon/Kokoro-M1-paper-frontier-3s-7s-deep-research-prompt.md`
 - `README/Guides/apple-silicon/Kokoro-M1-graph-surface-target.md`
 - `README/Guides/apple-silicon/Kokoro-M1-vocoder-boundary-research-brief.md`
 - `README/Notes/coreml-compute-unit-ablation.md`

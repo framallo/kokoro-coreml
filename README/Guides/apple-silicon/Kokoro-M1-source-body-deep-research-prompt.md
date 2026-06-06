@@ -52,10 +52,13 @@ regression.
 Authoritative frontier and target files:
 
 - `outputs/external_bakeoff/goal_frontier_status.md`
+- `outputs/external_bakeoff/lower_end_mac_win_gate.md`
+- `outputs/external_bakeoff/irvine_paper_frontier_path.md`
 - `outputs/external_bakeoff/irvine_3s_placement_target.md`
 - `outputs/external_bakeoff/irvine_next_targets.md`
 - `outputs/external_bakeoff/candidate_frontier_matrix.md`
 - `outputs/external_bakeoff/remote_host_quiet_latest.md`
+- `README/Guides/apple-silicon/Kokoro-M1-paper-frontier-3s-7s-deep-research-prompt.md`
 - `README/Guides/apple-silicon/Kokoro-M1-vocoder-boundary-research-brief.md`
 - `README/Guides/apple-silicon/Kokoro-M1-graph-surface-target.md`
 - `README/Guides/apple-silicon/Kokoro-M1-kernel-partition-deep-research-prompt.md`
@@ -160,6 +163,19 @@ Latest lower-end evidence:
   `outputs/f0_source_listening/m2_air_3s_source_body/f0_source_listening_decisions.csv`
   is intentionally blank until a human listens. Do not treat these as accepted
   production rows before that CSV validates.
+
+Latest paper-frontier correction:
+
+- M2 Air `3s` has two paper-frontier wins if human listening accepts the
+  source/body rows.
+- Irvine source/body candidates can beat several newer warmed profile rows, but
+  none beats the stricter paper-facing frontier by itself.
+- Combining source/body with the measured HAR-post rewrite closes only Irvine
+  `10s` (`591.2 ms` projected versus `593.9 ms` paper row), leaves `15s`
+  `2.7 ms` short, and leaves `3s/7s` far short (`31.4 ms` and `37.4 ms`
+  additional saves needed).
+- For the next external research pass, use
+  `README/Guides/apple-silicon/Kokoro-M1-paper-frontier-3s-7s-deep-research-prompt.md`.
 
 Acceptance:
 

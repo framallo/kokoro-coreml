@@ -7,6 +7,29 @@ implementation target. It is not a general Core ML guide. It is the current
 strict-parity frontier for making Config F faster than laishere on Irvine M1.
 For external research on the unresolved kernel/partition behavior, use
 `README/Guides/apple-silicon/Kokoro-M1-kernel-partition-deep-research-prompt.md`.
+For the narrower paper-frontier short-bucket target, use
+`README/Guides/apple-silicon/Kokoro-M1-paper-frontier-3s-7s-deep-research-prompt.md`.
+
+## Current Short-Bucket Paper Target
+
+The latest source/body plus HAR-post rewrite combined frontier is tracked in:
+
+- `outputs/external_bakeoff/lower_end_mac_win_gate.md`
+- `outputs/external_bakeoff/irvine_paper_frontier_path.md`
+
+That report shows source/body plus the HAR-post rewrite can close Irvine `10s`
+if listening accepts the source candidate, leaves Irvine `15s` `2.7 ms` short,
+and leaves Irvine `3s/7s` `31.4 ms` and `37.4 ms` short of the paper-facing
+laishere rows. Do not treat newer profile-only wins as paper-frontier wins.
+
+| Bucket | Combined projected Config F | Paper frontier | Extra save needed |
+| --- | ---: | ---: | ---: |
+| `3s` | `207.7 ms` | `176.3 ms` | `31.4 ms` |
+| `7s` | `432.0 ms` | `394.6 ms` | `37.4 ms` |
+
+The useful next implementation target is therefore not a small surface cleanup.
+It must change package boundary, tensor layout, runtime synchronization, or
+source/body contract enough to remove tens of milliseconds on M1 short buckets.
 
 ## Current Surface Delta
 
