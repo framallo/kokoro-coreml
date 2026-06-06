@@ -4162,6 +4162,16 @@ for 3s and `0.96731` for 7s. Laishere is faster partly because it moves this
 source work into a simplified Core ML graph; that is not strict-equivalent to
 our current seeded Double-accumulator Swift HnSF contract.
 
+The five-bucket source-variant refresh makes the blocker sharper:
+`outputs/f0_source_variants/summary_3s_7s_10s_15s_30s.md` reports
+`source_equation_is_solved=true` and `recomputed_stft_har_is_solved=false`.
+`swift_like_seeded` matches dumped `har_source` at SNR `138.15-140.33 dB`
+across `3s/7s/10s/15s/30s`, but recomputing HAR/STFT from even the exact dumped
+source stays near SNR `8.11-8.23 dB` with max abs `6.28`, consistent with
+phase-wrap/representation mismatch. So future quality-recovery work should not
+spend more time on the sine source equation alone; the missing strict contract
+is the Swift HAR/STFT representation or a quality-accepted replacement for it.
+
 Keeping exact Swift HAR and only splitting the laishere-style noise/body/tail
 is not a win locally. The exact-HAR cos/residual split passes quality, but is
 slower: 3s `36.76 ms` vs `32.07 ms`, and 7s `67.72 ms` vs `60.88 ms`. The

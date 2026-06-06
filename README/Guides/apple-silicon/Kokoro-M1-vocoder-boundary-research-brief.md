@@ -171,6 +171,10 @@ Research targets:
   character relative to the seeded Swift Double-accumulator HnSF source.
 - Find a Core ML-friendly source formulation that improves correlation/SNR
   without losing the speed signal.
+- Treat the sine-source equation as mostly solved: the five-bucket
+  `swift_like_seeded` probe matches dumped `har_source` at SNR `138.15-140.33 dB`.
+  The unsolved part is HAR/STFT recreation from source, which remains near SNR
+  `8.11-8.23 dB` even when recomputing from the exact dumped source.
 - If objective parity remains impossible, define a listening-review protocol
   that can support a "quality-equivalent" paper claim without Whisper/ASR.
 

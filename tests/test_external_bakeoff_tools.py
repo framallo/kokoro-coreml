@@ -72,6 +72,10 @@ from scripts.summarize_f0_source_candidates import (
     render_markdown as render_f0_candidate_markdown,
     summarize_report as summarize_f0_candidate_report,
 )
+from scripts.summarize_f0_source_variants import (
+    render_markdown as render_f0_source_variant_markdown,
+    summarize_source_variants,
+)
 from scripts.summarize_frontier_gap_candidates import (
     infer_bucket as infer_gap_candidate_bucket,
     infer_machine as infer_gap_candidate_machine,
@@ -1404,6 +1408,59 @@ def test_coreml_metadata_summary_normalizes_ios_op_names():
     assert "laishere" in markdown
     assert "asr:Float16 [1, 512, 120]" in markdown
     assert "constexprLutToDense=101" in markdown
+
+
+def test_f0_source_variant_summary_separates_source_from_har_stft():
+    payload = {
+        "reports": [
+            {
+                "input_key": "3s",
+                "bucket_seconds": 3,
+                "tensor_dump": "outputs/dumps/3s",
+                "metrics_vs_dump_har_source": {
+                    "swift_like_seeded": {"correlation": 1.0, "snr_db": 138.0},
+                    "linear_interp_noise_0": {"correlation": 0.94, "snr_db": 10.8},
+                    "original_pytorch_seeded": {"correlation": 0.88, "snr_db": 7.9},
+                },
+                "metrics_vs_dump_har_padded": {
+                    "dump_source_recomputed_stft": {
+                        "correlation": 0.923,
+                        "snr_db": 8.1,
+                        "max_abs_error": 6.283185,
+                    },
+                    "swift_like_seeded": {"correlation": 0.923, "snr_db": 8.1},
+                },
+            },
+            {
+                "input_key": "7s",
+                "bucket_seconds": 7,
+                "tensor_dump": "outputs/dumps/7s",
+                "metrics_vs_dump_har_source": {
+                    "swift_like_seeded": {"correlation": 1.0, "snr_db": 139.0},
+                    "probe_avg_pool_noise_0": {"correlation": 0.967, "snr_db": 13.2},
+                },
+                "metrics_vs_dump_har_padded": {
+                    "dump_source_recomputed_stft": {
+                        "correlation": 0.922,
+                        "snr_db": 8.2,
+                        "max_abs_error": 6.283185,
+                    }
+                },
+            },
+        ]
+    }
+
+    summary = summarize_source_variants(payload)
+
+    assert summary["row_count"] == 2
+    assert summary["source_equation_is_solved"] is True
+    assert summary["recomputed_stft_har_is_solved"] is False
+    assert summary["rows"][0]["best_simplified_source_variant"] == "linear_interp_noise_0"
+    assert "HAR/STFT representation contract" in summary["interpretation"]
+
+    markdown = render_f0_source_variant_markdown(summary)
+    assert "Source equation solved: `true`" in markdown
+    assert "Recomputed HAR/STFT solved: `false`" in markdown
 
 
 def test_generator_cos_snake_trim_or_pad_last_dim():
