@@ -497,6 +497,17 @@ sudo powermetrics -i 1000 --samplers ane
   ML conversion drift: the shipped baseline versus dump is corr `0.999996`, SNR
   `51.60 dB`, while the PyTorch F0-source candidate itself is only corr
   `0.939812`, SNR `9.57 dB` against the dump.
+- **F0-source phase-mode variants do not recover quality:** Added
+  `--phase-mode {atan2,acos,atan_manual,atan_swift}` to
+  `scripts/probe_f0_noise_exact_shape.py` and reran local 3s with the known-fast
+  `--cos-snake --patch-resblock-scale` branch. All variants remain
+  quality-rejected. Baseline `atan2` is corr `0.931895`, SNR `9.19 dB`;
+  `atan_swift` is worse at corr `0.915815`, SNR `7.44 dB`; `atan_manual` is
+  corr `0.938613`, SNR `9.47 dB`; `acos` is the best alternate at corr
+  `0.949566`, SNR `10.34 dB` but still far below strict parity. This closes
+  raw phase branch selection as the missing F0-source quality fix; the remaining
+  gap is source formulation and/or human-listening acceptance, not a Core ML
+  `atan2` lowering issue.
 
 **2026-05-17**
 

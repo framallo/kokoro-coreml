@@ -100,7 +100,7 @@ def _patch_resblock_rsqrt() -> None:
     AdainResBlk1d.forward = _patched_forward
 
 
-def _make_f0_noise_module(generator: Any):
+def _make_f0_noise_module(generator: Any, phase_mode: str):
     """Return ``F0 + style -> x_source_*`` module using first-party weights."""
 
     import torch
@@ -172,8 +172,9 @@ def _make_f0_noise_module(generator: Any):
     class _CoreMLForwardSTFT(nn.Module):
         """Forward STFT via fixed Conv1d kernels."""
 
-        def __init__(self, original_stft: Any):
+        def __init__(self, original_stft: Any, mode: str):
             super().__init__()
+            self.phase_mode = mode
             self.center = original_stft.center
             self.n_fft = original_stft.n_fft
             self.pad_mode = original_stft.pad_mode
@@ -205,7 +206,37 @@ def _make_f0_noise_module(generator: Any):
             real = self.conv_real(x)
             imag = self.conv_imag(x)
             magnitude = torch.sqrt(real**2 + imag**2 + 1e-14)
-            phase = torch.atan2(imag, real)
+            if self.phase_mode == "atan2":
+                phase = torch.atan2(imag, real)
+            elif self.phase_mode == "acos":
+                denom = torch.sqrt(real * real + imag * imag + 1e-14)
+                cos_phase = torch.clamp(real / denom, min=-1.0, max=1.0)
+                abs_phase = torch.acos(cos_phase)
+                sign = torch.where(imag < 0, -torch.ones_like(imag), torch.ones_like(imag))
+                phase = abs_phase * sign
+            elif self.phase_mode in {"atan_manual", "atan_swift"}:
+                eps = torch.tensor(1e-12, dtype=real.dtype, device=real.device)
+                safe_real = torch.where(real.abs() < eps, torch.where(real < 0, -eps, eps), real)
+                base = torch.atan(imag / safe_real)
+                pi = torch.tensor(math.pi, dtype=real.dtype, device=real.device)
+                phase = torch.where(
+                    real < 0,
+                    torch.where(imag >= 0, base + pi, base - pi),
+                    base,
+                )
+                phase = torch.where(
+                    (real == 0) & (imag > 0),
+                    pi / 2,
+                    torch.where((real == 0) & (imag < 0), -pi / 2, phase),
+                )
+                if self.phase_mode == "atan_swift":
+                    phase = torch.where(
+                        (imag == 0) & (real < 0),
+                        -pi,
+                        phase,
+                    )
+            else:
+                raise RuntimeError(f"unsupported phase_mode: {self.phase_mode}")
             return magnitude, phase
 
     class _F0NoiseModel(nn.Module):
@@ -220,7 +251,7 @@ def _make_f0_noise_module(generator: Any):
                 hop_length=gen.stft.hop_length,
                 win_length=gen.stft.win_length,
             )
-            self.stft = _CoreMLForwardSTFT(fwd_stft)
+            self.stft = _CoreMLForwardSTFT(fwd_stft, phase_mode)
             self.noise_convs = gen.noise_convs
             self.noise_res = gen.noise_res
 
@@ -299,7 +330,7 @@ def _export_packages(
     n_pred = torch.zeros(n_shape, dtype=torch.float32)
     style = torch.zeros(style_shape, dtype=torch.float32)
 
-    noise = _make_f0_noise_module(gen)
+    noise = _make_f0_noise_module(gen, args.phase_mode)
     noise_removed_dropouts = remove_dropout(noise)
     with torch.no_grad():
         traced_noise = torch.jit.trace(noise, (f0, style), strict=False, check_trace=False)
@@ -392,6 +423,7 @@ def _export_packages(
     return {
         "toolchain": _toolchain_report(),
         "deployment_target": args.deployment_target,
+        "phase_mode": args.phase_mode,
         "noise_package": str(noise_package),
         "body_package": str(body_package),
         "tail_package": str(tail_package),
@@ -700,6 +732,7 @@ def main() -> None:
     parser.add_argument("--body-input-dtype", default="fp32", choices=("fp16", "float16", "fp32", "float32"))
     parser.add_argument("--tail-precision", default="fp32", choices=("fp16", "float16", "fp32", "float32"))
     parser.add_argument("--deployment-target", default="macos13", choices=("macos13", "ios16", "ios17"))
+    parser.add_argument("--phase-mode", default="atan2", choices=("atan2", "acos", "atan_manual", "atan_swift"))
     parser.add_argument("--decoder-pre-compute-units", default="cpuAndNeuralEngine")
     parser.add_argument("--fused-compute-units", default="cpuAndGPU")
     parser.add_argument("--noise-compute-units", default="all")

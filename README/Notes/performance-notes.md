@@ -3202,6 +3202,14 @@ candidates are `needs_listening` with no waveform-health reject reasons. This
 does not approve the branch; it creates the human review artifact the user
 requested after skipping Whisper/ASR.
 
+Phase-mode recovery was tested and rejected for the 3s cos/residual F0-source
+branch. `scripts/probe_f0_noise_exact_shape.py` now supports `--phase-mode`;
+`acos` gave the best alternate result (candidate `32.54 ms` vs baseline
+`32.79 ms`, corr `0.949566`, SNR `10.34 dB`) but still failed strict quality.
+`atan_swift` preserved speed but worsened quality (corr `0.915815`, SNR
+`7.44 dB`). The next step is source formulation or listening acceptance, not
+more phase branch tuning.
+
 ---
 
 ## Bakeoff v5: Corrected benchmark (3s-30s) on M2 Ultra
