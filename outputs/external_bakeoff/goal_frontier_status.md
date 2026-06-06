@@ -26,6 +26,7 @@ Decision counts: `{"blank": 4}`.
 Install OK: `true`.
 Launch OK: `false`.
 Launch blocker: `device_locked`.
+Latest run check: `2026-06-06T07:23:09-07:00`.
 Bundle: `com.kokoro.externalbakeoff.ConfigFIOSRunnerManual`.
 
 ## Blockers
@@ -34,7 +35,6 @@ Bundle: `com.kokoro.externalbakeoff.ConfigFIOSRunnerManual`.
 - no saved strict-pass candidate closes a real Irvine loss
 - 4 Irvine no-ASR listening decisions are blank
 - iPhone Config F launch blocker: device_locked
-- 2026-06-06 06:51 local: irvine-m1 load averages 2.95/2.99/3.01; mediaanalysisd 66.0% CPU and mds_stores 40.3% CPU, so skip publishable Irvine timing for the upsample rewrite candidate.
 
 ## Next Actions
 

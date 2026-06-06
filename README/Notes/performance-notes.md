@@ -4602,6 +4602,16 @@ gets a runtime-useful CPU+NE vocoder partition, while first-party strict fused
 packages either stay GPU-only or lose when split. Use it when asking an
 external agent for deeper Core ML compiler/runtime research.
 
+`scripts/external_bakeoff/run_config_f_ios_when_unlocked.py` now provides the
+one-command Config F iPhone resume path. It records
+`outputs/external_bakeoff/config_f_ios_run_latest.json`, launches the installed
+manual runner when the physical device is unlocked, polls up to two hours for
+`Documents/config_f_ios_result.json`, ingests
+`results_config_f_reference_ios_iphone-12-pro.json`, and refreshes the
+competitive frontier. The 2026-06-06 07:23 local live launch attempt still
+failed with `device_locked`, so iPhone timing remains blocked only by the
+physical lock state.
+
 ---
 
 ## Bakeoff v5: Corrected benchmark (3s-30s) on M2 Ultra

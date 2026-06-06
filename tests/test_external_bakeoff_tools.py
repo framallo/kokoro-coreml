@@ -7,6 +7,7 @@ from pathlib import Path
 
 from scripts.create_f0_source_listening_pack import _natural_asr_enabled
 from scripts.external_bakeoff import check_remote_host_quiet
+from scripts.external_bakeoff import run_config_f_ios_when_unlocked
 from scripts.external_bakeoff.create_listening_review import _write_decisions_csv
 from scripts.external_bakeoff.ingest_ios_runner_result import _ingest_records
 from scripts.external_bakeoff.run_laishere_kokoro_coreml import (
@@ -33,6 +34,7 @@ from scripts.external_bakeoff.summarize_frontier_freshness import (
     summarize_freshness,
 )
 from scripts.external_bakeoff.summarize_goal_frontier_status import (
+    _merge_ios_status,
     render_markdown as render_goal_frontier_status_markdown,
     summarize_status as summarize_goal_frontier_status,
 )
@@ -1154,6 +1156,7 @@ def test_goal_frontier_status_exposes_blockers_and_next_actions():
         "install_ok": True,
         "launch_ok": False,
         "launch_blocker": "device_locked",
+        "checked_at_local": "2026-06-06T07:23:09-07:00",
         "bundle_id": "com.kokoro.externalbakeoff.ConfigFIOSRunnerManual",
         "device": {"model": "iPhone 12 Pro"},
     }
@@ -1180,6 +1183,7 @@ def test_goal_frontier_status_exposes_blockers_and_next_actions():
     markdown = render_goal_frontier_status_markdown(summary)
     assert "Absolute fastest verified: `false`." in markdown
     assert "| `3s` | 233.6 ms | 195.0 ms | 38.6 ms / 19.80% |" in markdown
+    assert "Latest run check: `2026-06-06T07:23:09-07:00`." in markdown
     assert "Retry iPhone Config F runner only after the physical device is unlocked." in markdown
 
 
@@ -1729,6 +1733,30 @@ def test_completion_verifier_accepts_manual_config_f_ios_install(tmp_path):
     assert preflight_errors == []
 
 
+def test_goal_frontier_status_prefers_latest_ios_run_blocker():
+    merged = _merge_ios_status(
+        {
+            "install_ok": True,
+            "launch_ok": False,
+            "launch_blocker": "older_blocker",
+            "bundle_id": "com.kokoro.externalbakeoff.ConfigFIOSRunnerManual",
+        },
+        {
+            "app_bundle_id": "com.kokoro.externalbakeoff.ConfigFIOSRunnerManual",
+            "checked_at_local": "2026-06-06T07:23:09-07:00",
+            "launch_ok": False,
+            "launch_blocker": "device_locked",
+            "ok": False,
+        },
+    )
+
+    assert merged["install_ok"] is True
+    assert merged["bundle_id"] == "com.kokoro.externalbakeoff.ConfigFIOSRunnerManual"
+    assert merged["launch_blocker"] == "device_locked"
+    assert merged["checked_at_local"] == "2026-06-06T07:23:09-07:00"
+    assert merged["latest_run_status"]["ok"] is False
+
+
 def test_candidate_frontier_matrix_records_successes_failures_and_blockers(tmp_path):
     strict_budget = tmp_path / "strict_budget.json"
     ios_install = tmp_path / "ios_install.json"
@@ -1832,3 +1860,64 @@ def test_remote_host_quiet_allows_publishable_timing_when_thresholds_pass(monkey
     assert payload["publishable_timing_allowed"] is True
     assert payload["rows"][0]["quiet"] is True
     assert payload["rows"][0]["blockers"] == []
+
+
+def test_config_f_ios_runner_detects_locked_launch_error():
+    text = (
+        "FBSOpenApplicationServiceErrorDomain RequestDenied Locked: "
+        "Unable to launch com.kokoro.externalbakeoff.ConfigFIOSRunnerManual "
+        "because the device was not, or could not be, unlocked"
+    )
+
+    assert run_config_f_ios_when_unlocked._is_locked_launch_error(text)
+    assert not run_config_f_ios_when_unlocked._is_locked_launch_error("network timeout")
+
+
+def test_config_f_ios_runner_mocked_success_flow(tmp_path, monkeypatch):
+    calls = []
+    pulled_json = tmp_path / "config_f_ios_result_latest.json"
+    ingested_json = tmp_path / "results_config_f_reference_ios_iphone-12-pro.json"
+
+    def fake_run(command, *, timeout_s=60):
+        calls.append(command)
+        if command[:5] == ["xcrun", "devicectl", "device", "info", "lockState"]:
+            return subprocess.CompletedProcess(
+                command,
+                0,
+                stdout="Current device lock state:\n• unlockedSinceBoot: true\n",
+                stderr="",
+            )
+        if command[:5] == ["xcrun", "devicectl", "device", "process", "launch"]:
+            return subprocess.CompletedProcess(command, 0, stdout="Launched application\n", stderr="")
+        if command[:5] == ["xcrun", "devicectl", "device", "copy", "from"]:
+            pulled_json.write_text('{"records": []}\n')
+            return subprocess.CompletedProcess(command, 0, stdout="Copied file\n", stderr="")
+        if command[:2] == ["python", "scripts/external_bakeoff/ingest_ios_runner_result.py"]:
+            ingested_json.write_text('{"records": []}\n')
+            return subprocess.CompletedProcess(command, 0, stdout=f"Wrote {ingested_json}\n", stderr="")
+        if command[:2] == ["python", "scripts/external_bakeoff/summarize_competitive_frontier.py"]:
+            return subprocess.CompletedProcess(command, 0, stdout="wrote frontier\n", stderr="")
+        raise AssertionError(command)
+
+    monkeypatch.setattr(run_config_f_ios_when_unlocked, "_run", fake_run)
+    args = argparse.Namespace(
+        app_bundle_id="com.kokoro.externalbakeoff.ConfigFIOSRunnerManual",
+        check_only=False,
+        copy_timeout_s=60,
+        device_id="device-id",
+        ingested_json=ingested_json,
+        launch_timeout_s=60,
+        poll_interval_s=0.0,
+        poll_timeout_s=0.0,
+        pulled_json=pulled_json,
+        remote_result="Documents/config_f_ios_result.json",
+    )
+
+    status = run_config_f_ios_when_unlocked.run(args)
+
+    assert status["ok"] is True
+    assert status["launch_ok"] is True
+    assert status["poll_result"]["ok"] is True
+    assert status["ingest"]["ok"] is True
+    assert status["frontier"]["ok"] is True
+    assert any(command[:5] == ["xcrun", "devicectl", "device", "process", "launch"] for command in calls)

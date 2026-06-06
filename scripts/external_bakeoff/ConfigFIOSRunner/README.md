@@ -35,3 +35,26 @@ xcodebuild -project ConfigFIOSRunner.xcodeproj \
 
 The first 30s generator compile can take a long time on older iPhones. Compare
 only the warmed timings in the emitted JSON.
+
+## Resume After Unlock
+
+The direct-`swiftc` manual runner is already installed as
+`com.kokoro.externalbakeoff.ConfigFIOSRunnerManual`. Once the physical iPhone is
+unlocked, this wrapper launches the app, waits for
+`Documents/config_f_ios_result.json`, ingests the result, and refreshes the
+competitive frontier:
+
+```bash
+uv run --no-sync python scripts/external_bakeoff/run_config_f_ios_when_unlocked.py
+```
+
+The default poll timeout is two hours because the first `30s` Core ML compile
+can take over an hour on older devices. For a status-only probe that does not
+launch the app:
+
+```bash
+uv run --no-sync python scripts/external_bakeoff/run_config_f_ios_when_unlocked.py --check-only
+```
+
+The latest structured status is written to
+`outputs/external_bakeoff/config_f_ios_run_latest.json`.

@@ -22,6 +22,7 @@ DEFAULT_FRESHNESS_JSON = DEFAULT_OUTPUT_DIR / "frontier_freshness.json"
 DEFAULT_NEXT_TARGETS_JSON = DEFAULT_OUTPUT_DIR / "irvine_next_targets.json"
 DEFAULT_LISTENING_JSON = DEFAULT_OUTPUT_DIR / "irvine_listening_targets.json"
 DEFAULT_IOS_INSTALL_JSON = DEFAULT_OUTPUT_DIR / "config_f_ios_manual_install_latest.json"
+DEFAULT_IOS_RUN_JSON = DEFAULT_OUTPUT_DIR / "config_f_ios_run_latest.json"
 DEFAULT_DECISIONS = (
     Path("outputs")
     / "f0_source_listening"
@@ -39,6 +40,37 @@ def _load_json(path: Path) -> dict[str, Any]:
     if not isinstance(payload, dict):
         raise ValueError(f"{path} did not contain a JSON object")
     return payload
+
+
+def _load_optional_json(path: Path) -> dict[str, Any]:
+    """Load a JSON object if it exists, otherwise return an empty object."""
+
+    if not path.exists():
+        return {}
+    return _load_json(path)
+
+
+def _merge_ios_status(install: dict[str, Any], run_status: dict[str, Any]) -> dict[str, Any]:
+    """Merge install evidence with the latest Config F launch/run evidence."""
+
+    if not run_status:
+        return install
+    merged = dict(install)
+    if run_status.get("app_bundle_id") and not merged.get("bundle_id"):
+        merged["bundle_id"] = run_status["app_bundle_id"]
+    for key in (
+        "checked_at_local",
+        "launch_blocker",
+        "launch_error",
+        "launch_ok",
+        "lock_state",
+        "ok",
+        "runner",
+    ):
+        if key in run_status:
+            merged[key] = run_status[key]
+    merged["latest_run_status"] = run_status
+    return merged
 
 
 def _decision_counts(path: Path) -> dict[str, int]:
@@ -114,6 +146,7 @@ def summarize_status(
             "launch_ok": bool(ios_install.get("launch_ok")),
             "launch_blocker": ios_install.get("launch_blocker"),
             "bundle_id": ios_install.get("bundle_id"),
+            "latest_run_checked_at_local": ios_install.get("checked_at_local"),
             "device": ios_install.get("device") or {},
         },
         "blockers": blockers,
@@ -184,6 +217,7 @@ def render_markdown(summary: dict[str, Any]) -> str:
             f"Install OK: `{str(iphone['install_ok']).lower()}`.",
             f"Launch OK: `{str(iphone['launch_ok']).lower()}`.",
             f"Launch blocker: `{iphone['launch_blocker'] or '-'}`.",
+            f"Latest run check: `{iphone.get('latest_run_checked_at_local') or '-'}`.",
             f"Bundle: `{iphone['bundle_id'] or '-'}`.",
             "",
             "## Blockers",
@@ -205,18 +239,20 @@ def main() -> int:
     parser.add_argument("--next-targets-json", type=Path, default=DEFAULT_NEXT_TARGETS_JSON)
     parser.add_argument("--listening-json", type=Path, default=DEFAULT_LISTENING_JSON)
     parser.add_argument("--ios-install-json", type=Path, default=DEFAULT_IOS_INSTALL_JSON)
+    parser.add_argument("--ios-run-json", type=Path, default=DEFAULT_IOS_RUN_JSON)
     parser.add_argument("--decisions", type=Path, default=DEFAULT_DECISIONS)
     parser.add_argument("--irvine-load-note", default="")
     parser.add_argument("--output", type=Path, default=DEFAULT_OUTPUT)
     parser.add_argument("--json-output", type=Path, default=DEFAULT_JSON_OUTPUT)
     args = parser.parse_args()
 
+    ios_status = _merge_ios_status(_load_json(args.ios_install_json), _load_optional_json(args.ios_run_json))
     summary = summarize_status(
         _load_json(args.frontier_json),
         _load_json(args.freshness_json),
         _load_json(args.next_targets_json),
         _load_json(args.listening_json),
-        _load_json(args.ios_install_json),
+        ios_status,
         _decision_counts(args.decisions),
         irvine_load_note=args.irvine_load_note,
     )
