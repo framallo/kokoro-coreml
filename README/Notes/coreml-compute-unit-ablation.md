@@ -231,21 +231,18 @@ sudo powermetrics -i 1000 --samplers ane
   reductions/broadcasts, and Snake lowering), or to evaluate a larger
   end-to-end graph reshape rather than the already-rejected static HAR-post
   splits.
-- **Fused cos-Snake rewrite rejected as a standalone production change:** `scripts/probe_generator_cos_snake.py`
-  exported the current fused `GeneratorFromHar` boundary with laishere's
-  algebraic cos-form Snake. Parity was exact on local M2 Studio `3s` and `7s`,
-  but latency was neutral: `3s` moved from `28.3 ms` to `27.9 ms` (+`1.27%`),
-  while `7s` moved from `57.2 ms` to `57.7 ms` (-`0.74%`). Cos-Snake may still
-  be useful inside a larger operator rewrite, but by itself it is not a
-  measured win.
-- **Broadcast AdaIN rejected as a source-level cleanup:** `scripts/probe_generator_cos_snake.py`
-  can now patch `AdaIN1d.forward` to use `(B, C, 1)` gamma/beta broadcasts
-  instead of explicit `expand(B, C, T)`. Parity was exact on local M2 Studio,
-  but latency was neutral-to-worse: `3s` fused `30.6 ms` vs broadcast `31.3 ms`,
-  and `7s` fused `62.4 ms` vs broadcast `62.3 ms`. MIL op counts were identical
-  to the shipping 3s fused package (`2207` total ops and `96` `tile` ops), so
-  Core ML re-materializes the broadcast surface. This does not remove the
-  AdaIN memory movement problem.
+- **Visible laishere graph-surface rewrites rejected:** `scripts/probe_generator_cos_snake.py`
+  now patches the actual dynamically loaded export module
+  (`export_synth.wrappers.kokoro_istftnet`) and can test iOS17/CoreML7 target
+  packages, broadcast AdaIN, native `nn.InstanceNorm1d` AdaIN, and cos-form
+  Snake. `scripts/compare_coreml_graph_surface.py` records the MIL histogram.
+  The strongest combined 3s candidate drops the fused graph from `2207` ops to
+  `1635`, removing explicit `tile`, explicit reduction-based normalization,
+  and nearly all Snake `sin` ops. It still does not speed prediction:
+  M2 Studio `30.08 ms` fused vs `30.68 ms` candidate, M2 Air `120.51 ms` vs
+  `120.65 ms`, and Irvine M1 `167.83 ms` vs `167.60 ms`. Parity passed
+  (`corr >= 0.999994`, `SNR >= 49.7 dB`). This rejects the simple hypothesis
+  that laishere wins because of visible MIL op cleanup alone.
 - **Style-specialized generator rejected:** `scripts/probe_generator_style_specialization.py`
   bakes the dump's `ref_s` into the generator and replaces all `AdaIN1d`
   projections with fixed gamma/beta constants. The 3s MIL graph shrank from

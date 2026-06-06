@@ -518,38 +518,52 @@ not faster after warmed Config F correction. Laishere is not faster on M2 Studio
 and is effectively tied on M2 Air when the stage-profile boundary is rerun. The
 remaining real loss is Irvine M1 short/medium. That loss is not explained by a
 simple Core ML compute-unit flip or by our already-tested split boundaries; the
-next useful experiment is a graph inspection of laishere's `KokoroVocoder` and
-`KokoroNoise` operator surface against our fused and split generator graphs.
+graph-surface inspection below checks whether laishere's visible
+`KokoroVocoder`/`KokoroNoise` operator choices explain it.
 
-#### Fused cos-Snake probe
+#### Fused generator graph-surface probes
 
 `scripts/probe_generator_cos_snake.py` tests generator operator rewrites that
 can be applied without changing package boundaries. It exports a fused
 `GeneratorFromHar` package, then compares the temporary package to the shipping
-fused HAR-post package on the same Swift tensor dump.
+fused HAR-post package on the same Swift tensor dump. The patch hooks must
+target `export_synth.wrappers.kokoro_istftnet`, because the exporter loads
+Kokoro modules under dynamic names; patching `kokoro.istftnet` directly does
+not affect the traced generator used by this repo's exporter.
 
-Local M2 Studio, CPU+GPU, N=10 median after three discarded warmups:
+`scripts/compare_coreml_graph_surface.py` records the MIL operation surface for
+each package. The result file for the table below is ignored under
+`outputs/graph_surface/laishere_vs_local_generator_3s.json`.
 
-| Probe | Input | Fused median | Candidate median | Speedup vs fused | Parity vs fused | Decision |
-| --- | --- | ---: | ---: | ---: | --- | --- |
-| cos-Snake | 3s | 28.3 ms | 27.9 ms | +1.27% | exact sample match, SNR 142.94 dB | reject as noise-sized |
-| cos-Snake | 7s | 57.2 ms | 57.7 ms | -0.74% | exact sample match, SNR 147.04 dB | reject |
-| broadcast AdaIN | 3s | 30.6 ms | 31.3 ms | -2.36% | exact sample match, SNR 142.94 dB | reject |
-| broadcast AdaIN | 7s | 62.4 ms | 62.3 ms | +0.24% | exact sample match, SNR 147.04 dB | reject as noise-sized |
-| cos-Snake + broadcast AdaIN | 3s | 31.5 ms | 31.3 ms | +0.46% | exact sample match, SNR 142.94 dB | reject as noise-sized |
+Local M2 Studio 3s, CPU+GPU, N=10 median after three discarded warmups:
 
-The rewrite is numerically safe for the dumped 3s and 7s generator boundaries,
-but the speed signal is not consistent or large enough to justify changing the
-production exporter. Keep the fused package on the current Snake lowering until
-a broader operator rewrite has stronger evidence.
+| Probe | Spec | MIL ops | Key graph change | Fused median | Candidate median | Speedup vs fused | Parity vs fused | Decision |
+| --- | ---: | ---: | --- | ---: | ---: | ---: | --- | --- |
+| iOS17 target only | 8 | 2207 | no op-surface change vs shipping CoreML6 | 30.98 ms | 30.78 ms | +0.65% | corr 0.999997, SNR 53.17 dB | reject as noise-sized |
+| corrected cos-Snake | 8 | 2303 | `sin` 50 -> 2, `cos` 1 -> 49 | 30.77 ms | 30.72 ms | +0.16% | corr 0.999995, SNR 50.42 dB | reject |
+| corrected broadcast AdaIN | 8 | 2015 | `tile` 96 -> 0 | 30.92 ms | 30.93 ms | -0.03% | corr 0.999997, SNR 53.17 dB | reject |
+| native InstanceNorm AdaIN | 8 | 1731 | `reduce_mean` 88 -> 0, `instance_norm` 0 -> 44 | 31.00 ms | 30.93 ms | +0.24% | corr 0.999994, SNR 49.84 dB | reject |
+| native InstanceNorm + broadcast + cos | 8 | 1635 | no `tile`, native `instance_norm`, cos Snake | 30.08 ms | 30.68 ms | -2.02% | corr 0.999994, SNR 49.71 dB | reject |
 
-The broadcast-AdaIN probe removes explicit source-level
-`gamma.expand(B, C, T)` / `beta.expand(B, C, T)` and relies on `(B, C, 1)`
-broadcasts. Core ML converted the temporary package to the same operation
-histogram as the shipping 3s fused package: `2207` MIL ops with `96` `tile`
-ops. In other words, the converter re-materializes the broadcast surface even
-when PyTorch source avoids `expand`. This source-level cleanup is not a
-production speed path.
+The strongest visible graph cleanup is the combined native InstanceNorm +
+broadcast + cos candidate: it drops the 3s fused graph from `2207` to `1635`
+ops and removes explicit `tile`, explicit reduction-based normalization, and
+nearly all Snake `sin` ops. That still does not improve local CPU+GPU runtime.
+The same candidate was copied to the two lower-end Macs and run predict-only
+against the existing 3s tensor dump:
+
+| Machine | Fused median | Candidate median | Speedup vs fused | Parity vs fused | Decision |
+| --- | ---: | ---: | ---: | --- | --- |
+| m2-air | 120.51 ms | 120.65 ms | -0.12% | corr 0.999994, SNR 49.96 dB | reject |
+| irvine-m1 | 167.83 ms | 167.60 ms | +0.14% | corr 0.999994, SNR 50.00 dB | reject as noise-sized |
+
+This closes the visible laishere graph-surface hypothesis for the current
+fused generator boundary. We can reproduce its obvious source-level ingredients
+inside our fused package, but they do not make Mac prediction faster. The
+remaining M1 loss is therefore likely below the visible MIL histogram: Core ML
+compute-plan/kernel selection, palettized weight decompression behavior, or a
+larger pipeline boundary difference rather than a simple AdaIN/Snake source
+rewrite.
 
 #### Style-specialized generator probe
 

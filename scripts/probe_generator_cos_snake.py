@@ -36,12 +36,30 @@ from probe_generator_exact_geometry import _compute_units, _load_kmodel, _metric
 from probe_generator_split import _duration_label_from_dump, _precision_arg, _remove_existing_package  # noqa: E402
 
 
+def _deployment_target(ct: Any, name: str) -> Any:
+    """Return a Core ML deployment target enum by stable CLI label."""
+
+    targets = {
+        "macos13": ct.target.macOS13,
+        "macos14": ct.target.macOS14,
+        "macos15": ct.target.macOS15,
+        "ios17": ct.target.iOS17,
+        "ios18": ct.target.iOS18,
+    }
+    try:
+        return targets[name.lower()]
+    except KeyError as exc:
+        raise ValueError(f"unsupported deployment target {name!r}") from exc
+
+
 def _patch_broadcast_adain() -> None:
     """Patch AdaIN1d to rely on broadcast instead of explicit expand/tile."""
 
     import torch
 
-    from kokoro.istftnet import AdaIN1d
+    from export_synth import wrappers
+
+    AdaIN1d = wrappers.kokoro_istftnet.AdaIN1d
 
     def _broadcast_forward(self: Any, x: torch.Tensor, s: torch.Tensor) -> torch.Tensor:
         B, C, _ = x.shape
@@ -55,6 +73,39 @@ def _patch_broadcast_adain() -> None:
         return (1.0 + gamma) * x_norm + beta
 
     AdaIN1d.forward = _broadcast_forward
+
+
+def _patch_native_instance_norm_adain(broadcast_adain: bool) -> None:
+    """Patch AdaIN1d to use native instance_norm lowering."""
+
+    import torch
+    import torch.nn as nn
+
+    from export_synth import wrappers
+
+    AdaIN1d = wrappers.kokoro_istftnet.AdaIN1d
+
+    def _native_instance_norm_init(self: Any, style_dim: int, num_features: int) -> None:
+        nn.Module.__init__(self)
+        self.num_features = num_features
+        self.eps = 1e-5
+        self.norm = nn.InstanceNorm1d(num_features, affine=False, track_running_stats=False, eps=self.eps)
+        self.fc = nn.Linear(style_dim, num_features * 2)
+
+    def _native_instance_norm_forward(self: Any, x: torch.Tensor, s: torch.Tensor) -> torch.Tensor:
+        B, C, T = x.shape
+        assert C == self.num_features, f"AdaIN1d channel mismatch: got {C}, expected {self.num_features}"
+        x_norm = self.norm(x)
+        h = self.fc(s).view(B, 2 * self.num_features, 1)
+        gamma, beta = torch.chunk(h, chunks=2, dim=1)
+        if broadcast_adain:
+            return (1.0 + gamma) * x_norm + beta
+        gamma_exp = gamma.expand(B, C, T)
+        beta_exp = beta.expand(B, C, T)
+        return (1.0 + gamma_exp) * x_norm + beta_exp
+
+    AdaIN1d.__init__ = _native_instance_norm_init
+    AdaIN1d.forward = _native_instance_norm_forward
 
 
 def _predict_inputs(tensors: dict[str, np.ndarray]) -> dict[str, np.ndarray]:
@@ -71,6 +122,8 @@ def _export_package(
     precision: str,
     cos_snake: bool,
     broadcast_adain: bool,
+    deployment_target: str,
+    native_instance_norm_adain: bool,
 ) -> dict[str, Any]:
     import coremltools as ct
     import torch
@@ -79,7 +132,9 @@ def _export_package(
 
     if cos_snake:
         _patch_cos_snake()
-    if broadcast_adain:
+    if native_instance_norm_adain:
+        _patch_native_instance_norm_adain(broadcast_adain)
+    elif broadcast_adain:
         _patch_broadcast_adain()
 
     ref_s_shape = tuple(int(v) for v in tensors["ref_s"].shape)
@@ -112,7 +167,7 @@ def _export_package(
         ],
         outputs=[ct.TensorType(name="waveform")],
         convert_to="mlprogram",
-        minimum_deployment_target=ct.target.macOS13,
+        minimum_deployment_target=_deployment_target(ct, deployment_target),
         compute_precision=_precision_arg(ct, precision),
         compute_units=ct.ComputeUnit.ALL,
     )
@@ -124,6 +179,8 @@ def _export_package(
         "precision": precision,
         "cos_snake": bool(cos_snake),
         "broadcast_adain": bool(broadcast_adain),
+        "native_instance_norm_adain": bool(native_instance_norm_adain),
+        "deployment_target": deployment_target,
         "removed_dropouts": removed_dropouts,
         "traced_samples": traced_samples,
         "x_pre_shape": list(x_pre_shape),
@@ -224,6 +281,10 @@ def run(args: argparse.Namespace) -> dict[str, Any]:
         label = f"{label}_plain"
     if args.broadcast_adain:
         label = f"{label}_broadcast_adain"
+    if args.native_instance_norm_adain:
+        label = f"{label}_native_in"
+    if args.deployment_target.lower() != "macos13":
+        label = f"{label}_{args.deployment_target.lower()}"
     work_dir = args.output_dir / label
     cos_package = work_dir / f"kokoro_generator_cos_snake_{label}.mlpackage"
     report_name = Path(args.report_name)
@@ -242,6 +303,8 @@ def run(args: argparse.Namespace) -> dict[str, Any]:
             args.precision,
             args.cos_snake,
             args.broadcast_adain,
+            args.deployment_target,
+            args.native_instance_norm_adain,
         )
 
     benchmark = _benchmark(args, tensors, cos_package)
@@ -261,6 +324,8 @@ def run(args: argparse.Namespace) -> dict[str, Any]:
         "manifest_metadata": manifest.get("metadata", {}),
         "cos_snake": bool(args.cos_snake),
         "broadcast_adain": bool(args.broadcast_adain),
+        "native_instance_norm_adain": bool(args.native_instance_norm_adain),
+        "deployment_target": args.deployment_target,
         "export": export_report,
         "benchmark": benchmark,
         "thresholds": {
@@ -300,6 +365,17 @@ def main() -> None:
     parser.add_argument("--no-cos-snake", dest="cos_snake", action="store_false")
     parser.set_defaults(cos_snake=True)
     parser.add_argument("--broadcast-adain", action="store_true")
+    parser.add_argument(
+        "--native-instance-norm-adain",
+        action="store_true",
+        help="Patch AdaIN1d normalization to F.instance_norm before export.",
+    )
+    parser.add_argument(
+        "--deployment-target",
+        default="macos13",
+        choices=("macos13", "macos14", "macos15", "ios17", "ios18"),
+        help="Minimum deployment target for the candidate package.",
+    )
     parser.add_argument(
         "--precision",
         default="fp16",

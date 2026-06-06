@@ -43,7 +43,9 @@ def _patch_cos_snake() -> None:
 
     import torch
 
-    from kokoro.istftnet import AdaINResBlock1
+    from export_synth import wrappers
+
+    AdaINResBlock1 = wrappers.kokoro_istftnet.AdaINResBlock1
 
     def _cos_forward(self: Any, x: torch.Tensor, s: torch.Tensor) -> torch.Tensor:
         for c1, c2, n1, n2, a1, a2 in zip(
