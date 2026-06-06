@@ -1,0 +1,142 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Irvine F0 Source Listening Review</title>
+  <style>
+    :root {
+      color-scheme: light dark;
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      line-height: 1.4;
+    }
+    body {
+      margin: 24px;
+      max-width: 1180px;
+    }
+    h1 {
+      font-size: 24px;
+      margin: 0 0 8px;
+    }
+    p {
+      margin: 0 0 18px;
+      color: #555;
+    }
+    table {
+      border-collapse: collapse;
+      width: 100%;
+    }
+    th,
+    td {
+      border: 1px solid #ccc;
+      padding: 10px;
+      text-align: left;
+      vertical-align: top;
+    }
+    th {
+      background: rgba(127, 127, 127, 0.12);
+      font-size: 13px;
+    }
+    code {
+      font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+      font-size: 12px;
+    }
+    audio {
+      width: 260px;
+      max-width: 100%;
+    }
+    .decision {
+      min-width: 150px;
+      white-space: nowrap;
+    }
+    .metrics {
+      min-width: 165px;
+    }
+    @media (max-width: 900px) {
+      body {
+        margin: 12px;
+      }
+      table,
+      thead,
+      tbody,
+      tr,
+      th,
+      td {
+        display: block;
+      }
+      thead {
+        display: none;
+      }
+      tr {
+        border: 1px solid #ccc;
+        margin-bottom: 14px;
+      }
+      td {
+        border: 0;
+        border-bottom: 1px solid #ddd;
+      }
+      td::before {
+        content: attr(data-label);
+        display: block;
+        font-weight: 600;
+        margin-bottom: 4px;
+      }
+    }
+  </style>
+</head>
+<body>
+  <h1>Irvine F0 Source Listening Review</h1>
+  <p>No ASR or Whisper gate is used. Compare baseline vs candidate by ear, then fill <code>f0_source_listening_decisions.csv</code> with <code>pass</code>, <code>caveat</code>, or <code>fail</code>.</p>
+  <table>
+    <thead>
+      <tr>
+        <th>Bucket</th>
+        <th>Candidate</th>
+        <th>Baseline</th>
+        <th>Candidate Audio</th>
+        <th>Speed</th>
+        <th>Metrics</th>
+        <th>Decision</th>
+      </tr>
+    </thead>
+    <tbody>
+      <tr>
+        <td data-label="Bucket">3s</td>
+        <td data-label="Candidate"><code>3s_natural_asr_cos_rsqrt</code></td>
+        <td data-label="Baseline"><audio controls src="3s_natural_asr_cos_rsqrt/wav/3s_natural_asr_cos_rsqrt_baseline.wav"></audio></td>
+        <td data-label="Candidate Audio"><audio controls src="3s_natural_asr_cos_rsqrt/wav/3s_natural_asr_cos_rsqrt_candidate.wav"></audio></td>
+        <td data-label="Speed">10.9% faster<br><code>172.0 -> 153.3 ms</code></td>
+        <td data-label="Metrics" class="metrics">corr 0.813995<br>SNR 5.08 dB</td>
+        <td data-label="Decision" class="decision">[ ] pass<br>[ ] caveat<br>[ ] fail</td>
+      </tr>
+      <tr>
+        <td data-label="Bucket">7s</td>
+        <td data-label="Candidate"><code>7s_natural_asr_cos_rsqrt</code></td>
+        <td data-label="Baseline"><audio controls src="7s_natural_asr_cos_rsqrt/wav/7s_natural_asr_cos_rsqrt_baseline.wav"></audio></td>
+        <td data-label="Candidate Audio"><audio controls src="7s_natural_asr_cos_rsqrt/wav/7s_natural_asr_cos_rsqrt_candidate.wav"></audio></td>
+        <td data-label="Speed">12.2% faster<br><code>398.4 -> 349.8 ms</code></td>
+        <td data-label="Metrics" class="metrics">corr 0.796785<br>SNR 4.77 dB</td>
+        <td data-label="Decision" class="decision">[ ] pass<br>[ ] caveat<br>[ ] fail</td>
+      </tr>
+      <tr>
+        <td data-label="Bucket">10s</td>
+        <td data-label="Candidate"><code>10s_natural_asr_cos_resblock_natural_asr_cos_rsqrt</code></td>
+        <td data-label="Baseline"><audio controls src="10s_natural_asr_cos_resblock_natural_asr_cos_rsqrt/wav/10s_natural_asr_cos_resblock_natural_asr_cos_rsqrt_baseline.wav"></audio></td>
+        <td data-label="Candidate Audio"><audio controls src="10s_natural_asr_cos_resblock_natural_asr_cos_rsqrt/wav/10s_natural_asr_cos_resblock_natural_asr_cos_rsqrt_candidate.wav"></audio></td>
+        <td data-label="Speed">13.6% faster<br><code>563.9 -> 487.1 ms</code></td>
+        <td data-label="Metrics" class="metrics">corr 0.867049<br>SNR 6.55 dB</td>
+        <td data-label="Decision" class="decision">[ ] pass<br>[ ] caveat<br>[ ] fail</td>
+      </tr>
+      <tr>
+        <td data-label="Bucket">15s</td>
+        <td data-label="Candidate"><code>15s_padded_cos_resblock_cos_rsqrt</code></td>
+        <td data-label="Baseline"><audio controls src="15s_padded_cos_resblock_cos_rsqrt/wav/15s_padded_cos_resblock_cos_rsqrt_baseline.wav"></audio></td>
+        <td data-label="Candidate Audio"><audio controls src="15s_padded_cos_resblock_cos_rsqrt/wav/15s_padded_cos_resblock_cos_rsqrt_candidate.wav"></audio></td>
+        <td data-label="Speed">9.4% faster<br><code>837.7 -> 758.8 ms</code></td>
+        <td data-label="Metrics" class="metrics">corr 0.956796<br>SNR 11.00 dB</td>
+        <td data-label="Decision" class="decision">[ ] pass<br>[ ] caveat<br>[ ] fail</td>
+      </tr>
+    </tbody>
+  </table>
+</body>
+</html>
