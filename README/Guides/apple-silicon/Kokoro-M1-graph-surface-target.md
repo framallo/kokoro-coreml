@@ -63,6 +63,7 @@ Do not spend more time on these as standalone probes:
 - style specialization;
 - HAR trim alone;
 - fused `GeneratorFromHar` fp16 input dtype alone;
+- fused native `instance_norm` plus fp16 input dtype without eliminating tiles;
 - adding more package boundaries.
 
 Each one has already been measured as slower, noise-sized, or quality-failing.
@@ -91,6 +92,37 @@ Result:
 
 Decision: reject as standalone. It does not remove the manual AdaIN/tile
 surface and is not worth Irvine timing.
+
+## Latest Partial Surface Repair
+
+Fused native `instance_norm` plus fp16 input dtype was also tested inside the
+same `GeneratorFromHar` package boundary:
+
+```bash
+uv run --no-sync python scripts/probe_generator_cos_snake.py \
+  --no-cos-snake \
+  --native-instance-norm-adain \
+  --input-dtype fp16 \
+  --deployment-target ios17 \
+  --label 3s_native_in_fp16_inputs \
+  --report-name report_ios17_native_in_fp16_inputs_cpu_gpu.json \
+  --warmup 3 \
+  --iterations 10
+```
+
+Result:
+
+- strict pass: corr `0.9999942588867583` vs fused trimmed, SNR `49.84 dB`,
+  max abs `0.00256348`;
+- warmed local M2 Studio CPU+GPU: fused `26.349 ms`, candidate `26.316 ms`,
+  speedup `0.12%`;
+- graph surface: `2207 -> 1725` ops, `88 -> 0` reductions,
+  `0 -> 44` native `instance_norm`, but still `96` tiles and no LUT
+  decompression.
+
+Decision: partial surface repair, not material. Do not promote to Irvine by
+itself. A useful next candidate must also eliminate the tile footprint or
+otherwise create a measurable local win before remote timing.
 
 ## Deep Research Request
 

@@ -1,0 +1,887 @@
+{
+  "models": [
+    {
+      "blocks": [
+        {
+          "block": "CoreML6",
+          "focus_op_counts": {
+            "cast": 5,
+            "conv": 51,
+            "conv_transpose": 4,
+            "cos": 1,
+            "exp": 1,
+            "linear": 48,
+            "pow": 48,
+            "real_div": 44,
+            "reduce_mean": 88,
+            "reshape": 48,
+            "sin": 50,
+            "split": 48,
+            "sqrt": 44,
+            "tile": 96
+          },
+          "function": "main",
+          "op_count": 2207,
+          "op_counts": {
+            "add": 218,
+            "cast": 5,
+            "const": 1166,
+            "conv": 51,
+            "conv_transpose": 4,
+            "cos": 1,
+            "exp": 1,
+            "leaky_relu": 3,
+            "linear": 48,
+            "mul": 148,
+            "pad": 1,
+            "pow": 48,
+            "real_div": 44,
+            "reduce_mean": 88,
+            "reshape": 48,
+            "sin": 50,
+            "slice_by_index": 6,
+            "split": 48,
+            "sqrt": 44,
+            "square": 44,
+            "sub": 45,
+            "tile": 96
+          },
+          "top_ops": [
+            [
+              "const",
+              1166
+            ],
+            [
+              "add",
+              218
+            ],
+            [
+              "mul",
+              148
+            ],
+            [
+              "tile",
+              96
+            ],
+            [
+              "reduce_mean",
+              88
+            ],
+            [
+              "conv",
+              51
+            ],
+            [
+              "sin",
+              50
+            ],
+            [
+              "linear",
+              48
+            ],
+            [
+              "reshape",
+              48
+            ],
+            [
+              "split",
+              48
+            ],
+            [
+              "pow",
+              48
+            ],
+            [
+              "sub",
+              45
+            ],
+            [
+              "square",
+              44
+            ],
+            [
+              "sqrt",
+              44
+            ],
+            [
+              "real_div",
+              44
+            ],
+            [
+              "slice_by_index",
+              6
+            ],
+            [
+              "cast",
+              5
+            ],
+            [
+              "conv_transpose",
+              4
+            ],
+            [
+              "leaky_relu",
+              3
+            ],
+            [
+              "pad",
+              1
+            ]
+          ],
+          "unique_op_count": 22
+        }
+      ],
+      "focus_op_counts": {
+        "cast": 5,
+        "conv": 51,
+        "conv_transpose": 4,
+        "cos": 1,
+        "exp": 1,
+        "linear": 48,
+        "pow": 48,
+        "real_div": 44,
+        "reduce_mean": 88,
+        "reshape": 48,
+        "sin": 50,
+        "split": 48,
+        "sqrt": 44,
+        "tile": 96
+      },
+      "inputs": [
+        {
+          "dtype": "FLOAT32",
+          "name": "x_pre",
+          "shape": [
+            1,
+            512,
+            240
+          ],
+          "shape_ranges": []
+        },
+        {
+          "dtype": "FLOAT32",
+          "name": "ref_s",
+          "shape": [
+            1,
+            256
+          ],
+          "shape_ranges": []
+        },
+        {
+          "dtype": "FLOAT32",
+          "name": "har",
+          "shape": [
+            1,
+            22,
+            28801
+          ],
+          "shape_ranges": []
+        }
+      ],
+      "label": "fused",
+      "op_count": 2207,
+      "outputs": [
+        {
+          "dtype": "FLOAT16",
+          "name": "waveform",
+          "shape": [
+            1,
+            1,
+            72000
+          ],
+          "shape_ranges": []
+        }
+      ],
+      "package_size_bytes": 39697341,
+      "path": "coreml/kokoro_decoder_har_post_3s.mlpackage",
+      "specification_version": 7,
+      "top_ops": [
+        [
+          "const",
+          1166
+        ],
+        [
+          "add",
+          218
+        ],
+        [
+          "mul",
+          148
+        ],
+        [
+          "tile",
+          96
+        ],
+        [
+          "reduce_mean",
+          88
+        ],
+        [
+          "conv",
+          51
+        ],
+        [
+          "sin",
+          50
+        ],
+        [
+          "linear",
+          48
+        ],
+        [
+          "reshape",
+          48
+        ],
+        [
+          "split",
+          48
+        ],
+        [
+          "pow",
+          48
+        ],
+        [
+          "sub",
+          45
+        ],
+        [
+          "square",
+          44
+        ],
+        [
+          "sqrt",
+          44
+        ],
+        [
+          "real_div",
+          44
+        ],
+        [
+          "slice_by_index",
+          6
+        ],
+        [
+          "cast",
+          5
+        ],
+        [
+          "conv_transpose",
+          4
+        ],
+        [
+          "leaky_relu",
+          3
+        ],
+        [
+          "pad",
+          1
+        ]
+      ],
+      "unique_op_count": 22
+    },
+    {
+      "blocks": [
+        {
+          "block": "CoreML7",
+          "focus_op_counts": {
+            "cast": 2,
+            "conv": 51,
+            "conv_transpose": 4,
+            "cos": 1,
+            "exp": 1,
+            "instance_norm": 44,
+            "linear": 48,
+            "pow": 48,
+            "reshape": 48,
+            "sin": 50,
+            "split": 48,
+            "tile": 96
+          },
+          "function": "main",
+          "op_count": 1725,
+          "op_counts": {
+            "add": 174,
+            "cast": 2,
+            "const": 951,
+            "conv": 51,
+            "conv_transpose": 4,
+            "cos": 1,
+            "exp": 1,
+            "instance_norm": 44,
+            "leaky_relu": 3,
+            "linear": 48,
+            "mul": 148,
+            "pad": 1,
+            "pow": 48,
+            "reshape": 48,
+            "sin": 50,
+            "slice_by_index": 6,
+            "split": 48,
+            "sub": 1,
+            "tile": 96
+          },
+          "top_ops": [
+            [
+              "const",
+              951
+            ],
+            [
+              "add",
+              174
+            ],
+            [
+              "mul",
+              148
+            ],
+            [
+              "tile",
+              96
+            ],
+            [
+              "conv",
+              51
+            ],
+            [
+              "sin",
+              50
+            ],
+            [
+              "linear",
+              48
+            ],
+            [
+              "reshape",
+              48
+            ],
+            [
+              "split",
+              48
+            ],
+            [
+              "pow",
+              48
+            ],
+            [
+              "instance_norm",
+              44
+            ],
+            [
+              "slice_by_index",
+              6
+            ],
+            [
+              "conv_transpose",
+              4
+            ],
+            [
+              "leaky_relu",
+              3
+            ],
+            [
+              "cast",
+              2
+            ],
+            [
+              "pad",
+              1
+            ],
+            [
+              "exp",
+              1
+            ],
+            [
+              "cos",
+              1
+            ],
+            [
+              "sub",
+              1
+            ]
+          ],
+          "unique_op_count": 19
+        }
+      ],
+      "focus_op_counts": {
+        "cast": 2,
+        "conv": 51,
+        "conv_transpose": 4,
+        "cos": 1,
+        "exp": 1,
+        "instance_norm": 44,
+        "linear": 48,
+        "pow": 48,
+        "reshape": 48,
+        "sin": 50,
+        "split": 48,
+        "tile": 96
+      },
+      "inputs": [
+        {
+          "dtype": "FLOAT16",
+          "name": "x_pre",
+          "shape": [
+            1,
+            512,
+            240
+          ],
+          "shape_ranges": []
+        },
+        {
+          "dtype": "FLOAT16",
+          "name": "ref_s",
+          "shape": [
+            1,
+            256
+          ],
+          "shape_ranges": []
+        },
+        {
+          "dtype": "FLOAT16",
+          "name": "har",
+          "shape": [
+            1,
+            22,
+            28801
+          ],
+          "shape_ranges": []
+        }
+      ],
+      "label": "native_in_fp16",
+      "op_count": 1725,
+      "outputs": [
+        {
+          "dtype": "FLOAT16",
+          "name": "waveform",
+          "shape": [
+            1,
+            1,
+            72000
+          ],
+          "shape_ranges": []
+        }
+      ],
+      "package_size_bytes": 39629510,
+      "path": "outputs/generator_cos_snake/3s_native_in_fp16_inputs_plain_native_in_fp16_inputs_ios17/kokoro_generator_cos_snake_3s_native_in_fp16_inputs_plain_native_in_fp16_inputs_ios17.mlpackage",
+      "specification_version": 8,
+      "top_ops": [
+        [
+          "const",
+          951
+        ],
+        [
+          "add",
+          174
+        ],
+        [
+          "mul",
+          148
+        ],
+        [
+          "tile",
+          96
+        ],
+        [
+          "conv",
+          51
+        ],
+        [
+          "sin",
+          50
+        ],
+        [
+          "linear",
+          48
+        ],
+        [
+          "reshape",
+          48
+        ],
+        [
+          "split",
+          48
+        ],
+        [
+          "pow",
+          48
+        ],
+        [
+          "instance_norm",
+          44
+        ],
+        [
+          "slice_by_index",
+          6
+        ],
+        [
+          "conv_transpose",
+          4
+        ],
+        [
+          "leaky_relu",
+          3
+        ],
+        [
+          "cast",
+          2
+        ],
+        [
+          "pad",
+          1
+        ],
+        [
+          "exp",
+          1
+        ],
+        [
+          "cos",
+          1
+        ],
+        [
+          "sub",
+          1
+        ]
+      ],
+      "unique_op_count": 19
+    },
+    {
+      "blocks": [
+        {
+          "block": "CoreML7",
+          "focus_op_counts": {
+            "concat": 6,
+            "constexpr_lut_to_dense": 101,
+            "conv": 54,
+            "conv_transpose": 3,
+            "cos": 36,
+            "instance_norm": 42,
+            "linear": 46,
+            "reduce_mean": 1,
+            "reshape": 46,
+            "split": 46
+          },
+          "function": "main",
+          "op_count": 1534,
+          "op_counts": {
+            "add": 193,
+            "concat": 6,
+            "const": 778,
+            "constexpr_lut_to_dense": 101,
+            "conv": 54,
+            "conv_transpose": 3,
+            "cos": 36,
+            "expand_dims": 4,
+            "instance_norm": 42,
+            "leaky_relu": 13,
+            "linear": 46,
+            "mul": 161,
+            "reduce_mean": 1,
+            "reshape": 46,
+            "slice_by_index": 2,
+            "split": 46,
+            "squeeze": 1,
+            "upsample_nearest_neighbor": 1
+          },
+          "top_ops": [
+            [
+              "const",
+              778
+            ],
+            [
+              "add",
+              193
+            ],
+            [
+              "mul",
+              161
+            ],
+            [
+              "constexpr_lut_to_dense",
+              101
+            ],
+            [
+              "conv",
+              54
+            ],
+            [
+              "linear",
+              46
+            ],
+            [
+              "reshape",
+              46
+            ],
+            [
+              "split",
+              46
+            ],
+            [
+              "instance_norm",
+              42
+            ],
+            [
+              "cos",
+              36
+            ],
+            [
+              "leaky_relu",
+              13
+            ],
+            [
+              "concat",
+              6
+            ],
+            [
+              "expand_dims",
+              4
+            ],
+            [
+              "conv_transpose",
+              3
+            ],
+            [
+              "slice_by_index",
+              2
+            ],
+            [
+              "upsample_nearest_neighbor",
+              1
+            ],
+            [
+              "squeeze",
+              1
+            ],
+            [
+              "reduce_mean",
+              1
+            ]
+          ],
+          "unique_op_count": 18
+        }
+      ],
+      "focus_op_counts": {
+        "concat": 6,
+        "constexpr_lut_to_dense": 101,
+        "conv": 54,
+        "conv_transpose": 3,
+        "cos": 36,
+        "instance_norm": 42,
+        "linear": 46,
+        "reduce_mean": 1,
+        "reshape": 46,
+        "split": 46
+      },
+      "inputs": [
+        {
+          "dtype": "FLOAT16",
+          "name": "asr",
+          "shape": [
+            1,
+            512,
+            120
+          ],
+          "shape_ranges": [
+            {
+              "lower": 1,
+              "upper": 1
+            },
+            {
+              "lower": 512,
+              "upper": 512
+            },
+            {
+              "lower": 1,
+              "upper": 2000
+            }
+          ]
+        },
+        {
+          "dtype": "FLOAT16",
+          "name": "F0_curve",
+          "shape": [
+            1,
+            240
+          ],
+          "shape_ranges": [
+            {
+              "lower": 1,
+              "upper": 1
+            },
+            {
+              "lower": 2,
+              "upper": 4000
+            }
+          ]
+        },
+        {
+          "dtype": "FLOAT16",
+          "name": "N_pred",
+          "shape": [
+            1,
+            240
+          ],
+          "shape_ranges": [
+            {
+              "lower": 1,
+              "upper": 1
+            },
+            {
+              "lower": 2,
+              "upper": 4000
+            }
+          ]
+        },
+        {
+          "dtype": "FLOAT16",
+          "name": "x_source_0",
+          "shape": [
+            1,
+            256,
+            2400
+          ],
+          "shape_ranges": [
+            {
+              "lower": 1,
+              "upper": 1
+            },
+            {
+              "lower": 256,
+              "upper": 256
+            },
+            {
+              "lower": 1,
+              "upper": 40000
+            }
+          ]
+        },
+        {
+          "dtype": "FLOAT16",
+          "name": "x_source_1",
+          "shape": [
+            1,
+            128,
+            14401
+          ],
+          "shape_ranges": [
+            {
+              "lower": 1,
+              "upper": 1
+            },
+            {
+              "lower": 128,
+              "upper": 128
+            },
+            {
+              "lower": 1,
+              "upper": 240001
+            }
+          ]
+        },
+        {
+          "dtype": "FLOAT16",
+          "name": "style_timbre",
+          "shape": [
+            1,
+            128
+          ],
+          "shape_ranges": []
+        }
+      ],
+      "label": "laishere_vocoder",
+      "op_count": 1534,
+      "outputs": [
+        {
+          "dtype": "FLOAT16",
+          "name": "anchor",
+          "shape": [
+            1
+          ],
+          "shape_ranges": []
+        },
+        {
+          "dtype": "FLOAT16",
+          "name": "x_pre",
+          "shape": [],
+          "shape_ranges": []
+        }
+      ],
+      "package_size_bytes": 49146391,
+      "path": "outputs/external_bakeoff/laishere_packages/KokoroVocoder.mlpackage",
+      "specification_version": 8,
+      "top_ops": [
+        [
+          "const",
+          778
+        ],
+        [
+          "add",
+          193
+        ],
+        [
+          "mul",
+          161
+        ],
+        [
+          "constexpr_lut_to_dense",
+          101
+        ],
+        [
+          "conv",
+          54
+        ],
+        [
+          "linear",
+          46
+        ],
+        [
+          "reshape",
+          46
+        ],
+        [
+          "split",
+          46
+        ],
+        [
+          "instance_norm",
+          42
+        ],
+        [
+          "cos",
+          36
+        ],
+        [
+          "leaky_relu",
+          13
+        ],
+        [
+          "concat",
+          6
+        ],
+        [
+          "expand_dims",
+          4
+        ],
+        [
+          "conv_transpose",
+          3
+        ],
+        [
+          "slice_by_index",
+          2
+        ],
+        [
+          "upsample_nearest_neighbor",
+          1
+        ],
+        [
+          "squeeze",
+          1
+        ],
+        [
+          "reduce_mean",
+          1
+        ]
+      ],
+      "unique_op_count": 18
+    }
+  ]
+}

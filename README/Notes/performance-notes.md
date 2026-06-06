@@ -244,6 +244,11 @@ startup with `FBSOpenApplicationServiceErrorDomain ... RequestDenied ...
 Locked`. CoreDevice could still acquire the tunnel and usage assertion, so the
 blocker remains only the physical phone lock state.
 
+Fresh launch check on 2026-06-06 at 05:56 local time produced the same
+SpringBoard lock denial. The machine can still see the device, but
+`com.kokoro.externalbakeoff.ConfigFIOSRunnerManual` cannot launch until the
+physical iPhone is unlocked.
+
 Whisper, ASR, VAD, playback, and echo-demo dependencies are not part of this
 bakeoff boundary. The iOS runner is intentionally Kokoro TTS only.
 
@@ -278,6 +283,17 @@ SNR `142.94 dB`, max abs `0`. The graph comparison
 `outputs/graph_surface/fused_fp16_inputs_3s.json` shows op count only changed
 from `2207` to `2201`, with the same `88` reductions and `96` tiles. This is
 rejected as a standalone path because it does not touch the actual bad surface.
+
+Fused native `instance_norm` plus fp16 inputs repairs only part of the target
+surface. `outputs/generator_cos_snake/3s_native_in_fp16_inputs_plain_native_in_fp16_inputs_ios17/report_ios17_native_in_fp16_inputs_cpu_gpu.json`
+reported a strict local pass with fused `26.349 ms`, candidate `26.316 ms`,
+speedup `0.12%`, corr `0.9999942588867583`, SNR `49.84 dB`, max abs
+`0.00256348`. The graph comparison
+`outputs/graph_surface/fused_native_in_fp16_inputs_3s.json` shows `2207 -> 1725`
+ops and `88 -> 0` reductions with `44` native `instance_norm` ops, but still
+`96` tiles and no LUT decompression. This is not material enough for Irvine
+timing by itself; the next useful strict candidate must remove the tile
+footprint or produce a much larger local win.
 
 ### Consolidated Warm Median and RTF by Platform
 
