@@ -428,13 +428,13 @@ uv run --no-sync python scripts/summarize_optimization_candidates.py \
   --json-output outputs/optimization_candidate_frontier.json
 ```
 
-Current scan result across `92` saved probe reports:
+Current scan result across `94` saved probe reports:
 
 | Category | Count | Interpretation |
 | --- | ---: | --- |
 | Quality-safe speed-positive candidates | `9` | All are noise-sized relative to the current frontier. |
 | Quality-safe material candidates (`>=3%`) | `0` | No saved strict-equivalent candidate should be promoted as the next fix. |
-| Speed-positive quality-fail candidates | `25` | The speed lives mostly in F0/source-shape branches that still fail parity. |
+| Speed-positive quality-fail candidates | `26` | The speed lives mostly in F0/source-shape branches that still fail parity. |
 
 Largest quality-safe speed-positive rows:
 
@@ -447,7 +447,10 @@ Largest quality-safe speed-positive rows:
 
 Largest speed-positive rows remain quality failures: F0-source natural/padded
 branches reach `28.9%`, `21.9%`, and `21.7%` in saved reports, but they fail
-strict waveform parity. The current promotion frontier therefore rules out
+strict waveform parity. The best padded phase-repair row so far is the local
+`7s_padded_cos_resblock_phase_acos_cos_rsqrt` probe: `6.17%` faster with
+`corr 0.972150`, SNR `13.04 dB`, and max abs `0.24933`, still far outside the
+strict gate. The current promotion frontier therefore rules out
 mining old saved reports for a ready strict-equivalent win. New work must either
 recover F0/source quality, change the accepted quality criterion through
 listening review, or find a new generator/vocoder formulation with a material
@@ -1050,6 +1053,7 @@ At `7s`, the natural-ASR export uses `x_source_0=[1,256,5400]` and
 | irvine-m1 | natural `asr=112`, `F0=224` | 172.0 ms | 153.3 ms | noise 37.1 ms, body 111.4 ms, tail 4.6 ms | corr 0.814046, SNR 5.08 dB | corr 0.804153, SNR 4.54 dB | promising M1 speed, not quality-safe |
 | m2-studio | natural `asr=270`, `F0=540` | 63.1 ms | 56.5 ms | noise 12.8 ms, body 41.5 ms, tail 2.2 ms | corr 0.796791, SNR 4.77 dB | corr 0.795823, SNR 4.33 dB | faster, reject for quality |
 | m2-studio | padded `asr=280`, `F0=560` | 63.0 ms | 58.8 ms | noise 13.5 ms, body 43.0 ms, tail 2.3 ms | corr 0.962251, SNR 11.51 dB | corr 0.968596, SNR 12.51 dB | faster, quality closer but not parity |
+| m2-studio | padded `asr=280`, `F0=560`, `acos` phase | 63.8 ms | 59.9 ms | noise 13.6 ms, body 43.8 ms, tail 2.2 ms | corr 0.972150, SNR 13.04 dB | recorded in `report_cos_resblock_phase_acos.json` | faster, best quality so far, still not strict parity |
 | irvine-m1 | natural `asr=270`, `F0=540` | 398.4 ms | 349.8 ms | noise 87.1 ms, body 255.3 ms, tail 8.0 ms | corr 0.796785, SNR 4.77 dB | corr 0.795823, SNR 4.33 dB | faster, reject for quality |
 | irvine-m1 | padded `asr=280`, `F0=560` | 390.8 ms | 358.9 ms | noise 89.6 ms, body 261.5 ms, tail 7.4 ms | corr 0.962306, SNR 11.52 dB | corr 0.968596, SNR 12.51 dB | faster, quality closer but not parity |
 | m2-studio | natural `asr=384`, `F0=768` | 86.0 ms | 76.4 ms | noise 18.2 ms, body 56.1 ms, tail 2.7 ms | corr 0.866976, SNR 6.55 dB | corr 0.843346, SNR 5.40 dB | faster, reject for quality |
