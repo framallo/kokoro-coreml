@@ -19,6 +19,12 @@ from scripts.external_bakeoff.verify_external_bakeoff_completion import (
     _load_records,
 )
 from scripts.create_f0_source_listening_pack import _write_decisions_csv as _write_f0_decisions_csv
+from scripts.summarize_f0_source_candidates import (
+    collect_rows as collect_f0_candidate_rows,
+    load_decisions as load_f0_candidate_decisions,
+    render_markdown as render_f0_candidate_markdown,
+    summarize_report as summarize_f0_candidate_report,
+)
 from scripts.validate_f0_source_listening_decisions import validate_rows as validate_f0_rows
 
 
@@ -273,6 +279,92 @@ def test_f0_source_decision_csv_preserves_human_fields(tmp_path):
     assert row["source_report"] == "new.json"
     assert row["human_decision"] == "pass"
     assert row["notes"] == "acceptable source character"
+
+
+def test_f0_source_candidate_summary_ranks_warm_speedups_and_decisions(tmp_path):
+    report_path = tmp_path / "outputs" / "f0_noise_exact_shape" / "3s_candidate" / "report.json"
+    report_path.parent.mkdir(parents=True)
+    source_report = "outputs/f0_noise_exact_shape/3s_candidate/report.json"
+    report_path.write_text(
+        json.dumps(
+            {
+                "report": source_report,
+                "tensor_dump": "outputs/external_bakeoff/tensor_dumps/3s",
+                "passes": False,
+                "export": {
+                    "natural_asr": True,
+                    "deployment_target": "iOS18",
+                    "native_instance_norm": False,
+                    "palettize_body": False,
+                    "source_mode": "cos_rsqrt",
+                    "phase_mode": "atan2",
+                },
+                "benchmark": {
+                    "warm_predict_median_ms": {
+                        "baseline_total": 100.0,
+                        "candidate_total": 75.0,
+                    },
+                    "metrics": {
+                        "candidate_vs_baseline_trimmed": {
+                            "correlation": 0.95,
+                            "snr_db": 10.5,
+                            "max_abs_error": 0.2,
+                        }
+                    },
+                },
+            }
+        )
+    )
+    slower_path = tmp_path / "outputs" / "f0_noise_exact_shape" / "7s_candidate" / "report.json"
+    slower_path.parent.mkdir(parents=True)
+    slower_path.write_text(
+        json.dumps(
+            {
+                "report": "outputs/f0_noise_exact_shape/7s_candidate/report.json",
+                "tensor_dump": "outputs/external_bakeoff/tensor_dumps/7s",
+                "passes": False,
+                "benchmark": {
+                    "warm_predict_median_ms": {
+                        "baseline_total": 100.0,
+                        "candidate_total": 90.0,
+                    },
+                    "metrics": {"candidate_vs_baseline_trimmed": {}},
+                },
+            }
+        )
+    )
+    decisions_path = tmp_path / "decisions.csv"
+    decisions_path.write_text(
+        "\n".join(
+            [
+                "label,waveform_gate_decision,candidate_wav,review,source_report,human_decision,notes",
+                "3s_candidate,needs_listening,candidate.wav,review.md,"
+                + source_report
+                + ",caveat,acceptable but brighter",
+                "",
+            ]
+        )
+    )
+
+    decisions = load_f0_candidate_decisions([decisions_path])
+    row = summarize_f0_candidate_report(report_path, decisions)
+    assert row
+    assert row["label"] == "3s_candidate"
+    assert row["bucket"] == "3s"
+    assert row["speedup_pct"] == 25.0
+    assert row["corr"] == 0.95
+    assert row["snr_db"] == 10.5
+    assert row["passes_strict_gate"] is False
+    assert row["natural_asr"] is True
+    assert row["human_decision"] == "caveat"
+    assert row["decision_notes"] == "acceptable but brighter"
+
+    rows = collect_f0_candidate_rows([str(tmp_path / "outputs/f0_noise_exact_shape/**/report.json")], decisions)
+    assert [item["label"] for item in rows] == ["3s_candidate", "7s_candidate"]
+
+    markdown = render_f0_candidate_markdown(rows)
+    assert "| 1 | m2-studio | 3s | `3s_candidate` | 25.0% |" in markdown
+    assert "Strict waveform failures are not production approvals" in markdown
 
 
 def test_completion_verifier_allows_mlx_3s_error_but_requires_iphone():

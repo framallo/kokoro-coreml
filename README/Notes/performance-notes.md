@@ -1014,6 +1014,30 @@ native-IN iOS17/spec8 pack, the current pre-listening state is
 `valid=false` with `missing human_decision`, which prevents this speed branch
 from silently becoming a production claim before human review.
 
+`scripts/summarize_f0_source_candidates.py` ranks all saved
+`outputs/f0_noise_exact_shape/**/report*.json` probes by warm median speedup
+and joins any filled `f0_source_listening_decisions.csv` rows when available.
+This keeps the failed and successful speed paths reusable without rerunning the
+exports:
+
+```bash
+uv run --no-sync python scripts/summarize_f0_source_candidates.py \
+  --decisions outputs/f0_source_listening/native_in_ios17_speed_branch/f0_source_listening_decisions.csv \
+  --top 12 \
+  --output outputs/f0_source_listening/f0_source_candidate_summary.md \
+  --json-output outputs/f0_source_listening/f0_source_candidate_summary.json
+```
+
+Current top-ranked rows are all speed-positive but strict-quality-negative:
+`30s` natural on local M2 Studio is fastest relative to baseline (`28.9%`
+warm median speedup, corr `0.794801`, SNR `4.78 dB`), followed by `15s`
+natural (`21.9%`) and `30s` padded (`21.7%`). The padded candidates are closer
+objectively, but every top-12 row still fails strict waveform parity and has a
+blank human decision. The ranking therefore points at where the speed lives:
+longer exact/natural F0-source branches save the most work, while padded
+branches preserve more quality. It does not approve any F0-source branch for
+production.
+
 | Candidate | Waveform health gate | Candidate vs baseline | Review WAV |
 | --- | --- | --- | --- |
 | natural `asr=112`, `F0=224` | `needs_listening` | corr 0.814034, SNR 5.08 dB, max 0.43998 | `outputs/f0_source_listening/3s_natural_asr_cos_rsqrt/wav/3s_natural_asr_cos_rsqrt_candidate.wav` |
