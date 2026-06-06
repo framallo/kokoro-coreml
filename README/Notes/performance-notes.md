@@ -564,6 +564,31 @@ laishere-style package/kernel-plan decomposition, or a hardware-specific Core
 ML scheduling fix; polishing the existing F0-source candidate is not enough
 unless it comes with additional full-path savings.
 
+#### Irvine 3s residual after warmed-profile correction
+
+`scripts/external_bakeoff/summarize_irvine_3s_residual.py` isolates the
+remaining hard cell after the warmed-profile correction:
+
+```bash
+uv run --no-sync python scripts/external_bakeoff/summarize_irvine_3s_residual.py \
+  --output outputs/external_bakeoff/irvine_3s_residual.md \
+  --json-output outputs/external_bakeoff/irvine_3s_residual.json
+```
+
+Current result: the best saved F0/source quality-fail branch
+(`3s_natural_asr_cos_rsqrt`) saves `18.7 ms` but still leaves `19.8 ms` versus
+the warmed laishere profile (`214.8 ms` projected Config F vs `195.0 ms`
+laishere). Adding the only positive strict-pass saved probe
+(`3s_har28561`, `0.7 ms`) still leaves `19.1 ms`. Even the optimistic additive
+estimate of best F0/source branch + best strict probe + eliminating the matched
+upstream/runtime gap still leaves `6.2 ms`.
+
+This means Irvine `3s` needs a genuinely new source/body graph surface or a
+real upstream/runtime reduction that exceeds the currently measured matched
+gap. Existing saved strict-equivalent probes do not close it, and the
+quality-fail F0/source family alone is insufficient for the broad
+absolute-fastest claim.
+
 #### Corrected Config F stage medians
 
 Each cell is the median per-stage time from the corrected staged + exact

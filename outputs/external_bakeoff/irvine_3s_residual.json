@@ -1,0 +1,60 @@
+{
+  "best_positive_strict_signal": {
+    "corr": 0.9999836188858681,
+    "delta_ms": 0.7222495041787624,
+    "family": "generator_har_input_trim",
+    "label": "3s_har28561",
+    "snr_db": 45.28481796403164
+  },
+  "best_quality_fail_signal": {
+    "corr": 0.813995146096268,
+    "delta_ms": 18.71397893410176,
+    "estimated_margin_ms": -38.50602106589827,
+    "family": "f0_noise_exact_shape",
+    "label": "3s_natural_asr_cos_rsqrt",
+    "snr_db": 5.082877006874869
+  },
+  "config_f_ms": 233.55,
+  "input_key": "3s",
+  "interpretation": "Saved 3s signals do not close warmed laishere. Even after the best quality-fail F0/source branch, the estimated residual is material; removing the matched upstream gap still leaves a positive residual.",
+  "known_positive_estimates_close_3s": false,
+  "laishere_profile_ms": 195.026,
+  "machine_id": "irvine-m1",
+  "profile_gap_ms": 38.524,
+  "quality_fail_candidates": [
+    {
+      "corr": 0.813995146096268,
+      "delta_ms": 18.71397893410176,
+      "label": "3s_natural_asr_cos_rsqrt",
+      "path": "outputs/f0_noise_exact_shape/remote_reports/report_f0_noise_exact_3s_irvine.json",
+      "snr_db": 5.082877006874869
+    },
+    {
+      "corr": 0.9318010730598894,
+      "delta_ms": 12.822124175727367,
+      "label": "3s_padded_native_in_nopal_cos_rsqrt_native_in",
+      "path": "outputs/f0_noise_exact_shape/3s_padded_native_in_nopal_cos_rsqrt_native_in/report_native_in_nopal_irvine.json",
+      "snr_db": 9.186025015775979
+    },
+    {
+      "corr": 0.9318398711921109,
+      "delta_ms": 10.884876013733447,
+      "label": "3s_padded_native_in_ios17_nopal_cos_rsqrt_cos_rsqrt_native_in",
+      "path": "outputs/f0_noise_exact_shape/remote_reports/report_native_in_ios17_nopal_irvine.json",
+      "snr_db": 9.18810639833705
+    },
+    {
+      "corr": 0.931616978001204,
+      "delta_ms": 4.243583767674863,
+      "label": "3s_padded_native_in_fp16_pal_v2_cos_rsqrt_body_pal_native_in",
+      "path": "outputs/f0_noise_exact_shape/3s_padded_native_in_fp16_pal_v2_cos_rsqrt_body_pal_native_in/report_native_in_fp16_pal_v2_irvine.json",
+      "snr_db": 9.17197260572146
+    }
+  ],
+  "residual_after_all_known_positive_estimates_ms": 6.172771561719468,
+  "residual_after_best_quality_fail_ms": 19.81002106589824,
+  "residual_after_quality_plus_best_strict_ms": 19.087771561719478,
+  "residual_after_quality_plus_upstream_gap_ms": 6.895021065898231,
+  "source_body_gap_ms": 22.024999999999988,
+  "upstream_runtime_gap_ms": 12.91500000000001
+}

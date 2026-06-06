@@ -33,6 +33,10 @@ from scripts.external_bakeoff.summarize_irvine_listening_targets import (
     render_markdown as render_irvine_listening_targets_markdown,
     summarize_listening_targets as summarize_irvine_listening_targets,
 )
+from scripts.external_bakeoff.summarize_irvine_3s_residual import (
+    render_markdown as render_irvine_3s_residual_markdown,
+    summarize_residual as summarize_irvine_3s_residual,
+)
 from scripts.external_bakeoff.summarize_stage_gap_decomposition import (
     render_markdown as render_stage_gap_markdown,
     summarize_config_record,
@@ -1168,6 +1172,57 @@ def test_irvine_listening_targets_prefers_exact_timing_artifact():
     assert row["listening_candidate_wav"] == "exact.wav"
     assert row["exact_timing_report_has_listening_artifact"] is True
     assert summary["exact_timing_report_listening_artifact_count"] == 1
+
+
+def test_irvine_3s_residual_budget_keeps_additive_estimates_explicit():
+    next_targets = {
+        "rows": [
+            {
+                "machine_id": "irvine-m1",
+                "input_key": "3s",
+                "config_f_ms": 230.0,
+                "laishere_ms": 195.0,
+                "source_body_gap_ms": 20.0,
+                "upstream_runtime_gap_ms": 10.0,
+                "best_quality_fail_signal": {"label": "3s_fast_fail", "delta_ms": 18.0},
+            }
+        ]
+    }
+    gap_candidates = {
+        "loss_cells": [
+            {
+                "machine_id": "irvine-m1",
+                "input_key": "3s",
+                "top_candidates": [
+                    {
+                        "quality_status": "strict-pass",
+                        "label": "3s_strict",
+                        "family": "generator_har_input_trim",
+                        "delta_ms": 0.5,
+                        "corr": 0.99999,
+                        "snr_db": 45.0,
+                    },
+                    {
+                        "quality_status": "quality-fail",
+                        "label": "3s_fast_fail",
+                        "delta_ms": 18.0,
+                        "corr": 0.81,
+                        "snr_db": 5.1,
+                        "path": "report.json",
+                    },
+                ],
+            }
+        ]
+    }
+
+    summary = summarize_irvine_3s_residual(next_targets, gap_candidates)
+    assert summary["residual_after_best_quality_fail_ms"] == 17.0
+    assert summary["residual_after_all_known_positive_estimates_ms"] == 6.5
+    assert summary["known_positive_estimates_close_3s"] is False
+
+    markdown = render_irvine_3s_residual_markdown(summary)
+    assert "Additive rows are estimates" in markdown
+    assert "`3s_fast_fail`" in markdown
 
 
 def test_coreml_metadata_summary_normalizes_ios_op_names():
