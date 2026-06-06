@@ -352,14 +352,13 @@ and `har_padded` tensors emitted by the current Swift pipeline.
 | irvine-m1 | 3s | 168.9 ms | 172.8 ms | not rerun | not rerun |
 | irvine-m1 | 7s | 384.7 ms | 394.2 ms | not rerun | not rerun |
 
-This isolates the remaining performance problem to the generator graph, not
-to upstream Swift orchestration or to an incorrect compute-unit policy. On the
-two machines where Config F still loses to laishere's chain-only short/medium
-rows, `.all` is slower than explicit `cpuAndGPU`; on M2 Studio, `.all` merely
-ties `cpuAndGPU`. Forcing CPU+ANE is catastrophic even at 3s. The next
-performance work must reduce or restructure generator graph work: a
-laishere-style noise/vocoder/tail split, or an operator rewrite that removes
-the GPU-preferred generator surface.
+This isolates the generator as the dominant Config F stage and rules out an
+incorrect compute-unit policy for the current `GeneratorFromHar` package. On
+the two lower-end Macs, `.all` is slower than explicit `cpuAndGPU`; on M2
+Studio, `.all` merely ties `cpuAndGPU`. Forcing CPU+ANE is catastrophic even at
+3s. This does not by itself prove laishere's generator-equivalent chain is
+faster; it proves our current fused generator is the main place where a
+same-boundary optimization could move the full-pipeline table.
 
 #### Exact generator geometry probe
 
@@ -471,6 +470,56 @@ On M2 Air, stage0 CPU+ANE is superficially faster (`28.3 ms` vs `31.2 ms`) but
 the audio output is invalid, so it is not a candidate. On Irvine M1, CPU+ANE is
 both slower and invalid. The next speed work must target the CPU+GPU generator
 operator count and memory movement directly.
+
+#### Laishere stage profile
+
+`scripts/external_bakeoff/profile_laishere_stages.py` profiles the pinned
+`laishere/kokoro-coreml` seven-package chain with the same timing boundary as
+the external bakeoff adapter: phonemization and feed preparation are reported
+separately and excluded from the warm chain median. Results are ignored under
+`outputs/external_bakeoff/placement/results_laishere_stage_profile_*.json`.
+
+The profile keeps laishere's public compute-unit policy: Albert, post-Albert,
+alignment, prosody, and vocoder use `CPU_AND_NE`; noise and tail use `ALL`.
+Each value below is the N=5 median after three discarded warmups.
+
+| Machine | Input | Total chain | Upstream stages | Noise+vocoder+tail | Noise | Vocoder | Tail |
+| --- | --- | ---: | ---: | ---: | ---: | ---: | ---: |
+| m2-studio | 3s | 104.5 ms | 13.7 ms | 90.4 ms | 26.2 ms | 60.9 ms | 3.2 ms |
+| m2-studio | 7s | 192.7 ms | 24.8 ms | 168.0 ms | 37.6 ms | 125.7 ms | 4.8 ms |
+| m2-studio | 10s | 248.3 ms | 30.3 ms | 216.2 ms | 43.0 ms | 166.2 ms | 7.0 ms |
+| m2-studio | 15s | 339.5 ms | 42.8 ms | 298.8 ms | 55.7 ms | 234.8 ms | 8.2 ms |
+| m2-studio | 30s | 619.7 ms | 85.6 ms | 532.1 ms | 85.6 ms | 432.9 ms | 13.6 ms |
+| m2-air | 3s | 153.0 ms | 27.0 ms | 123.7 ms | 46.1 ms | 73.8 ms | 3.8 ms |
+| m2-air | 7s | 334.7 ms | 54.8 ms | 279.0 ms | 92.4 ms | 175.9 ms | 10.7 ms |
+| m2-air | 10s | 467.3 ms | 74.9 ms | 392.8 ms | 115.4 ms | 262.9 ms | 14.6 ms |
+| m2-air | 15s | 691.5 ms | 105.0 ms | 583.9 ms | 163.2 ms | 405.1 ms | 15.6 ms |
+| m2-air | 30s | 1527.0 ms | 228.2 ms | 1298.5 ms | 384.3 ms | 877.0 ms | 37.3 ms |
+| irvine-m1 | 3s | 195.0 ms | 49.4 ms | 145.1 ms | 57.9 ms | 82.8 ms | 4.4 ms |
+| irvine-m1 | 7s | 444.2 ms | 102.5 ms | 340.4 ms | 114.1 ms | 216.5 ms | 9.8 ms |
+| irvine-m1 | 10s | 644.9 ms | 142.9 ms | 492.7 ms | 157.4 ms | 322.1 ms | 13.2 ms |
+| irvine-m1 | 15s | 990.6 ms | 213.1 ms | 779.9 ms | 225.1 ms | 536.3 ms | 18.5 ms |
+| irvine-m1 | 30s | 2292.3 ms | 498.9 ms | 1799.7 ms | 490.5 ms | 1271.2 ms | 38.0 ms |
+
+The 3s/7s same-boundary comparison against our generator-isolation measurements
+is the useful interpretation layer:
+
+| Machine | Input | Config F full | Config F generator | Laishere chain | Laishere noise+vocoder+tail | Interpretation |
+| --- | --- | ---: | ---: | ---: | ---: | --- |
+| m2-studio | 3s | 60.2 ms | 27.2 ms | 104.5 ms | 90.4 ms | Config F wins decisively; laishere's split chain is slower here. |
+| m2-studio | 7s | 110.5 ms | 59.5 ms | 192.7 ms | 168.0 ms | Config F wins decisively; no laishere generator advantage. |
+| m2-air | 3s | 151.7 ms | 120.1 ms | 153.0 ms | 123.7 ms | Practical tie; laishere is not faster at the generator-equivalent boundary. |
+| m2-air | 7s | 335.0 ms | 277.6 ms | 334.7 ms | 279.0 ms | Practical tie; old laishere lead was measurement-scale, not a clear graph win. |
+| irvine-m1 | 3s | 239.2 ms | 168.9 ms | 195.0 ms | 145.1 ms | Laishere wins; about half the gap is source/vocoder/tail and half upstream. |
+| irvine-m1 | 7s | 510.2 ms | 384.7 ms | 444.2 ms | 340.4 ms | Laishere wins; the M1 gap is real on both generator-equivalent and upstream stages. |
+
+This answers the "how is laishere/MLX faster?" question more narrowly. MLX is
+not faster after warmed Config F correction. Laishere is not faster on M2 Studio
+and is effectively tied on M2 Air when the stage-profile boundary is rerun. The
+remaining real loss is Irvine M1 short/medium. That loss is not explained by a
+simple Core ML compute-unit flip or by our already-tested split boundaries; the
+next useful experiment is a graph inspection of laishere's `KokoroVocoder` and
+`KokoroNoise` operator surface against our fused and split generator graphs.
 
 #### Fused cos-Snake probe
 

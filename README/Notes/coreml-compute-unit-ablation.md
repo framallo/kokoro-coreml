@@ -276,6 +276,16 @@ sudo powermetrics -i 1000 --samplers ane
   CPU+ANE corr `0.120825`; Irvine M1 stage0 CPU+ANE corr `0.403829`,
   stage1+tail CPU+ANE corr `0.121443`. Do not use ANE for any current generator
   substage on these hosts.
+- **Laishere stage profile narrowed the remaining loss:** `scripts/external_bakeoff/profile_laishere_stages.py`
+  times laishere's seven-package chain by stage while preserving its public
+  timing boundary. On M2 Air, laishere's noise+vocoder+tail portion is
+  effectively tied with our isolated generator (`3s` `123.7 ms` vs `120.1 ms`;
+  `7s` `279.0 ms` vs `277.6 ms`). On Irvine M1, laishere remains faster at the
+  comparable boundary (`3s` `145.1 ms` vs `168.9 ms`; `7s` `340.4 ms` vs
+  `384.7 ms`) and also has faster upstream stages. This means the next useful
+  comparison is laishere `KokoroNoise`/`KokoroVocoder` operator-surface
+  inspection, not more `MLComputeUnits` experiments or static HAR-post boundary
+  splitting.
 
 **2026-05-17**
 
