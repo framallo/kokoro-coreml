@@ -130,6 +130,9 @@ The shortest useful formulation is:
 
 For the next implementation pass, use the constrained handoff prompt in
 `README/Guides/apple-silicon/Kokoro-M1-source-body-deep-research-prompt.md`.
+The numeric post-rewrite target budget is generated at
+`outputs/external_bakeoff/strict_win_budget_after_rewrite.md`; update it after
+any new strict candidate before changing the research prompt.
 
 ## High-Value Directions
 

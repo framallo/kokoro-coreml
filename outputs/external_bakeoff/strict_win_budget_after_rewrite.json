@@ -1,0 +1,55 @@
+{
+  "rewrite_impact": "outputs/external_bakeoff/rewrite_candidate_impact.json",
+  "rows": [
+    {
+      "additional_paper_generator_speedup_required_pct": 31.297003948744145,
+      "additional_paper_save_required_ms": 50.06664503283764,
+      "additional_profile_generator_speedup_required_pct": 19.61000583968475,
+      "additional_profile_save_required_ms": 31.370645032837615,
+      "bucket": "3s",
+      "generator_after_rewrite_ms": 159.97264503283762,
+      "laishere_profile_ms": 195.026,
+      "paper_frontier_best_ms": 176.32999999999998,
+      "projected_total_after_rewrite_ms": 226.39664503283763
+    },
+    {
+      "additional_paper_generator_speedup_required_pct": 23.14744220439735,
+      "additional_paper_save_required_ms": 86.02098395476372,
+      "additional_profile_generator_speedup_required_pct": 9.786822503802926,
+      "additional_profile_save_required_ms": 36.36998395476371,
+      "bucket": "7s",
+      "generator_after_rewrite_ms": 371.6219839547637,
+      "laishere_profile_ms": 444.217,
+      "paper_frontier_best_ms": 394.566,
+      "projected_total_after_rewrite_ms": 480.5869839547637
+    },
+    {
+      "additional_paper_generator_speedup_required_pct": 13.958009438370675,
+      "additional_paper_save_required_ms": 74.15077743493657,
+      "additional_profile_generator_speedup_required_pct": 4.36143737542821,
+      "additional_profile_save_required_ms": 23.169777434936464,
+      "bucket": "10s",
+      "generator_after_rewrite_ms": 531.2417774349365,
+      "laishere_profile_ms": 644.873,
+      "paper_frontier_best_ms": 593.8919999999999,
+      "projected_total_after_rewrite_ms": 668.0427774349365
+    },
+    {
+      "additional_paper_generator_speedup_required_pct": 10.202878297992195,
+      "additional_paper_save_required_ms": 81.56417347566958,
+      "additional_profile_generator_speedup_required_pct": 0.3696632238994609,
+      "additional_profile_save_required_ms": 2.9551734756695396,
+      "bucket": "15s",
+      "generator_after_rewrite_ms": 799.4231734756695,
+      "laishere_profile_ms": 990.61,
+      "paper_frontier_best_ms": 912.001,
+      "projected_total_after_rewrite_ms": 993.5651734756696
+    }
+  ],
+  "summary": {
+    "irvine_buckets": 4,
+    "paper_rows_remaining": 4,
+    "profile_rows_already_closed": 0,
+    "profile_rows_remaining": 4
+  }
+}

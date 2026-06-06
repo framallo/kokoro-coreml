@@ -23,6 +23,19 @@ Current real Irvine M1 losses:
 | `10s` | `685.5 ms` | `644.9 ms` | `40.6 ms / 6.29%` |
 | `15s` | `1014.9 ms` | `990.6 ms` | `24.3 ms / 2.46%` |
 
+The HAR-post upsample rewrite is a measured strict local win and should be
+kept, but it is not enough alone. The current post-rewrite budget is tracked in
+`outputs/external_bakeoff/strict_win_budget_after_rewrite.md`. If the measured
+local package speedup transfers to Irvine, the remaining warmed profile target
+still needs:
+
+| Bucket | Projected Config F after rewrite | laishere profile | Extra strict save needed |
+| --- | ---: | ---: | ---: |
+| `3s` | `226.4 ms` | `195.0 ms` | `31.4 ms` |
+| `7s` | `480.6 ms` | `444.2 ms` | `36.4 ms` |
+| `10s` | `668.0 ms` | `644.9 ms` | `23.2 ms` |
+| `15s` | `993.6 ms` | `990.6 ms` | `3.0 ms` |
+
 Do not use cold compile/cache timings. Every claim must use warmed inference.
 
 ## Research Question
@@ -61,6 +74,13 @@ vocoder has native `instance_norm`, no tiles, and LUT-backed weight
 decompression. A useful strict candidate must change that surface without
 adding a new hot-path package boundary.
 
+The fully rewritten local probe surface
+(`cos-Snake + native-IN + broadcast AdaIN + fp16 inputs + iOS17 + upsample
+rewrite`) is contract-compatible as a Swift HAR-post overlay, but was rejected
+as a production replacement because it does not beat the simpler production
+rewrite overall. Do not treat "more visible surface matching" as a sufficient
+hypothesis.
+
 ## Do Not Repeat
 
 Treat these as measured rejections unless the proposal changes the boundary or
@@ -91,8 +111,9 @@ keeping the Swift input/output contract stable.
 Acceptance:
 
 - strict waveform gate passes;
-- Irvine M1 `3s` improves by at least `20 ms` warmed median, or combines with
-  measured upstream savings to close the full `38.5 ms` gap;
+- after the upsample rewrite baseline, Irvine M1 `3s` improves by at least
+  another `31.4 ms` warmed median, or combines with measured upstream savings
+  to close the full remaining profile gap;
 - M2 Studio does not materially regress.
 
 ### 2. In-Package HAR Source Consumption
