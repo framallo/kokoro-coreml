@@ -41,6 +41,7 @@ from probe_f0_noise_exact_shape import (  # noqa: E402
     _baseline_predict,
     _candidate_predict,
     _metrics,
+    _np_dtype,
     _select_inputs,
 )
 from probe_generator_exact_geometry import _compute_units  # noqa: E402
@@ -105,7 +106,8 @@ def _render_pair(
     tail = _load_model(Path(str(report["tail_package"])), args.tail_compute_units)
 
     baseline_wave, baseline_times = _baseline_predict(decoder_pre, fused, inputs)
-    candidate_wave, candidate_times = _candidate_predict(noise, body, tail, inputs)
+    body_input_dtype = _np_dtype(str((report.get("export") or {}).get("body_input_dtype", "fp32")))
+    candidate_wave, candidate_times = _candidate_predict(noise, body, tail, inputs, body_input_dtype)
     trim_len = min(
         int(tensors["waveform"].size),
         int(baseline_wave.size),
@@ -144,6 +146,7 @@ def _render_pair(
         "tensor_dump": _relative(tensor_dump),
         "manifest_metadata": manifest.get("metadata", {}),
         "natural_asr": natural_asr,
+        "body_input_dtype": str((report.get("export") or {}).get("body_input_dtype", "fp32")),
         "packages": {
             "decoder_pre": report["decoder_pre_package"],
             "fused": report["fused_package"],

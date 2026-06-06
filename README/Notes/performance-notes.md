@@ -3196,6 +3196,12 @@ while the PyTorch F0-source candidate vs dump is corr `0.939812`, SNR
 accept/reject the drift by listening review; more conversion flags are unlikely
 to solve this branch.
 
+Rendered a no-ASR listening pack for the 3s and 7s cos/residual speed branch at
+`outputs/f0_source_listening/cos_resblock_speed_branch/README.md`. Both
+candidates are `needs_listening` with no waveform-health reject reasons. This
+does not approve the branch; it creates the human review artifact the user
+requested after skipping Whisper/ASR.
+
 ---
 
 ## Bakeoff v5: Corrected benchmark (3s-30s) on M2 Ultra
