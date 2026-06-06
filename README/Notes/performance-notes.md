@@ -1049,10 +1049,21 @@ compute units, N=10 warm median after three discarded preflight calls:
 | 3s | 295.94 ms | 299.34 ms | -3.40 ms | 11.24 ms | 10.72 ms | 166.59 ms | 166.27 ms | reject; wall slower |
 | 7s | 642.97 ms | 640.37 ms | +2.61 ms | 25.96 ms | 26.16 ms | 383.50 ms | 383.07 ms | reject; tiny, noisy wall win |
 
+The padded-duration M1 probe used a temporary checkout where `coreml` was a
+symlink. Swift `FileManager.contentsOfDirectory(at:)` did not enumerate exact
+duration packages through that symlink, even though direct package paths
+resolved. A rerun with an absolute `--models-dir` selected `exact_t44` and
+`exact_t105` correctly:
+
+| Input | Exact-duration wall | Duration model | HnSF | Generator | Duration | F0Ntrain | DecoderPre |
+| --- | ---: | --- | ---: | ---: | ---: | ---: | ---: |
+| 3s | 238.99 ms | exact_t44 | 19.12 ms | 166.02 ms | 23.07 ms | 10.21 ms | 3.17 ms |
+| 7s | 504.08 ms | exact_t105 | 27.76 ms | 383.08 ms | 40.64 ms | 11.57 ms | 5.72 ms |
+
 Conclusion: after the vDSP HnSF work, exact Swift HnSF is not large enough to
-close the lower-end Mac gap. On Irvine M1, the paired run shows generator
-predict at roughly `167 ms` for 3s and `383 ms` for 7s, while HnSF is only
-`11 ms` and `26 ms`. The next quality-safe speed work should attack the
+close the lower-end Mac gap. On Irvine M1 with the exact-duration baseline,
+generator predict remains roughly `166 ms` for 3s and `383 ms` for 7s, while
+HnSF is `19 ms` and `28 ms`. The next quality-safe speed work should attack the
 generator/vocoder graph boundary, not further Swift source micro-optimizations.
 
 #### HAR input-trim probe
