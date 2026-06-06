@@ -689,6 +689,36 @@ alone. It must come from laishere's full runtime/package details, a
 hardware-specific Core ML compile plan, or work reduction outside the reproduced
 boundary.
 
+#### F0-noise exact-shape reuse probe
+
+A one-off package-reuse probe fed the Swift tensor dumps into the pinned
+laishere `KokoroNoise`/`KokoroVocoder`/`KokoroTail` packages. This is not a
+drop-in implementation because it uses laishere's F0-driven noise source rather
+than our Swift HnSF/HAR tensor and the waveform is not numerically close to the
+current output. It is still useful because it tests the likely missing speed
+ingredient: delete the large HAR input and run exact dynamic `asr`/`F0` lengths.
+
+The shape effect is large. On local M2 Studio, feeding padded 3s tensors
+(`asr=120`, `F0=240`) made laishere's vocoder take `237.2 ms`; feeding natural
+`asr=112` dropped the vocoder to `58-64 ms`. On Irvine M1, padded 3s tensors
+took `245.1 ms` total for noise+vocoder+tail, while natural `asr=112` with
+`F0=240` took `135.4 ms`.
+
+Irvine M1 direct package-reuse timings:
+
+| Input | Shape | Noise+vocoder+tail | Current DecoderPre+HnSF+Generator stack | Estimated full Config F if substituted | Parity vs current dump | Decision |
+| --- | --- | ---: | ---: | ---: | --- | --- |
+| 3s | `asr=112`, `F0=240` | 135.4 ms | 199.3 ms | ~175.3 ms | corr 0.699830, SNR 0.56 dB | promising speed, not quality-safe |
+| 7s | `asr=270`, `F0=540` | 337.4 ms | 443.1 ms | ~404.5 ms | corr 0.701953, SNR 0.64 dB | promising speed, still trails laishere unless upstream also improves |
+
+The speed implication is concrete: replacing the M1 3s
+`DecoderPre + Swift HnSF + GeneratorFromHar` stack with an exact-shape
+F0-noise/vocoder/tail stack could put Config F roughly at the laishere 3s row.
+The quality implication is equally concrete: current correlation/SNR is far too
+low for a parity claim. The next optimization target should be a first-party
+F0-noise exact-shape probe with listening review and quality recovery, not more
+HAR-post repartitioning.
+
 #### HnSF vDSP optimization
 
 Current `main` vectorizes the Swift HnSF STFT path with cached 20-point DFT

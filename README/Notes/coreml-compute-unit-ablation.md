@@ -332,6 +332,20 @@ sudo powermetrics -i 1000 --samplers ane
   remaining laishere gap is either from its full chain/runtime details, a
   hardware-specific Core ML compile plan, or work reduction outside this
   boundary; do not ship this split.
+- **F0-noise exact-shape path is the next real target, but not quality-safe yet:**
+  feeding the Swift dumps into the pinned laishere `KokoroNoise`/`KokoroVocoder`/
+  `KokoroTail` packages shows the missing speed ingredient is not another
+  HAR-post split; it is removing the HAR input and using exact dynamic lengths.
+  On Irvine M1, natural-shape `3s` (`asr=112`, `F0=240`) took `135.4 ms` for
+  noise+vocoder+tail versus the current `DecoderPre + Swift HnSF + Generator`
+  stack at `199.3 ms`. Natural-shape `7s` (`asr=270`, `F0=540`) took
+  `337.4 ms` versus the current stack at `443.1 ms`. Padded shapes are much
+  slower (`245.1 ms` for 3s), so exact dynamic shape is part of the speed story.
+  This path is not shippable yet: waveform parity versus the current dump is
+  poor (`3s` corr `0.699830`, SNR `0.56 dB`; `7s` corr `0.701953`, SNR
+  `0.64 dB`). Next work should build a first-party F0-noise exact-shape probe
+  and run listening/quality recovery; do not spend more time repartitioning the
+  current HAR-post package.
 
 **2026-05-17**
 
