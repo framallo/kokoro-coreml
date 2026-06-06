@@ -589,6 +589,24 @@ gap. Existing saved strict-equivalent probes do not close it, and the
 quality-fail F0/source family alone is insufficient for the broad
 absolute-fastest claim.
 
+`scripts/external_bakeoff/summarize_irvine_3s_surfaces.py` is the focused
+scanner for saved Irvine `3s` graph-surface reports. It understands split/fused
+benchmark schemas that the generic optimization scanner does not classify:
+
+```bash
+uv run --no-sync python scripts/external_bakeoff/summarize_irvine_3s_surfaces.py \
+  --output outputs/external_bakeoff/irvine_3s_surfaces.md \
+  --json-output outputs/external_bakeoff/irvine_3s_surfaces.json
+```
+
+Current scan result: `19` saved Irvine `3s` surface rows are classifiable.
+Only `2` strict-pass rows are speed-positive: `3s_har28561` (`+0.7 ms`) and
+`3s_broadcast_adain_native_in_ios17` (`+0.2 ms`). Every material positive row
+is a quality-fail F0/source variant. The quality-safe split/fused attempts
+around generator stage split, generator noise split, exact HAR/body split, and
+nyquist-padded HAR-source fused graphs are all slower on Irvine `3s`. This
+closes the "maybe an existing unclassified report already solved 3s" question.
+
 #### Corrected Config F stage medians
 
 Each cell is the median per-stage time from the corrected staged + exact

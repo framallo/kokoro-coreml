@@ -37,6 +37,11 @@ from scripts.external_bakeoff.summarize_irvine_3s_residual import (
     render_markdown as render_irvine_3s_residual_markdown,
     summarize_residual as summarize_irvine_3s_residual,
 )
+from scripts.external_bakeoff.summarize_irvine_3s_surfaces import (
+    collect_rows as collect_irvine_3s_surface_rows,
+    render_markdown as render_irvine_3s_surfaces_markdown,
+    summarize_surfaces as summarize_irvine_3s_surfaces,
+)
 from scripts.external_bakeoff.summarize_stage_gap_decomposition import (
     render_markdown as render_stage_gap_markdown,
     summarize_config_record,
@@ -1223,6 +1228,63 @@ def test_irvine_3s_residual_budget_keeps_additive_estimates_explicit():
     markdown = render_irvine_3s_residual_markdown(summary)
     assert "Additive rows are estimates" in markdown
     assert "`3s_fast_fail`" in markdown
+
+
+def test_irvine_3s_surface_summary_handles_split_schema(tmp_path):
+    report = tmp_path / "outputs" / "generator_stage_split" / "3s" / "report_irvine_cpugpu.json"
+    report.parent.mkdir(parents=True)
+    report.write_text(
+        json.dumps(
+            {
+                "report": "outputs/generator_stage_split/3s/report_irvine_cpugpu.json",
+                "passes": True,
+                "benchmark": {
+                    "warm_predict_median_ms": {
+                        "fused": 100.0,
+                        "split_total": 92.0,
+                    },
+                    "metrics": {
+                        "split_vs_fused_trimmed": {
+                            "correlation": 0.99999,
+                            "snr_db": 48.0,
+                        }
+                    },
+                },
+            }
+        )
+    )
+    inferred = tmp_path / "outputs" / "har_source_fused" / "3s" / "report_irvine_no_pass.json"
+    inferred.parent.mkdir(parents=True)
+    inferred.write_text(
+        json.dumps(
+            {
+                "report_path": "outputs/har_source_fused/3s/report_irvine_no_pass.json",
+                "warm_predict_median_ms": {
+                    "baseline_generator": 100.0,
+                    "candidate_har_source_fused": 90.0,
+                },
+                "metrics": {
+                    "candidate_vs_baseline_trimmed": {
+                        "correlation": 0.9,
+                        "snr_db": 10.0,
+                    }
+                },
+            }
+        )
+    )
+
+    rows = collect_irvine_3s_surface_rows([str(tmp_path / "outputs/**/report*.json")])
+    summary = summarize_irvine_3s_surfaces(rows)
+
+    assert summary["row_count"] == 2
+    assert summary["strict_pass_positive_count"] == 1
+    assert summary["quality_fail_positive_count"] == 1
+    assert summary["best_strict_pass"]["label"] == "3s"
+    assert summary["best_quality_fail"]["path"].endswith("report_irvine_no_pass.json")
+
+    markdown = render_irvine_3s_surfaces_markdown(summary, top=10)
+    assert "Saved Irvine 3s reports only" in markdown
+    assert "generator_stage_split" in markdown
 
 
 def test_coreml_metadata_summary_normalizes_ios_op_names():
