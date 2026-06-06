@@ -34,11 +34,11 @@
       "strict": true
     },
     {
-      "best_signal": "Irvine 3s CPU+GPU -11.5 ms; CPU+NE quality/speed failure",
-      "decision": "reject; tightest strict split still loses",
+      "best_signal": "body-only is faster if x_source tensors are free (M2 17.6 vs 26.4 ms; Irvine 105.9 vs 168.3 ms), but full strict split loses once noise/source is included",
+      "decision": "reject; x_source body package is promising only with a cheaper strict source contract",
       "evidence": "README/Notes/performance-notes.md",
       "family": "Exact generator noise/body split",
-      "next_gate": "do not repeat unless packaging/synchronization changes",
+      "next_gate": "only revisit if x_source is produced without a separate Core ML noise call or with a new source representation",
       "production_ready": false,
       "quality": "strict on CPU+GPU; CPU+NE quality fails",
       "scope": "multi-package exact HAR-post generator split",

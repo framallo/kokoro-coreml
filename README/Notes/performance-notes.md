@@ -4397,6 +4397,17 @@ HAR-post generator either; it likely requires moving to a laishere-style source
 contract, proving that drift acceptable by listening review, or finding a new
 single-package optimization that preserves the exact Swift HAR contract.
 
+The body-only counterfactual is important and should not be lost: if
+`x_source_0/x_source_1` were already available for free, the single
+body+tail package would beat fused prediction. Local M2 Studio native-IN/iOS17
+3s body-only is `17.59 ms` versus fused `26.43 ms`; Irvine M1 body-only is
+`105.89 ms` versus fused `168.31 ms`. The full strict split loses because
+producing exact `x_source_*` costs `11.25 ms` on M2 Studio and `74.02 ms` on
+Irvine, plus an extra Core ML dispatch. This reframes the open path: do not
+repeat the same split, but do search for a cheaper strict source contract or a
+single package that consumes a smaller Swift-produced representation and still
+gets the body-only savings.
+
 Style-specializing the fused generator for the fixed bakeoff voice is also not
 a speed path. `scripts/probe_generator_style_specialization.py` freezes the
 48 AdaIN style projections from the `af_heart` tensor dump, removes `ref_s` as
