@@ -862,6 +862,17 @@ Current generated stage-gap summary:
 | m2-air | 10s | `-1.3 ms` | `+3.2 ms` | `-8.6 ms` | Practical tie; small source/body deficit offset elsewhere. |
 | m2-air | 15s | `+2.0 ms` | `+7.6 ms` | `-7.6 ms` | Measurement-scale tie. |
 
+Frontier-candidate reruns now include the previously missing Irvine M1 15s
+F0-source row. The remote skip-export run reused the local
+`15s_padded_cos_resblock_cos_rsqrt` packages and measured `758.8 ms` versus a
+same-host strict-equivalent baseline of `837.7 ms` (`+9.4%`), but it still fails
+quality (`corr 0.956796`, `SNR 11.00 dB`) and does not close the current 15s
+frontier cell. Regenerating `outputs/external_bakeoff/frontier_gap_candidates.md`
+after that run still reports `0` strict-pass closers and `0` quality-fail
+closers across all current loss cells. The F0-source branch remains useful
+research evidence, but the saved candidates are not enough to prove a faster
+implementation even if listening accepted the quality drift.
+
 This answers the "how is laishere/MLX faster?" question more narrowly. MLX is
 not faster after warmed Config F correction. Laishere is not faster on M2 Studio
 and is effectively tied on M2 Air when the stage-profile boundary is rerun. The
