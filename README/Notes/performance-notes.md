@@ -3210,6 +3210,20 @@ branch. `scripts/probe_f0_noise_exact_shape.py` now supports `--phase-mode`;
 `7.44 dB`). The next step is source formulation or listening acceptance, not
 more phase branch tuning.
 
+The source formulation gap is now proven. `scripts/probe_f0_source_variants.py`
+has a `swift_like_seeded` variant that matches dumped Swift `har_source` at
+essentially perfect parity (`3s` SNR `138.15 dB`, `7s` SNR `139.65 dB`). The
+deterministic CoreML-friendly/laishere-style source stays at corr `0.93978`
+for 3s and `0.96731` for 7s. Laishere is faster partly because it moves this
+source work into a simplified Core ML graph; that is not strict-equivalent to
+our current seeded Double-accumulator Swift HnSF contract.
+
+Keeping exact Swift HAR and only splitting the laishere-style noise/body/tail
+is not a win locally. The exact-HAR cos/residual split passes quality, but is
+slower: 3s `36.76 ms` vs `32.07 ms`, and 7s `67.72 ms` vs `60.88 ms`. That path
+is rejected for production unless a lower-end remote device contradicts the
+local result.
+
 ---
 
 ## Bakeoff v5: Corrected benchmark (3s-30s) on M2 Ultra

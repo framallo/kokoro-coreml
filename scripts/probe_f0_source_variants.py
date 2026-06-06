@@ -81,6 +81,110 @@ def _source_original_seeded(gen: Any, f0_curve: Any, seed: int):
     return har_source.transpose(1, 2).squeeze(1)
 
 
+def _xorshift64_values(seed: int, count: int) -> np.ndarray:
+    """Return Swift ``SeededRNG`` values for cross-language source parity."""
+
+    state = np.uint64(seed)
+    values = np.empty(count, dtype=np.uint64)
+    for idx in range(count):
+        state = np.uint64(state ^ np.uint64(state << np.uint64(13)))
+        state = np.uint64(state ^ np.uint64(state >> np.uint64(7)))
+        state = np.uint64(state ^ np.uint64(state << np.uint64(17)))
+        values[idx] = state
+    return values
+
+
+def _swift_uniform01(seed: int, count: int) -> np.ndarray:
+    """Return Swift-style 24-bit uniform floats in ``[0, 1)``."""
+
+    values = _xorshift64_values(seed, count)
+    masked = (values & np.uint64(0xFFFFFF)).astype(np.float32)
+    return masked / np.float32(0xFFFFFF)
+
+
+def _swift_gaussian(seed: int, count: int) -> np.ndarray:
+    """Return Gaussian noise matching Swift ``generateGaussianNoise``."""
+
+    pair_count = (count + 1) // 2
+    uniforms = _swift_uniform01(seed, pair_count * 2)
+    out = np.empty(pair_count * 2, dtype=np.float32)
+    tiny = np.finfo(np.float32).eps
+    for pair in range(pair_count):
+        u1 = max(tiny, float(uniforms[2 * pair]))
+        u2 = float(uniforms[2 * pair + 1])
+        radius = math.sqrt(-2.0 * math.log(u1))
+        theta = 2.0 * math.pi * u2
+        out[2 * pair] = np.float32(radius * math.cos(theta))
+        out[2 * pair + 1] = np.float32(radius * math.sin(theta))
+    return out[:count]
+
+
+def _linear_interp_np(values: np.ndarray, target_len: int) -> np.ndarray:
+    """Match Swift/PyTorch linear interpolation with ``align_corners=False``."""
+
+    src_count = int(values.shape[0])
+    if src_count == 0 or target_len <= 0:
+        return np.empty((0,), dtype=np.float64)
+    if target_len == 1:
+        return np.asarray([float(np.mean(values))], dtype=np.float64)
+    if src_count == target_len:
+        return values.astype(np.float64, copy=True)
+
+    src_len = float(src_count)
+    dst_len = float(target_len)
+    ratio = src_len / dst_len
+    out = np.empty(target_len, dtype=np.float64)
+    for idx in range(target_len):
+        src_idx = (float(idx) + 0.5) * ratio - 0.5
+        src_idx = max(0.0, min(src_idx, src_len - 1.0))
+        lo = int(src_idx)
+        hi = min(lo + 1, src_count - 1)
+        frac = src_idx - float(lo)
+        out[idx] = float(values[lo]) * (1.0 - frac) + float(values[hi]) * frac
+    return out
+
+
+def _source_swift_like(gen: Any, f0_curve: Any, seed: int):
+    """Return source generated with the Swift HarmonicSource equation."""
+
+    import torch
+
+    f0 = gen.f0_upsamp(f0_curve[:, None]).transpose(1, 2).detach().cpu().numpy()
+    f0_up = f0.reshape(-1).astype(np.float32)
+    sine = gen.m_source.l_sin_gen
+    linear = gen.m_source.l_linear
+    weights = linear.weight.detach().cpu().numpy().reshape(-1).astype(np.float32)
+    bias = float(linear.bias.detach().cpu().numpy().reshape(-1)[0])
+
+    length = int(f0_up.shape[0])
+    dim = int(sine.harmonic_num + 1)
+    scale = int(sine.upsample_scale)
+    down_len = max(1, (length + scale - 1) // scale)
+    up_len = down_len * scale
+    sine_waves = np.empty((dim, length), dtype=np.float32)
+
+    # Swift consumes one random value for each overtone's initial phase before
+    # generating the separate Gaussian-noise stream from the same seed.
+    initial_uniforms = _swift_uniform01(seed, dim - 1) if dim > 1 else np.empty((0,), dtype=np.float32)
+    two_pi_times_scale = 2.0 * math.pi * float(scale)
+    for harmonic in range(dim):
+        rad = np.remainder(f0_up.astype(np.float64) * float(harmonic + 1) / float(sine.sampling_rate), 1.0)
+        if harmonic > 0:
+            rad[0] += float(initial_uniforms[harmonic - 1])
+        rad_ds = _linear_interp_np(rad, down_len)
+        phase_scaled = np.cumsum(rad_ds, dtype=np.float64) * two_pi_times_scale
+        phase_up = _linear_interp_np(phase_scaled, up_len)
+        sine_waves[harmonic, :] = (np.sin(phase_up[:length]) * float(sine.sine_amp)).astype(np.float32)
+
+    gaussian = _swift_gaussian(seed, dim * length).reshape(dim, length)
+    uv = (f0_up > float(sine.voiced_threshold)).astype(np.float32)
+    noise_amp = uv * float(sine.noise_std) + (1.0 - uv) * float(sine.sine_amp / 3.0)
+    sine_waves = sine_waves * uv[None, :] + gaussian * noise_amp[None, :]
+
+    merged = np.tanh(bias + weights.astype(np.float32) @ sine_waves).astype(np.float32)
+    return torch.from_numpy(merged.reshape(1, -1))
+
+
 def _report_for_dump(tensor_dump: Path, seed_override: int | None) -> dict[str, Any]:
     import torch
 
@@ -97,6 +201,7 @@ def _report_for_dump(tensor_dump: Path, seed_override: int | None) -> dict[str, 
 
     variants = {
         "original_pytorch_seeded": _source_original_seeded(gen, f0, seed),
+        "swift_like_seeded": _source_swift_like(gen, f0, seed),
         "probe_avg_pool_noise_0p01": _source_current_probe(gen, f0, downsample="avg_pool", noise_scale=0.01),
         "probe_avg_pool_noise_0": _source_current_probe(gen, f0, downsample="avg_pool", noise_scale=0.0),
         "linear_interp_noise_0p01": _source_current_probe(gen, f0, downsample="linear", noise_scale=0.01),

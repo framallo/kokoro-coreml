@@ -508,6 +508,26 @@ sudo powermetrics -i 1000 --samplers ane
   raw phase branch selection as the missing F0-source quality fix; the remaining
   gap is source formulation and/or human-listening acceptance, not a Core ML
   `atan2` lowering issue.
+- **Swift-like source explains the F0-source quality gap:** Extended
+  `scripts/probe_f0_source_variants.py` with a Python `swift_like_seeded`
+  implementation of Swift `HarmonicSource.swift`: xorshift64 initial phase,
+  Box-Muller Gaussian noise, linear interpolation, and Double phase
+  accumulation. It matches dumped Swift `har_source` essentially exactly
+  (`3s` corr `1.000000`, SNR `138.15 dB`; `7s` corr `1.000000`, SNR
+  `139.65 dB`). The laishere/CoreML-friendly deterministic source remains only
+  corr `0.93978`/`0.96731` against that boundary. This proves the speed-positive
+  F0-source branch is trading away the exact seeded/Double source contract; it
+  cannot become strict-parity production without either porting that contract or
+  accepting the audio drift by listening review.
+- **Exact Swift HAR + laishere body split is quality-safe but slower:** Reran
+  `scripts/probe_decoder_vocoder_split.py` with exact dumped `har_padded` plus
+  `--cos-snake --patch-resblock-scale`. Local 3s passes strict quality
+  (`corr 0.9999908`, SNR `47.76 dB`) but is slower (`36.76 ms` candidate vs
+  `32.07 ms` baseline, `-14.6%`). Local 7s also passes quality
+  (`corr 0.9999907`, SNR `47.81 dB`) but is slower (`67.72 ms` vs `60.88 ms`,
+  `-11.2%`). This rejects the simple production path of keeping the current
+  Swift HnSF/HAR contract while splitting only laishere's noise/body/tail
+  packages.
 
 **2026-05-17**
 
