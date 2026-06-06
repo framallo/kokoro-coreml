@@ -19,6 +19,7 @@ laishere on Irvine M1 short and medium buckets. The live frontier is tracked by:
 - `outputs/external_bakeoff/frontier_freshness.md`
 - `outputs/external_bakeoff/irvine_next_targets.md`
 - `outputs/external_bakeoff/irvine_3s_placement_target.md`
+- `outputs/external_bakeoff/candidate_frontier_matrix.md`
 - `README/Guides/apple-silicon/Kokoro-M1-graph-surface-target.md`
 
 For `irvine-m1/3s`, the warmed profile gap is:
@@ -132,7 +133,10 @@ For the next implementation pass, use the constrained handoff prompt in
 `README/Guides/apple-silicon/Kokoro-M1-source-body-deep-research-prompt.md`.
 The numeric post-rewrite target budget is generated at
 `outputs/external_bakeoff/strict_win_budget_after_rewrite.md`; update it after
-any new strict candidate before changing the research prompt.
+any new strict candidate before changing the research prompt. The candidate
+frontier matrix at `outputs/external_bakeoff/candidate_frontier_matrix.md`
+summarizes the current strict wins, strict rejections, quality-fail speed
+branches, and iPhone launch gate; update it whenever a candidate changes status.
 
 ## High-Value Directions
 

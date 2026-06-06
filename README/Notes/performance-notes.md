@@ -4571,6 +4571,19 @@ production rewrite on `3s` and noise-tied on `10s`; it regresses `7s/15s/30s`.
 Result:
 `outputs/external_bakeoff/results_config_f_reference_m2-studio-local_full_surface_ups_as_conv.json`.
 
+`scripts/external_bakeoff/summarize_candidate_frontier_matrix.py` now records
+the current optimization frontier at
+`outputs/external_bakeoff/candidate_frontier_matrix.md`. The matrix separates
+the single production-ready strict win (HAR-post upsample rewrite), six strict
+but rejected or too-small families, and the one fast quality-fail F0/source
+family. It also carries the current iPhone Config F launch blocker from
+`outputs/external_bakeoff/config_f_ios_manual_install_latest.json`, so the
+next pass has one machine-readable place to check what is worth rerunning. As
+of the latest local check on 2026-06-06 at 07:06, the iPhone remains visible
+and paired, but launching `com.kokoro.externalbakeoff.ConfigFIOSRunnerManual`
+still fails with `RequestDenied ... Locked`; Config F iPhone warmed timing is
+therefore still blocked only by the physical lock state.
+
 ---
 
 ## Bakeoff v5: Corrected benchmark (3s-30s) on M2 Ultra
