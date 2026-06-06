@@ -1032,7 +1032,15 @@ def test_irvine_next_targets_keeps_only_real_irvine_losses():
                 "input_key": "7s",
                 "strict_pass_closers": 0,
                 "quality_fail_closers": 0,
-                "top_candidates": [],
+                "top_candidates": [
+                    {
+                        "quality_status": "quality-fail",
+                        "label": "7s_fast_fail",
+                        "family": "f0_noise_exact_shape",
+                        "delta_ms": 60.0,
+                        "estimated_margin_ms": -10.0,
+                    },
+                ],
             },
         ]
     }
@@ -1045,9 +1053,13 @@ def test_irvine_next_targets_keeps_only_real_irvine_losses():
     assert summary["rows"][1]["target_class"] == "source/body dominates"
     assert summary["rows"][0]["best_strict_candidate"]["label"] == "3s_strict_small"
     assert summary["rows"][0]["best_quality_fail_signal"]["label"] == "3s_fast_fail"
+    assert summary["rows"][0]["quality_fail_vs_warmed_profile"]["would_beat_warmed_laishere_profile"] is False
+    assert summary["rows"][1]["quality_fail_vs_warmed_profile"]["would_beat_warmed_laishere_profile"] is True
+    assert summary["quality_fail_warmed_profile_closers"] == 1
 
     markdown = render_irvine_next_targets_markdown(summary)
     assert "Real Irvine loss rows: `2`." in markdown
+    assert "Quality-fail candidates that would beat warmed laishere profile: `1`." in markdown
     assert "source/body primary; upstream/runtime material" in markdown
     assert "Do not promote fresh Irvine timing" in markdown
 

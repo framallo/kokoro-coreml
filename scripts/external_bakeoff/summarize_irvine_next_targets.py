@@ -49,6 +49,23 @@ def _candidate_text(candidate: dict[str, Any] | None) -> str:
     return f"`{candidate['label']}` ({change}; still {_fmt_ms(margin)} short)"
 
 
+def _quality_profile_counterfactual(
+    config_ms: Any,
+    laishere_ms: Any,
+    candidate: dict[str, Any] | None,
+) -> dict[str, Any] | None:
+    if config_ms is None or laishere_ms is None or candidate is None:
+        return None
+    delta_ms = float(candidate.get("delta_ms") or 0.0)
+    projected_ms = float(config_ms) - delta_ms
+    margin_ms = float(laishere_ms) - projected_ms
+    return {
+        "projected_config_f_ms": projected_ms,
+        "profile_margin_ms": margin_ms,
+        "would_beat_warmed_laishere_profile": margin_ms > 0.0,
+    }
+
+
 def _stage_index(stage_gaps: dict[str, Any]) -> dict[tuple[str, str], dict[str, Any]]:
     rows = stage_gaps.get("rows") or []
     return {(str(row.get("machine_id")), str(row.get("input_key"))): row for row in rows}
@@ -145,6 +162,11 @@ def summarize_targets(
                     "corr": quality_fail.get("corr"),
                     "snr_db": quality_fail.get("snr_db"),
                 },
+                "quality_fail_vs_warmed_profile": _quality_profile_counterfactual(
+                    loss.get("profile_config_f_ms"),
+                    loss.get("profile_laishere_ms"),
+                    quality_fail,
+                ),
             }
         )
 
@@ -155,6 +177,13 @@ def summarize_targets(
         "rows": rows,
         "strict_pass_closers": sum(row["strict_pass_closers"] for row in rows),
         "quality_fail_closers": sum(row["quality_fail_closers"] for row in rows),
+        "quality_fail_warmed_profile_closers": sum(
+            1
+            for row in rows
+            if (row.get("quality_fail_vs_warmed_profile") or {}).get(
+                "would_beat_warmed_laishere_profile"
+            )
+        ),
         "next_actions": [
             "Do not promote fresh Irvine timing until background indexing/media analysis is idle.",
             "Strict path: find a single-package or narrower exact-HAR source/body graph surface; saved strict-pass probes do not close any current Irvine loss.",
@@ -174,13 +203,24 @@ def render_markdown(summary: dict[str, Any]) -> str:
         f"Real Irvine loss rows: `{summary['real_loss_count']}`.",
         f"Saved strict-pass candidates that close these losses: `{summary['strict_pass_closers']}`.",
         f"Saved quality-fail candidates that close these losses: `{summary['quality_fail_closers']}`.",
+        f"Quality-fail candidates that would beat warmed laishere profile: `{summary['quality_fail_warmed_profile_closers']}`.",
         "",
-        "| Bucket | Config F | laishere | Gap | Source/body gap | Upstream/runtime gap | Target class | Best saved strict pass | Best quality-fail speed signal |",
-        "| --- | ---: | ---: | ---: | ---: | ---: | --- | --- | --- |",
+        "| Bucket | Config F | laishere | Gap | Source/body gap | Upstream/runtime gap | Target class | Best saved strict pass | Best quality-fail speed signal | Quality-fail vs warmed profile |",
+        "| --- | ---: | ---: | ---: | ---: | ---: | --- | --- | --- | --- |",
     ]
     for row in summary["rows"]:
         strict_text = _candidate_text(row["best_strict_candidate"])
         quality_text = _candidate_text(row["best_quality_fail_signal"])
+        profile = row.get("quality_fail_vs_warmed_profile") or {}
+        profile_margin = profile.get("profile_margin_ms")
+        if profile:
+            outcome = "win" if profile["would_beat_warmed_laishere_profile"] else "loss"
+            profile_text = (
+                f"{outcome}: projected {_fmt_ms(profile['projected_config_f_ms'])}, "
+                f"margin {_fmt_ms(profile_margin)}"
+            )
+        else:
+            profile_text = "n/a"
         lines.append(
             "| "
             + " | ".join(
@@ -194,6 +234,7 @@ def render_markdown(summary: dict[str, Any]) -> str:
                     row["target_class"],
                     strict_text,
                     quality_text,
+                    profile_text,
                 ]
             )
             + " |"
@@ -228,6 +269,7 @@ def main() -> int:
                 "real_loss_count": summary["real_loss_count"],
                 "strict_pass_closers": summary["strict_pass_closers"],
                 "quality_fail_closers": summary["quality_fail_closers"],
+                "quality_fail_warmed_profile_closers": summary["quality_fail_warmed_profile_closers"],
                 "output": str(args.output),
             },
             indent=2,

@@ -595,6 +595,28 @@ sudo powermetrics -i 1000 --samplers ane
   `3s`/`7s`/`10s`/`15s`/`30s`. The remaining lower-end loss is still generator
   predict, not host HnSF.
 
+**2026-06-06**
+
+- **Do not mix stale paper-frontier gaps with warmed profile gaps:** Added
+  `scripts/external_bakeoff/summarize_irvine_next_targets.py` to separate the
+  paper-facing frontier from newer warmed laishere stage-profile evidence. The
+  saved strict-pass probes still close `0` Irvine losses, and quality-fail
+  candidates close `0` losses against the older paper frontier. Against the
+  warmed laishere profile, however, the best F0/source quality-fail candidate
+  would beat `7s` by `0.1 ms`, `10s` by `36.2 ms`, and `15s` by `54.5 ms`; it
+  still loses `3s` by `19.8 ms`. This makes the next real research target
+  precise: either recover/approve the F0/source branch and separately solve
+  Irvine `3s`, or find a strict-equivalent source/body graph change that has not
+  already been rejected.
+- **Listening evidence is now separated from timing evidence:** Added
+  `scripts/external_bakeoff/summarize_irvine_listening_targets.py` and rendered
+  exact no-ASR listening packs for the recoverable Irvine `3s`/`7s` remote
+  reports at `outputs/f0_source_listening/irvine_exact_speed_branch/`. `10s`
+  and `15s` remote reports pointed to deleted `/tmp` packages, so the current
+  listening rows for those cells are same-label local WAVs rather than exact
+  remote-report renders. Human decisions remain blank, so none of these
+  quality-fail speed branches are production-approved.
+
 **2026-05-17**
 
 - **Powermetrics result:** Config F/reference single-stream was not ANE-bound
