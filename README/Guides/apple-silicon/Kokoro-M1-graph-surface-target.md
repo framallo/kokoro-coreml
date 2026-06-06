@@ -350,17 +350,37 @@ The exported package has the intended production-default graph delta:
 | shipped `kokoro_decoder_har_post_3s` | 2207 | 51 | 4 | 0 | 88 | 96 | 50 | 1 |
 | production rewrite smoke | 2229 | 53 | 2 | 0 | 88 | 96 | 50 | 1 |
 
-On the real 3s generator tensor dump, warmed local M2 Studio CPU+GPU improves
-from `26.377 ms` to `25.122 ms` (`+4.76%`) with corr `0.9999957084781588`,
-SNR `51.10 dB`, and max abs `0.00219727` versus shipped output.
+All five runtime-bucket packages export and benchmark against the shipped
+`coreml/` packages on real Swift generator tensor dumps. The first multi-bucket
+export exposed an idempotence bug because the exporter reuses one in-memory
+generator across buckets; rerunning the rewrite on an already rewritten
+`ZeroInsertConvTranspose1d` layer failed. `rewrite_generator_ups_conv_transpose`
+now skips already rewritten layers, so one process can export `3s/7s/10s/15s/30s`
+safely. The 30s synthetic export gate still reports the known FP16 synthetic-HAR
+non-finite warning, but the real-dump warmed benchmark output is finite and
+strict-like.
+
+Local M2 Studio CPU+GPU production-package results, warmed only:
+
+| Bucket | Shipped | Rewrite | Speedup | Corr | SNR | Max abs |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: |
+| 3s | 26.278 ms | 25.154 ms | 4.28% | 0.999995708 | 51.10 dB | 0.002197 |
+| 7s | 53.827 ms | 52.134 ms | 3.15% | 0.999996566 | 52.17 dB | 0.001953 |
+| 10s | 73.072 ms | 70.753 ms | 3.17% | 0.999995896 | 51.41 dB | 0.002426 |
+| 15s | 105.842 ms | 103.086 ms | 2.60% | 0.999996419 | 51.98 dB | 0.002563 |
+| 30s | 204.765 ms | 200.253 ms | 2.20% | 0.999995368 | 50.88 dB | 0.002930 |
 
 Reports:
 
+- `outputs/export_rewrite_smoke/report_all_buckets_cpu_gpu.json`
 - `outputs/export_rewrite_smoke/report_3s_cpu_gpu.json`
 - `outputs/graph_surface/production_rewrite_ups_as_conv_3s.json`
 
-Decision: production integration path is open and opt-in. Next proof must be
-Irvine M1 warmed timing and, if positive, regenerating the actual five shipped
+Decision: production integration path is open and opt-in. The local all-bucket
+package proof is positive but smaller than the probe-only result because it uses
+the shipped production graph surface rather than the fully rewritten
+cos/native-IN/broadcast/fp16 probe surface. Next proof must be Irvine M1 warmed
+timing and, if positive, regenerating the actual five shipped
 `coreml/kokoro_decoder_har_post_{3s,7s,10s,15s,30s}.mlpackage` packages.
 
 ## Deep Research Request

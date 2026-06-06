@@ -112,6 +112,8 @@ def rewrite_generator_ups_conv_transpose(generator: nn.Module) -> int:
 
     rewritten = 0
     for index, upsample in enumerate(generator.ups):
+        if isinstance(upsample, ZeroInsertConvTranspose1d):
+            continue
         generator.ups[index] = ZeroInsertConvTranspose1d(upsample)
         rewritten += 1
     return rewritten

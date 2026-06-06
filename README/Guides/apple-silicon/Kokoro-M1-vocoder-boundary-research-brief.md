@@ -148,8 +148,10 @@ Research targets:
 - Can the zero-insert plus `conv1d` upsample rewrite replace main
   `ConvTranspose1d` layers in the production exporter and preserve the current
   local `3.2-4.5%` strict win on Irvine M1? The production exporter now has an
-  opt-in `--rewrite-ups-conv-transpose` flag; the 3s local smoke improves
-  `26.377 -> 25.122 ms` (`+4.76%`) against the shipped package.
+  opt-in `--rewrite-ups-conv-transpose` flag, and the all-bucket production
+  package smoke improves warmed local M2 Studio CPU+GPU medians by `+4.28%`
+  `3s`, `+3.15%` `7s`, `+3.17%` `10s`, `+2.60%` `15s`, and `+2.20%`
+  `30s` against the shipped packages.
 - Can the graph be rewritten so M1 chooses useful NE partitions without
   crossing CPU/NE/GPU boundaries repeatedly?
 - Can layout be changed to reduce ANE padding or memory movement while keeping

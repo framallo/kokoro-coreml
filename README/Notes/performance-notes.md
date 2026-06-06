@@ -4479,13 +4479,29 @@ and
 
 The same upsample rewrite has been moved into the production `decoder-har`
 exporter behind `--rewrite-ups-conv-transpose`; shipped defaults are unchanged.
-A 3s smoke export to `outputs/export_rewrite_smoke/kokoro_decoder_har_post_3s.mlpackage`
-preserves the production-default surface except for the intended upsample
-lowering (`conv_transpose 4 -> 2`, `conv 51 -> 53`). On the real 3s generator
-tensor dump, warmed local M2 Studio CPU+GPU improves against the shipped
-package from `26.377 ms` to `25.122 ms` (`+4.76%`) with corr
-`0.9999957084781588`, SNR `51.10 dB`, and max abs `0.00219727`. Reports:
-`outputs/export_rewrite_smoke/report_3s_cpu_gpu.json` and
+A 3s graph-surface smoke export preserves the production-default surface except
+for the intended upsample lowering (`conv_transpose 4 -> 2`, `conv 51 -> 53`).
+The all-bucket production-package benchmark compares
+`outputs/export_rewrite_smoke/kokoro_decoder_har_post_{3s,7s,10s,15s,30s}.mlpackage`
+against the shipped `coreml/` packages on the saved Swift generator tensor
+dumps. Results are warmed local M2 Studio CPU+GPU medians:
+
+| Bucket | Shipped | Rewrite | Speedup | Corr | SNR | Max abs |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: |
+| 3s | 26.278 ms | 25.154 ms | 4.28% | 0.999995708 | 51.10 dB | 0.002197 |
+| 7s | 53.827 ms | 52.134 ms | 3.15% | 0.999996566 | 52.17 dB | 0.001953 |
+| 10s | 73.072 ms | 70.753 ms | 3.17% | 0.999995896 | 51.41 dB | 0.002426 |
+| 15s | 105.842 ms | 103.086 ms | 2.60% | 0.999996419 | 51.98 dB | 0.002563 |
+| 30s | 204.765 ms | 200.253 ms | 2.20% | 0.999995368 | 50.88 dB | 0.002930 |
+
+The multi-bucket export also flushed out and fixed exporter idempotence:
+`rewrite_generator_ups_conv_transpose` now skips already rewritten
+`ZeroInsertConvTranspose1d` layers, because `export_synth.main` reuses one
+generator object across buckets. The 30s synthetic export gate still emits the
+known FP16 synthetic-HAR non-finite warning, but the real tensor dump benchmark
+is finite and strict-like. Reports:
+`outputs/export_rewrite_smoke/report_all_buckets_cpu_gpu.json`,
+`outputs/export_rewrite_smoke/report_3s_cpu_gpu.json`, and
 `outputs/graph_surface/production_rewrite_ups_as_conv_3s.json`. Next action is
 Irvine M1 warmed timing when the host is quiet; only then should the checked-in
 five runtime bucket packages be regenerated.
