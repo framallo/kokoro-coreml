@@ -134,18 +134,34 @@ def main() -> None:
         type=Path,
         default=Path("outputs/swift_bench_inputs/hnsf_weights.json"),
     )
-    parser.add_argument("--compute-units", default="all")
+    parser.add_argument(
+        "--compute-units",
+        default="staged",
+        help=(
+            "Core ML compute policy passed to kokoro-bench. Default 'staged' "
+            "matches the production Swift pipeline: duration/F0/generator on "
+            "CPU+GPU, decoder-pre on CPU+ANE. Use 'all' to reproduce the old "
+            "single-policy bakeoff cells."
+        ),
+    )
     parser.add_argument("--iterations", type=int, default=5)
     parser.add_argument(
         "--preflight-runs",
         type=int,
-        default=0,
+        default=3,
         help="Run and discard this many calls per input before recording cold/warm timings.",
     )
     parser.add_argument(
         "--use-exact-duration-models",
         action="store_true",
+        default=True,
         help="Set KOKORO_USE_EXACT_DURATION_MODELS=1 for the Swift benchmark subprocess.",
+    )
+    parser.add_argument(
+        "--use-padded-duration-models",
+        dest="use_exact_duration_models",
+        action="store_false",
+        help="Disable exact-duration model discovery and reproduce the old padded-duration cells.",
     )
     parser.add_argument("--input-key", action="append", default=None)
     parser.add_argument("--spotcheck-dir", type=Path, default=None)

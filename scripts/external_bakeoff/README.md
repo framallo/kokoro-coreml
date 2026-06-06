@@ -89,6 +89,23 @@ uv run --with-requirements requirements-bakeoff.txt --no-sync \
 python scripts/external_bakeoff/run_config_f_reference.py --machine-id m2-studio
 ```
 
+By default this runs the fastest production-shaped Config F policy:
+`--compute-units staged` and exact duration model discovery. `staged` loads
+duration, F0Ntrain, and generator with CPU+GPU and loads decoder-pre with
+CPU+ANE. Use `--compute-units all --use-padded-duration-models` only when
+reproducing the original slower bakeoff cells.
+
+The adapter also defaults to `--preflight-runs 3`, so each bucket discards
+three calls before recording the cold marker and five warm inference calls. Keep
+that default for paper comparisons; warmed inference is the apples-to-apples
+boundary.
+
+For the five runtime fixtures, the fast path expects exact duration packages for
+the observed token counts. In particular, the `10s` fixture needs
+`coreml/kokoro_duration_exact_t156.mlpackage`; without it, the benchmark falls
+back to `padded_t256` and spends hundreds of extra milliseconds in Duration on
+M2 Studio-class hardware.
+
 By default, each adapter writes the last warm output for each successful input
 to `outputs/external_bakeoff/spotcheck_wavs/<impl>_<machine_id>/<bucket>.wav`.
 Pass `--spotcheck-dir` to use an explicit collection directory.
