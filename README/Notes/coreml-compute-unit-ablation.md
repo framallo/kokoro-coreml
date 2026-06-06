@@ -544,6 +544,17 @@ sudo powermetrics -i 1000 --samplers ane
   formulation/listening acceptance, not Core ML conversion drift. Rendered the
   no-ASR 10s listening pack at
   `outputs/f0_source_listening/10s_speed_branch/README.md`.
+- **15s F0-source speed branch strengthens the duration trend:** Captured a
+  fresh `15s` Swift tensor dump with `exact_t219` and reran the same cos/residual
+  F0-source probe locally. Padded shape (`asr=600`, `F0=1200`) is faster
+  (`109.20 ms` candidate vs `129.98 ms` baseline, `+16.0%`) but still fails
+  strict quality (`corr 0.956701`, SNR `10.99 dB`). Natural shape
+  (`asr=556`, `F0=1112`) is faster again (`101.41 ms` vs `129.88 ms`,
+  `+21.9%`) and worse on metrics (`corr 0.838603`, SNR `5.73 dB`). The local
+  PyTorch reference is already divergent (`corr 0.949135` padded,
+  `0.818057` natural), so this remains the same source-formulation/listening
+  gate. Rendered the no-ASR 15s listening pack at
+  `outputs/f0_source_listening/15s_speed_branch/README.md`.
 
 **2026-05-17**
 
