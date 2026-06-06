@@ -1,0 +1,94 @@
+{
+  "checked_at_local": "2026-06-06T12:59:22-07:00",
+  "publishable_timing_allowed": false,
+  "rows": [
+    {
+      "blockers": [
+        "load1 1.51 exceeds 1.00"
+      ],
+      "load": {
+        "fifteen_minutes": 2.59,
+        "five_minutes": 2.01,
+        "one_minute": 1.51
+      },
+      "machine_id": "m2-air",
+      "ok": true,
+      "processes": [
+        {
+          "command": "sshd-session: mattmireles [priv]",
+          "cpu_pct": 12.0,
+          "noisy": false
+        },
+        {
+          "command": "/usr/libexec/dasd",
+          "cpu_pct": 9.1,
+          "noisy": false
+        },
+        {
+          "command": "/System/Library/PrivateFrameworks/AOSKit.framework/Versions/A/XPCServices/com.apple.iCloudHelper.xpc/Contents/MacOS/com.apple.iCloudHelper",
+          "cpu_pct": 5.6,
+          "noisy": false
+        },
+        {
+          "command": "/System/Library/PrivateFrameworks/DataAccess.framework/Support/dataaccessd",
+          "cpu_pct": 4.5,
+          "noisy": false
+        },
+        {
+          "command": "/usr/libexec/runningboardd",
+          "cpu_pct": 3.2,
+          "noisy": false
+        },
+        {
+          "command": "/usr/libexec/opendirectoryd",
+          "cpu_pct": 3.2,
+          "noisy": false
+        },
+        {
+          "command": "/usr/libexec/trustd",
+          "cpu_pct": 2.8,
+          "noisy": false
+        },
+        {
+          "command": "/usr/libexec/UserEventAgent",
+          "cpu_pct": 2.4,
+          "noisy": false
+        },
+        {
+          "command": "/Applications/Botnet.app/Contents/MacOS/Brave Browser",
+          "cpu_pct": 2.4,
+          "noisy": false
+        },
+        {
+          "command": "/System/Library/DriverExtensions/com.apple.DriverKit-AppleBCMWLAN.dext/com.apple.DriverKit-AppleBCMWLAN",
+          "cpu_pct": 2.0,
+          "noisy": false
+        },
+        {
+          "command": "/System/Library/CoreServices/powerd.bundle/powerd",
+          "cpu_pct": 1.7,
+          "noisy": false
+        },
+        {
+          "command": "/usr/libexec/logd",
+          "cpu_pct": 1.0,
+          "noisy": false
+        }
+      ],
+      "quiet": false,
+      "target": "mattmireles@m2-air.local",
+      "thresholds": {
+        "max_load_1": 1.0,
+        "max_noisy_cpu_pct": 10.0,
+        "noisy_process_patterns": [
+          "mds",
+          "mdworker",
+          "mediaanalysisd",
+          "mediaanalysisd-access",
+          "photoanalysisd"
+        ]
+      },
+      "uptime": "12:59  up 8 days, 14:36, 1 user, load averages: 1.51 2.01 2.59"
+    }
+  ]
+}
