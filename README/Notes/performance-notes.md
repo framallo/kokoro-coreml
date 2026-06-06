@@ -3633,6 +3633,32 @@ Graph-surface comparison for the corrected 3s body packages:
 | first-party native InstanceNorm + palette | 7 | 49.1 MB | 1526 | 42 | 1 | 0 | 101 | matches laishere size/LUT surface; spec still v7 |
 | laishere `KokoroVocoder` | 8 | 49.1 MB | 1534 | 42 | 1 | 0 | 101 | public comparator package |
 
+`scripts/compare_coreml_metadata.py` wraps `xcrun coremlcompiler metadata` and
+normalizes spec/storage/I/O/op-histogram fields for repeatable package-surface
+comparison:
+
+```bash
+uv run --no-sync python scripts/compare_coreml_metadata.py \
+  --model 'config-f-generator=coreml/kokoro_decoder_har_post_3s.mlpackage' \
+  --model 'laishere-vocoder=outputs/external_bakeoff/laishere_packages/KokoroVocoder.mlpackage' \
+  --model 'first-party-native-in-body=outputs/f0_noise_exact_shape/3s_padded_native_in_ios17_nopal_cos_rsqrt_cos_rsqrt_native_in/kokoro_f0_noise_body_3s_padded_native_in_ios17_nopal_cos_rsqrt_cos_rsqrt_native_in.mlpackage' \
+  --output outputs/graph_surface/coreml_metadata_configf_laishere_nativein_3s.json \
+  --markdown-output outputs/graph_surface/coreml_metadata_configf_laishere_nativein_3s.md
+```
+
+The metadata comparison confirms that the first-party native-IN body has the
+same major body surface as laishere's vocoder (`54` conv, `3` convTranspose,
+`46` linear, `42` instanceNorm, `1` reduceMean, `36` cos), while the shipping
+Config F generator still exposes the older HAR-post surface (`88` reduceMean,
+`96` tile, `50` sin, `1` cos). The remaining visible differences between the
+closest first-party body and laishere are now narrow: laishere uses fp16
+flexible inputs, a discarded `anchor` plus scalar-shaped `x_pre` output,
+palettized storage with `101` LUT ops, and a CT9/Torch 2.10 conversion
+metadata string. Prior fp16-input, palette, iOS17/spec8, native-IN, and CT9
+probes did not produce a quality-safe material win, so the next speed path
+cannot be "match the metadata surface" alone; it needs source/vocoder quality
+recovery or a different accepted boundary.
+
 Warmed 3s timing, same tensor dump and strict waveform gate:
 
 | Machine | Variant | Baseline stack | Candidate stack | Candidate body | Speedup | Corr | SNR | Decision |

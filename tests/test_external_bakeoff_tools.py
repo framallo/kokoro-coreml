@@ -23,6 +23,10 @@ from scripts.external_bakeoff.verify_external_bakeoff_completion import (
     _check_preflight,
     _load_records,
 )
+from scripts.compare_coreml_metadata import (
+    render_markdown as render_coreml_metadata_markdown,
+    summarize_metadata as summarize_coreml_metadata,
+)
 from scripts.create_f0_source_listening_pack import _write_decisions_csv as _write_f0_decisions_csv
 from scripts.summarize_f0_source_candidates import (
     collect_rows as collect_f0_candidate_rows,
@@ -516,6 +520,54 @@ def test_optimization_candidate_summary_separates_quality_from_speed(tmp_path):
     assert "Quality-safe material candidates: `0`." in markdown
     assert "speed-positive quality fail" in markdown
     assert "quality-safe noise-sized speedup" in markdown
+
+
+def test_coreml_metadata_summary_normalizes_ios_op_names():
+    metadata = {
+        "generatedClassName": "KokoroVocoder",
+        "specificationVersion": 8,
+        "storagePrecision": "Mixed (Float16, Palettized (8 bits))",
+        "computePrecision": "Mixed (Float16, Float32, Int32)",
+        "availability": {"iOS": "17.0"},
+        "userDefinedMetadata": {"com.github.apple.coremltools.version": "9.0"},
+        "mlProgramOperationTypeHistogram": {
+            "Ios17.conv": 54,
+            "Ios17.instanceNorm": 42,
+            "Ios16.constexprLutToDense": 101,
+            "Tile": 2,
+        },
+        "inputSchema": [
+            {
+                "name": "asr",
+                "dataType": "Float16",
+                "shape": "[1, 512, 120]",
+                "hasShapeFlexibility": "1",
+                "shapeFlexibility": "1 x 512 x 1...2000",
+            }
+        ],
+        "outputSchema": [
+            {
+                "name": "x_pre",
+                "dataType": "Float16",
+                "shape": "[]",
+                "hasShapeFlexibility": "0",
+            }
+        ],
+    }
+
+    summary = summarize_coreml_metadata("laishere", Path("KokoroVocoder.mlpackage"), metadata)
+    assert summary["focusOps"] == {
+        "conv": 54,
+        "instanceNorm": 42,
+        "tile": 2,
+        "constexprLutToDense": 101,
+    }
+    assert summary["inputSchema"][0]["shapeFlexibility"] == "1 x 512 x 1...2000"
+
+    markdown = render_coreml_metadata_markdown([summary])
+    assert "laishere" in markdown
+    assert "asr:Float16 [1, 512, 120]" in markdown
+    assert "constexprLutToDense=101" in markdown
 
 
 def test_completion_verifier_allows_mlx_3s_error_but_requires_iphone():
