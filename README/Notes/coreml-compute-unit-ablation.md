@@ -528,6 +528,18 @@ sudo powermetrics -i 1000 --samplers ane
   `-11.2%`). This rejects the simple production path of keeping the current
   Swift HnSF/HAR contract while splitting only laishere's noise/body/tail
   packages.
+- **10s F0-source speed branch matches the earlier pattern:** Captured a fresh
+  `10s` Swift tensor dump with `exact_t156`, then reran
+  `scripts/probe_f0_noise_exact_shape.py` with `--cos-snake
+  --patch-resblock-scale --include-torch-reference`. Local padded shape
+  (`asr=400`, `F0=800`) is faster (`79.02 ms` candidate vs `87.55 ms`
+  baseline, `+9.7%`) but fails quality (`corr 0.955085`, SNR `10.86 dB`).
+  Natural shape (`asr=384`, `F0=768`) is faster again (`76.37 ms` vs
+  `86.01 ms`, `+11.2%`) but worse on metrics (`corr 0.866976`, SNR
+  `6.55 dB`). PyTorch references are already divergent, so this remains source
+  formulation/listening acceptance, not Core ML conversion drift. Rendered the
+  no-ASR 10s listening pack at
+  `outputs/f0_source_listening/10s_speed_branch/README.md`.
 
 **2026-05-17**
 
