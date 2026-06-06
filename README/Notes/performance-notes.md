@@ -595,6 +595,13 @@ moved HnSF medians to `7.0/17.6/22.7/35.0/72.8 ms` for `3s/7s/10s/15s/30s`.
 M2 Air and Irvine rows were not repromoted in this refresh because both hosts
 were running Spotlight/mediaanalysis load during the live check.
 
+Rejected micro-optimization: replacing the scalar `f0Upsample` repeat loop with
+per-frame `vDSP_vfill` preserved output SHA-256 but was slightly slower in a
+local M2 Studio probe. `3s` moved from `51.136 ms` wall / `7.018 ms` HnSF to
+`52.941 ms` wall / `7.304 ms` HnSF; `30s` moved from `389.353 ms` wall /
+`72.821 ms` HnSF to `390.939 ms` wall / `73.009 ms` HnSF. Keep the scalar repeat
+loop unless a future compiler/hardware check proves otherwise.
+
 #### Direct HAR padding fast path
 
 Current `main` avoids constructing a temporary HAR `MLMultiArray` before
