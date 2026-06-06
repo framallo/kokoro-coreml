@@ -1609,6 +1609,17 @@ laishere noise+vocoder+tail at `145.1 ms` and `340.4 ms`. Future lower-end Mac
 work should target that combined source/vocoder contract, not duration, F0,
 decoder-pre, compute-unit policy, or generic compression.
 
+Rejected M2 Air refresh attempt: a same-host rerun on 2026-06-06 under
+`/tmp/kokoro-m2air-refresh` produced much slower medians for both Config F and
+laishere and must not replace the cleaner frontier rows. Config F measured
+`193.6/483.4/700.8/1079.5 ms` for `3s/7s/10s/15s`; laishere measured
+`176.9/418.1/606.3/884.2 ms`. A simultaneous host snapshot showed load averages
+around `4` on the fanless Air, with `mds_stores` at about `100%` CPU,
+`mediaanalysisd` around `53%`, and `mediaanalysisd-access` around `39%`. This
+is a polluted benchmark window, useful only as a warning: before replacing any
+M2 Air frontier row, collect a low-load run or explicitly pause competing
+desktop/indexing work.
+
 #### Fused HnSF merge probe
 
 Rejected path: fusing the HnSF 9-to-1 linear merge into the harmonic loop
