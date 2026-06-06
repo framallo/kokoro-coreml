@@ -5,7 +5,7 @@
     "no saved strict-pass candidate closes a real Irvine loss",
     "4 Irvine no-ASR listening decisions are blank",
     "iPhone Config F launch blocker: device_locked",
-    "Irvine M1 is not quiet enough for publishable timing: load averages 2.95/2.82/2.85 with mediaanalysisd 77.0% and mds_stores 38.7%."
+    "Irvine M1 is not quiet enough for publishable timing: load averages 3.22/2.86/2.85 with mds_stores 65.6% and mediaanalysisd 49.9%."
   ],
   "config_f_loss_cells": 8,
   "config_f_missing_cells": 1,

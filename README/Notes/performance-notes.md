@@ -254,6 +254,11 @@ SpringBoard denial after CoreDevice acquired a tunnel and usage assertion.
 The iPhone remains visible and paired, but Config F iPhone timing still cannot
 run until the physical device is unlocked.
 
+Fresh launch check on 2026-06-06 at 06:00 local time again produced the same
+locked SpringBoard denial. This reconfirms that the installed Config F runner
+is blocked by the physical iPhone lock state, not by pairing, tunnel, signing,
+or install.
+
 Whisper, ASR, VAD, playback, and echo-demo dependencies are not part of this
 bakeoff boundary. The iOS runner is intentionally Kokoro TTS only.
 
@@ -312,6 +317,20 @@ speedup `0.08%`, corr `0.9999942588867583`, SNR `49.84 dB`, max abs
 laishere so far, but it proves that surface similarity alone is not sufficient;
 the missing ingredient is likely runtime placement, weight decompression, or a
 different boundary/layout effect.
+
+Adding 8-bit palettization to that same fused near-surface package creates the
+closest visible laishere-like surface so far, but it loses runtime and reduces
+quality margin. The report at
+`outputs/generator_cos_snake/3s_native_broadcast_fp16_pal8_plain_broadcast_adain_native_in_pal8_fp16_inputs_ios17/report_ios17_native_broadcast_fp16_pal8_cpu_gpu.json`
+passed the strict threshold with fused `26.333 ms`, candidate `27.077 ms`,
+speedup `-2.83%`, corr `0.9998795313806623`, SNR `36.55 dB`, max abs
+`0.00868225`. The graph comparison
+`outputs/graph_surface/fused_native_broadcast_fp16_pal8_3s.json` shows
+`2207 -> 1533` ops, `88 -> 0` reductions, `96 -> 0` tiles, `44` native
+`instance_norm` ops, and `101` LUT decompression ops. This rejects the
+hypothesis that laishere's visible surface alone explains the M1 win; the
+remaining difference is likely placement, layout, external runtime scheduling,
+or a boundary effect outside this fused package.
 
 ### Consolidated Warm Median and RTF by Platform
 

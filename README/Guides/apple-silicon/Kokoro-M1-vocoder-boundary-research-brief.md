@@ -84,6 +84,7 @@ Saved Irvine M1 `3s` strict-equivalent results:
 | Fused `GeneratorFromHar` fp16 inputs | local `3s -0.07%`; graph still has `88` reductions and `96` tiles | Does not change the actual bad surface. |
 | Fused native-IN + fp16 inputs | local `3s +0.12%`; `88 -> 0` reductions, `44` instance_norm, still `96` tiles | Partial surface repair, not material. |
 | Fused native-IN + broadcast + fp16 inputs | local `3s +0.08%`; `88 -> 0` reductions, `96 -> 0` tiles, `44` instance_norm | Near-surface match but no material speed win. |
+| Fused native-IN + broadcast + fp16 + pal8 | local `3s -2.83%`; `101` LUT ops, no reductions/tiles | Full visible surface match still loses and reduces quality margin. |
 | HAR-source fused strict path | `-22.9 ms` CPU+GPU, `-163.8 ms` CPU+NE | Source/STFT boundary not a win. |
 
 Do not spend research budget on another broad split of the current
@@ -240,6 +241,9 @@ Do not prioritize these unless new evidence changes the premises:
 - Fused native-IN plus broadcast AdaIN plus fp16 inputs. The direct
   single-package probe removes both reductions and tiles, but only improves
   local `3s` by `0.08%`; surface similarity alone is not enough.
+- Fused native-IN plus broadcast AdaIN plus fp16 inputs plus 8-bit
+  palettization. It adds the laishere-like LUT surface but regresses local `3s`
+  by `2.83%` and thins quality margin.
 - More broad generator noise/stage splits. The extra Core ML call boundary is
   currently more expensive than the saved graph work.
 

@@ -66,6 +66,8 @@ Do not spend more time on these as standalone probes:
 - fused native `instance_norm` plus fp16 input dtype without eliminating tiles;
 - fused native `instance_norm` plus broadcast AdaIN plus fp16 input dtype as a
   standalone surface-only change;
+- fused native `instance_norm` plus broadcast AdaIN plus fp16 input dtype plus
+  8-bit palettization as a standalone surface-only change;
 - adding more package boundaries.
 
 Each one has already been measured as slower, noise-sized, or quality-failing.
@@ -159,6 +161,40 @@ far, but it proves that removing reductions and tiles is not sufficient by
 itself. Do not promote to Irvine unless combined with a change that creates a
 larger local win, changes placement, or adds laishere-like weight
 decompression without quality/runtime failure.
+
+## Latest Full Surface Match
+
+Fused native `instance_norm`, broadcast AdaIN, fp16 input dtype, and 8-bit
+palettization was tested inside the same `GeneratorFromHar` package boundary:
+
+```bash
+uv run --no-sync python scripts/probe_generator_cos_snake.py \
+  --no-cos-snake \
+  --native-instance-norm-adain \
+  --broadcast-adain \
+  --input-dtype fp16 \
+  --deployment-target ios17 \
+  --palettize \
+  --label 3s_native_broadcast_fp16_pal8 \
+  --report-name report_ios17_native_broadcast_fp16_pal8_cpu_gpu.json \
+  --warmup 3 \
+  --iterations 10
+```
+
+Result:
+
+- strict threshold pass but thinner margin: corr `0.9998795313806623` vs fused
+  trimmed, SNR `36.55 dB`, max abs `0.00868225`;
+- warmed local M2 Studio CPU+GPU: fused `26.333 ms`, candidate `27.077 ms`,
+  speedup `-2.83%`;
+- graph surface: `2207 -> 1533` ops, `88 -> 0` reductions, `96 -> 0` tiles,
+  `0 -> 44` native `instance_norm`, and `0 -> 101` LUT decompression ops.
+
+Decision: reject as standalone. This is a strong negative result because it
+matches the visible laishere-like surface most closely so far, yet loses local
+warmed runtime and reduces quality margin. The remaining win is not explained
+by surface counts alone; it likely depends on placement, layout, external
+runtime scheduling, or a boundary effect outside this fused package.
 
 ## Deep Research Request
 
