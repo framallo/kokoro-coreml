@@ -456,6 +456,49 @@ recover F0/source quality, change the accepted quality criterion through
 listening review, or find a new generator/vocoder formulation with a material
 quality-safe speedup.
 
+#### Frontier gap candidate closure
+
+`scripts/summarize_frontier_gap_candidates.py` joins the current competitive
+frontier with saved probe reports and asks a narrower question: if a measured
+exact-machine, exact-bucket sub-stack saving were substituted into Config F,
+would that estimated full-path median beat the current fastest implementation?
+This uses warmed inference only and treats the result as an estimate, not
+promotion proof, because most probes time a sub-stack rather than the full
+end-to-end path. The percent in this table is `required_ms / Config F median`;
+the competitive frontier's "Config F needs" percent is relative to the
+competitor median.
+
+```bash
+uv run --no-sync python scripts/summarize_frontier_gap_candidates.py \
+  --frontier-json outputs/external_bakeoff/competitive_frontier.json \
+  --top-per-cell 6 \
+  --output outputs/external_bakeoff/frontier_gap_candidates.md \
+  --json-output outputs/external_bakeoff/frontier_gap_candidates.json
+```
+
+Current gap-closure result:
+
+| Status | Count | Interpretation |
+| --- | ---: | --- |
+| Loss cells analyzed | `8` | The current full-duration Mac losses to laishere. |
+| Strict-pass candidates that would close a loss | `0` | No saved quality-safe probe is enough to promote. |
+| Quality-fail candidates that would close a loss | `0` | Even accepting current quality-fail F0/source probes would not erase any exact-machine loss by itself. |
+
+Exact-machine highlights from the generated report:
+
+| Machine | Bucket | Required Config F reduction | Best strict-pass estimate | Best quality-fail estimate |
+| --- | --- | ---: | --- | --- |
+| irvine-m1 | 3s | `57.2 ms` | `3s_har28561` estimates `232.8 ms`, still short of laishere `176.3 ms`. | `3s_natural_asr_cos_rsqrt` estimates `214.8 ms`, still short and quality-fail. |
+| irvine-m1 | 7s | `98.1 ms` | none | `7s_natural_asr_cos_rsqrt` estimates `444.1 ms`, still short of laishere `394.6 ms`. |
+| irvine-m1 | 10s | `91.6 ms` | none | `10s_natural_asr_cos_resblock_natural_asr_cos_rsqrt` estimates `608.7 ms`, still short of laishere `593.9 ms`. |
+| m2-air | 3s | `6.0 ms` | saved strict-pass probes are slower on this exact hardware. | none |
+
+This rules out the current saved probe pile as the route to the absolute-fastest
+claim. The next frontier move needs a new full-path graph/runtime change,
+laishere-style package/kernel-plan decomposition, or a hardware-specific Core
+ML scheduling fix; polishing the existing F0-source candidate is not enough
+unless it comes with additional full-path savings.
+
 #### Corrected Config F stage medians
 
 Each cell is the median per-stage time from the corrected staged + exact

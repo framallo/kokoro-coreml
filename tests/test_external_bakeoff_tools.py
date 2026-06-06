@@ -36,6 +36,12 @@ from scripts.summarize_f0_source_candidates import (
     render_markdown as render_f0_candidate_markdown,
     summarize_report as summarize_f0_candidate_report,
 )
+from scripts.summarize_frontier_gap_candidates import (
+    infer_bucket as infer_gap_candidate_bucket,
+    infer_machine as infer_gap_candidate_machine,
+    render_markdown as render_frontier_gap_candidates_markdown,
+    summarize_gap_candidates,
+)
 from scripts.summarize_optimization_candidates import (
     classify as classify_optimization_candidate,
     collect_rows as collect_optimization_candidates,
@@ -522,6 +528,82 @@ def test_optimization_candidate_summary_separates_quality_from_speed(tmp_path):
     assert "Quality-safe material candidates: `0`." in markdown
     assert "speed-positive quality fail" in markdown
     assert "quality-safe noise-sized speedup" in markdown
+
+
+def test_frontier_gap_candidate_infers_bucket_and_machine():
+    irvine = {
+        "label": "10s_padded_cos_resblock_phase_acos_cos_rsqrt",
+        "path": "outputs/f0_noise_exact_shape/remote_reports/report_f0_noise_phase_acos_10s_irvine.json",
+    }
+    m2air = {
+        "label": "3s_broadcast_adain_native_in_ios17",
+        "path": "outputs/generator_cos_snake/3s_broadcast_adain_native_in_ios17/report_m2air_ios17_native_broadcast_cos.json",
+    }
+
+    assert infer_gap_candidate_bucket(irvine) == "10s"
+    assert infer_gap_candidate_machine(irvine) == "irvine-m1"
+    assert infer_gap_candidate_bucket(m2air) == "3s"
+    assert infer_gap_candidate_machine(m2air) == "m2-air"
+
+
+def test_frontier_gap_candidate_estimates_exact_machine_closure():
+    frontier = {
+        "config_f_losses": [
+            {
+                "machine_id": "irvine-m1",
+                "input_key": "10s",
+                "best_impl_label": "laishere",
+                "best_warm_median_ms": 590.0,
+                "config_f_warm_median_ms": 685.0,
+            },
+            {
+                "machine_id": "m2-air",
+                "input_key": "3s",
+                "best_impl_label": "laishere",
+                "best_warm_median_ms": 142.0,
+                "config_f_warm_median_ms": 148.0,
+            },
+        ]
+    }
+    rows = [
+        {
+            "family": "f0_noise_exact_shape",
+            "label": "10s_padded_cos_resblock_phase_acos_cos_rsqrt",
+            "path": "outputs/f0_noise_exact_shape/remote_reports/report_f0_noise_phase_acos_10s_irvine.json",
+            "passes": False,
+            "speedup_pct": 10.0,
+            "baseline_ms": 560.0,
+            "candidate_ms": 500.0,
+            "corr": 0.96,
+            "snr_db": 12.0,
+        },
+        {
+            "family": "generator_cos_snake",
+            "label": "3s_broadcast_adain_native_in_ios17",
+            "path": "outputs/generator_cos_snake/3s_broadcast_adain_native_in_ios17/report_m2air_ios17_native_broadcast_cos.json",
+            "passes": True,
+            "speedup_pct": 4.8,
+            "baseline_ms": 100.0,
+            "candidate_ms": 92.0,
+            "corr": 0.99999,
+            "snr_db": 50.0,
+        },
+    ]
+
+    summary = summarize_gap_candidates(frontier, rows, top_per_cell=5)
+    irvine = next(cell for cell in summary["loss_cells"] if cell["machine_id"] == "irvine-m1")
+    m2air = next(cell for cell in summary["loss_cells"] if cell["machine_id"] == "m2-air")
+
+    assert irvine["top_candidates"][0]["estimated_config_f_ms"] == 625.0
+    assert irvine["top_candidates"][0]["would_close_gap"] is False
+    assert m2air["top_candidates"][0]["estimated_config_f_ms"] == 140.0
+    assert m2air["top_candidates"][0]["would_close_gap"] is True
+    assert summary["strict_pass_closers"] == 1
+    assert summary["quality_fail_closers"] == 0
+
+    markdown = render_frontier_gap_candidates_markdown(summary)
+    assert "Strict-pass candidates that would close a loss: `1`." in markdown
+    assert "`10s_padded_cos_resblock_phase_acos_cos_rsqrt` -> 625.0 ms (short)" in markdown
 
 
 def test_coreml_metadata_summary_normalizes_ios_op_names():
