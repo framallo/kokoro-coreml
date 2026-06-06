@@ -405,9 +405,15 @@ sudo powermetrics -i 1000 --samplers ane
   to the downstream convs. The follow-up `scripts/probe_har_source_fused_debug.py`
   proves fp32 manual `atan` is Core ML-safe (Core ML vs PyTorch waveform corr
   `1.000000`, SNR `72.24 dB`) but the PyTorch/Core ML source-boundary waveform
-  is still only corr `0.987820` vs the Swift dump. Future work should avoid raw
-  phase discontinuities or reproduce the exact Swift HAR contract before
-  revisiting the fused source speed path.
+  is still only corr `0.987820` vs the Swift dump. Padding the recomputed HAR
+  back to the shipping 3s `28801`-frame input restores most quality (corr
+  `0.998808`, SNR `26.44 dB`) but loses the package speed edge (`27.2 ms`
+  candidate vs `26.9 ms` baseline) and still fails strict parity. The remaining
+  raw phase mismatch is isolated to the Nyquist phase channel (`10`): channels
+  `0-9` match Swift, and replacing only channel `10` with the dumped Swift phase
+  restores PyTorch waveform parity to corr `0.999991`, SNR `47.76 dB`. Future
+  work should avoid raw phase discontinuities or reproduce the exact Swift HAR
+  contract before revisiting the fused source speed path.
 - **HAR input-tail trimming is too small:** `scripts/probe_generator_har_input_trim.py`
   keeps the bucketed `x_pre` shape and current Swift HAR source, but exports a
   temporary `GeneratorFromHar` with a shorter static `har` axis. The aggressive

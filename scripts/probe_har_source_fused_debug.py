@@ -28,7 +28,7 @@ from probe_generator_exact_geometry import _compute_units, _load_kmodel, _metric
 from probe_generator_split import _precision_arg, _remove_existing_package  # noqa: E402
 
 
-def _make_debug_module(generator: Any, phase_mode: str):
+def _make_debug_module(generator: Any, phase_mode: str, pad_har_to: int | None):
     import torch
     import torch.nn as nn
     import torch.nn.functional as F
@@ -97,6 +97,12 @@ def _make_debug_module(generator: Any, phase_mode: str):
             gen = self.gen
             har_spec, har_phase = self.forward_stft(har_source)
             har = torch.cat([har_spec, har_phase], dim=1)
+            if pad_har_to is not None:
+                current = har.size(2)
+                if current < pad_har_to:
+                    har = F.pad(har, (0, pad_har_to - current))
+                elif current > pad_har_to:
+                    har = har[:, :, :pad_har_to]
             x = x_pre
             debug_sources = []
             for i in range(gen.num_upsamples):
@@ -129,10 +135,15 @@ def _make_debug_module(generator: Any, phase_mode: str):
     return _DebugFused(generator).eval()
 
 
-def _reference_outputs(generator: Any, tensors: dict[str, np.ndarray], phase_mode: str) -> dict[str, np.ndarray]:
+def _reference_outputs(
+    generator: Any,
+    tensors: dict[str, np.ndarray],
+    phase_mode: str,
+    pad_har_to: int | None,
+) -> dict[str, np.ndarray]:
     import torch
 
-    module = _make_debug_module(generator, phase_mode)
+    module = _make_debug_module(generator, phase_mode, pad_har_to)
     with torch.no_grad():
         values = module(
             torch.from_numpy(tensors["x_pre_padded"].astype(np.float32)),
@@ -160,10 +171,10 @@ def run(args: argparse.Namespace) -> dict[str, Any]:
 
     package = args.output_dir / args.label / f"kokoro_har_source_fused_debug_{args.label}.mlpackage"
     gen = _load_kmodel().decoder.generator
-    reference = _reference_outputs(gen, tensors, args.phase_mode)
+    reference = _reference_outputs(gen, tensors, args.phase_mode, args.pad_har_to)
 
     if not args.skip_export:
-        module = _make_debug_module(gen, args.phase_mode)
+        module = _make_debug_module(gen, args.phase_mode, args.pad_har_to)
         dummy_inputs = (
             torch.zeros(tuple(tensors["x_pre_padded"].shape), dtype=torch.float32),
             torch.zeros(tuple(tensors["ref_s"].shape), dtype=torch.float32),
@@ -232,6 +243,7 @@ def run(args: argparse.Namespace) -> dict[str, Any]:
         "package": str(package),
         "precision": args.precision,
         "phase_mode": args.phase_mode,
+        "pad_har_to": args.pad_har_to,
         "compute_units": args.compute_units,
         "manifest_metadata": manifest.get("metadata", {}),
         "metrics": metrics,
@@ -250,6 +262,7 @@ def main() -> None:
     parser.add_argument("--report-name", default="report_har_source_fused_debug.json")
     parser.add_argument("--precision", default="fp32", choices=["fp16", "fp32"])
     parser.add_argument("--phase-mode", default="atan_manual", choices=["atan2", "atan_manual"])
+    parser.add_argument("--pad-har-to", type=int, default=None)
     parser.add_argument("--compute-units", default="cpu_only")
     parser.add_argument("--skip-export", action="store_true")
     args = parser.parse_args()

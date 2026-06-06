@@ -853,6 +853,15 @@ uv run --no-sync python scripts/probe_har_source_fused_debug.py \
   --phase-mode atan_manual \
   --precision fp32 \
   --compute-units cpu_only
+
+uv run --no-sync python scripts/probe_har_source_fused.py \
+  outputs/generator_isolation/dumps/3s \
+  --fused-package coreml/kokoro_decoder_har_post_3s.mlpackage \
+  --label 3s_atan_manual_fp32_padded \
+  --phase-mode atan_manual \
+  --precision fp32 \
+  --pad-har-to 28801 \
+  --warmup 2 --iterations 10
 ```
 
 | Probe | Baseline median | Candidate median | Candidate vs dump | Decision |
@@ -864,6 +873,7 @@ uv run --no-sync python scripts/probe_har_source_fused_debug.py \
 | fused `har_source`, 3s `acos` phase | 29.5 ms | 25.5 ms | corr 0.987344, SNR 16.18 dB | better, still not parity |
 | fused `har_source`, 3s `atan_manual` phase | 31.1 ms | 27.2 ms | corr 0.987372, SNR 16.19 dB | better, still not parity |
 | fused `har_source`, 3s `atan_manual` fp32 | 31.4 ms | 27.1 ms | corr 0.987820, SNR 16.58 dB | Core ML matches PyTorch; PyTorch source boundary still not parity |
+| fused `har_source`, 3s `atan_manual` fp32 + HAR pad 28801 | 26.9 ms | 27.2 ms | corr 0.998808, SNR 26.44 dB | padding restores most quality but loses speed and still not strict parity |
 | fused `har_source`, 7s fp16 | 60.9 ms | 51.2 ms | corr 0.979271, SNR 13.06 dB | speed-positive, blocked on Core ML parity |
 
 Interpretation: exact dumped source improves quality over the F0-source path,
@@ -900,9 +910,22 @@ Observed failure mode: converted `atan2` is quadrant-unsafe. For example, when
 `imag == 0` and `real < 0`, the Core ML phase can be `0` instead of `pi`. Manual
 `atan` in fp32 fixes that conversion bug. However, waveform parity remains below
 threshold because the compact source-boundary graph is not the same numerical
-contract as the current Swift HAR dump. The next useful path is a source/STFT
-contract rewrite that either feeds the exact Swift HAR convention or removes raw
-phase discontinuities before the first noise convolution.
+contract as the current Swift HAR dump.
+
+Two contract details now matter:
+
+- The shipping `GeneratorFromHar` graph was traced against bucket-padded HAR
+  (`3s` input `[1,22,28801]`). Feeding the fused source graph's natural STFT
+  length (`3s` `[1,22,14401]`) changes the downstream noise-conv contract.
+  Padding the recomputed HAR back to `28801` restores most quality but removes
+  the speed edge and still misses strict parity.
+- The raw `+pi/-pi` branch mismatch is isolated to phase channel `10`
+  (Nyquist). Channels `0-9` match Swift essentially exactly. Replacing only the
+  Nyquist phase with the dumped Swift channel restores PyTorch waveform parity
+  to corr `0.999991`, SNR `47.76 dB`; setting it to `0`, `+pi`, or `-pi` is
+  worse. A production fused-source path therefore needs either the exact Swift
+  Nyquist convention in Core ML or a representation that removes raw Nyquist
+  phase as a learned feature.
 
 #### HAR input-trim probe
 

@@ -29,7 +29,7 @@ from probe_generator_exact_geometry import _compute_units, _load_kmodel, _metric
 from probe_generator_split import _duration_label_from_dump, _precision_arg, _remove_existing_package  # noqa: E402
 
 
-def _make_har_source_fused_module(generator: Any, phase_mode: str):
+def _make_har_source_fused_module(generator: Any, phase_mode: str, pad_har_to: int | None):
     import torch
     import torch.nn as nn
     import torch.nn.functional as F
@@ -127,6 +127,12 @@ def _make_har_source_fused_module(generator: Any, phase_mode: str):
             gen = self.gen
             har_spec, har_phase = self.forward_stft.transform(har_source)
             har = torch.cat([har_spec, har_phase], dim=1)
+            if pad_har_to is not None:
+                current = har.size(2)
+                if current < pad_har_to:
+                    har = F.pad(har, (0, pad_har_to - current))
+                elif current > pad_har_to:
+                    har = har[:, :, :pad_har_to]
             x = x_pre
             for i in range(gen.num_upsamples):
                 x = F.leaky_relu(x, negative_slope=0.1)
@@ -189,7 +195,7 @@ def run(args: argparse.Namespace) -> dict[str, Any]:
     har = tensors["har_padded"].astype(np.float32)
 
     if not args.skip_export:
-        module = _make_har_source_fused_module(gen, args.phase_mode)
+        module = _make_har_source_fused_module(gen, args.phase_mode, args.pad_har_to)
         removed_dropouts = remove_dropout(module)
         with torch.no_grad():
             traced = torch.jit.trace(
@@ -254,6 +260,7 @@ def run(args: argparse.Namespace) -> dict[str, Any]:
         "manifest_metadata": manifest.get("metadata", {}),
         "precision": args.precision,
         "phase_mode": args.phase_mode,
+        "pad_har_to": args.pad_har_to,
         "compute_units": args.compute_units,
         "fused_compute_units": args.fused_compute_units,
         "first_predict_ms": {
@@ -293,6 +300,7 @@ def main() -> None:
     parser.add_argument("--fused-package", type=Path, default=Path("coreml/kokoro_decoder_har_post_3s.mlpackage"))
     parser.add_argument("--precision", default="fp16", choices=["fp16", "fp32"])
     parser.add_argument("--phase-mode", default="atan2", choices=["atan2", "acos", "atan_manual", "atan_swift"])
+    parser.add_argument("--pad-har-to", type=int, default=None)
     parser.add_argument("--compute-units", default="all")
     parser.add_argument("--fused-compute-units", default="all")
     parser.add_argument("--warmup", type=int, default=2)
