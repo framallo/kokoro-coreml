@@ -6,9 +6,9 @@ candidates from non-strict or quality-changing branches.
 
 ## Summary
 
-- Candidates recorded: `13`.
+- Candidates recorded: `14`.
 - Production-ready strict candidates: `1`.
-- Strict rejected or too-small candidates: `9`.
+- Strict rejected or too-small candidates: `10`.
 - Non-strict or quality-changing candidates: `3`.
 - Irvine profile rows remaining after rewrite projection: `4`.
 - iPhone Config F launch blocker: `device_locked`.
@@ -24,6 +24,7 @@ candidates from non-strict or quality-changing branches.
 | Full visible surface rewrite | single-package GeneratorFromHar | local E2E only wins 3s (49.532 ms vs production rewrite 49.669 ms) and noise-ties 10s | `yes` | `no` | reject as production replacement; simpler rewrite wins more buckets | none unless a new operator rewrite changes runtime behavior beyond surface matching |
 | HAR input trim | single-package GeneratorFromHar with shorter strict HAR axis | Irvine 3s +0.43%; M2 Studio strict point is slower (-1.15%) | `yes` | `no` | reject; less than one millisecond on M1 cannot close laishere gap | do not repeat tail trim unless a new source/HAR representation removes much more padding |
 | HAR-source fused strict path | source/STFT/HAR fused path | Irvine 3s CPU+GPU -22.9 ms; CPU+NE -163.8 ms | `yes` | `no` | reject; preserving strict source contract loses the speed edge | new representation only; do not promote padded strict path |
+| LUT-palettized full surface plus upsample rewrite | single-package GeneratorFromHar with native-IN, broadcast AdaIN, fp16 inputs, pal8 weights, and zero-insert upsample rewrite | local 3s -2.78% versus production upsample rewrite; CPU+NE still CPU-preferred after ANE compile failure | `yes` | `no` | reject; reproduces laishere-like LUT surface but is slower and does not fix placement | do not repeat palettized final-waveform packages unless compression is moved behind a separate strict tail or changes placement |
 | Native-IN/broadcast/cos/fp16 fused surface without upsample rewrite | single-package GeneratorFromHar | local 3s roughly +0.08-0.26%; .all/CPU+NE remains harmful | `yes` | `no` | reject as too small; graph-surface parity alone is not enough | do not repeat without a new layout, fusion, or partitioning mechanism |
 | Style-specialized fused generator | single-package GeneratorFromHar with fixed af_heart projections | Irvine 3s -3.0 ms; M2 Air 3s -2.2 ms; local native-IN variant only +0.07 ms | `yes` | `no` | reject; freezing style is not a speed path | none unless combined with a material new operator rewrite |
 | Style-specialized generator plus upsample rewrite | single-package fixed-voice GeneratorFromHar with native-IN and zero-insert upsample rewrite | local 3s +4.54% vs shipped fused, only +0.17% versus production upsample rewrite at N=30; CPU+NE still CPU-preferred after ANE compile failure | `yes` | `no` | reject; noise-sized over the simpler rewrite and does not fix partitioning | do not promote unless multi-bucket local evidence beats production rewrite by a material margin |
@@ -40,6 +41,7 @@ candidates from non-strict or quality-changing branches.
 - Full visible surface rewrite: `outputs/external_bakeoff/results_config_f_reference_m2-studio-local_full_surface_ups_as_conv.json`.
 - HAR input trim: `README/Notes/performance-notes.md`.
 - HAR-source fused strict path: `outputs/nyquist_phase_contribution/summary.md`.
+- LUT-palettized full surface plus upsample rewrite: `outputs/generator_cos_snake/3s_native_broadcast_fp16_pal8_ups_as_conv_vs_rewrite_plain_broadcast_adain_native_in_pal8_fp16_inputs_ups_as_conv_ios17/report_cpu_gpu_vs_rewrite.json`.
 - Native-IN/broadcast/cos/fp16 fused surface without upsample rewrite: `README/Notes/performance-notes.md`.
 - Style-specialized fused generator: `README/Notes/performance-notes.md`.
 - Style-specialized generator plus upsample rewrite: `outputs/generator_style_specialization/3s_style_native_in_ups_as_conv_ios17/report_cpu_gpu_vs_rewrite_n30.json`.

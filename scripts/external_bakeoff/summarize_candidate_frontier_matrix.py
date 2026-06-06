@@ -105,6 +105,17 @@ CANDIDATES: tuple[Candidate, ...] = (
         next_gate="do not promote unless multi-bucket local evidence beats production rewrite by a material margin",
     ),
     Candidate(
+        family="LUT-palettized full surface plus upsample rewrite",
+        scope="single-package GeneratorFromHar with native-IN, broadcast AdaIN, fp16 inputs, pal8 weights, and zero-insert upsample rewrite",
+        best_signal="local 3s -2.78% versus production upsample rewrite; CPU+NE still CPU-preferred after ANE compile failure",
+        quality="strict by fused-output gate but weak margin: corr 0.999880, SNR 36.57 dB, max abs 0.009857",
+        strict=True,
+        production_ready=False,
+        decision="reject; reproduces laishere-like LUT surface but is slower and does not fix placement",
+        evidence="outputs/generator_cos_snake/3s_native_broadcast_fp16_pal8_ups_as_conv_vs_rewrite_plain_broadcast_adain_native_in_pal8_fp16_inputs_ups_as_conv_ios17/report_cpu_gpu_vs_rewrite.json",
+        next_gate="do not repeat palettized final-waveform packages unless compression is moved behind a separate strict tail or changes placement",
+    ),
+    Candidate(
         family="CT8/CT9/iOS17 toolchain-only rebuild",
         scope="single-package GeneratorFromHar rebuild with newer conversion target",
         best_signal="initial local 3s CT9 +2.14%, but 10s -0.16% and 15s -0.27%; later same-process rows tied",

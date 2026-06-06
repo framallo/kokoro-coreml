@@ -1293,6 +1293,38 @@ split: its palettized vocoder emits an intermediate audio anchor that is
 discarded, while a separate tail emits the listener-facing waveform. Do not
 ship or rank palettized fused-generator packages without a fresh quality gate.
 
+The same full visible-surface pal8 candidate was combined with the current
+HAR-post upsample rewrite and compared directly against the production rewrite
+package rather than the older shipped package:
+
+```bash
+uv run --no-sync python scripts/probe_generator_cos_snake.py \
+  --label 3s_native_broadcast_fp16_pal8_ups_as_conv_vs_rewrite \
+  --no-cos-snake \
+  --native-instance-norm-adain \
+  --broadcast-adain \
+  --input-dtype fp16 \
+  --deployment-target ios17 \
+  --palettize \
+  --rewrite-ups-conv-transpose \
+  --fused-package outputs/export_rewrite_smoke/kokoro_decoder_har_post_3s.mlpackage \
+  --report-name report_cpu_gpu_vs_rewrite.json \
+  --warmup 3 \
+  --iterations 10
+```
+
+Result: strict by the fused-output gate but slower than the simpler production
+rewrite. Warmed local M2 Studio CPU+GPU was production rewrite `25.221 ms`
+versus full-surface pal8 rewrite `25.923 ms` (`-2.78%`). Quality versus the
+production rewrite was corr `0.999880`, SNR `36.57 dB`, max abs `0.009857`.
+The graph surface has `1555` ops, `101` LUT decompressions, `44` native
+`instance_norm` ops, no manual reductions/tiles, and the remaining `2`
+`conv_transpose` ops are the iSTFT tail. CPU+NE compute-plan extraction still
+emitted `ANECCompile() FAILED`; the returned plan had `685` CPU-preferred ops,
+`0` neural-engine-preferred ops, and `576` NE-supported ops. Decision: reject.
+The laishere-like LUT surface does not add speed on top of the upsample rewrite
+and does not fix Core ML placement.
+
 Linear weight quantization is also rejected for the final-waveform generator.
 `scripts/probe_generator_cos_snake.py --linear-quantize int8` compressed the
 plain fixed-shape 3s candidate from `39.7 MB` to `20.2 MB` without changing the
