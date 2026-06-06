@@ -308,12 +308,15 @@ sudo powermetrics -i 1000 --samplers ane
   times laishere's seven-package chain by stage while preserving its public
   timing boundary. On M2 Air, laishere's noise+vocoder+tail portion is
   effectively tied with our isolated generator (`3s` `123.7 ms` vs `120.1 ms`;
-  `7s` `279.0 ms` vs `277.6 ms`). On Irvine M1, laishere remains faster at the
-  comparable boundary (`3s` `145.1 ms` vs `168.9 ms`; `7s` `340.4 ms` vs
-  `384.7 ms`) and also has faster upstream stages. This means the next useful
-  comparison is laishere `KokoroNoise`/`KokoroVocoder` operator-surface
-  inspection, not more `MLComputeUnits` experiments or static HAR-post boundary
-  splitting.
+  `7s` `279.0 ms` vs `277.6 ms`). Source audit later showed this is not a
+  pure same-boundary comparison: laishere's `KokoroVocoder` includes F0/N conv,
+  decoder encode/decode, and the generator body, then emits `x_pre` for a
+  separate fp32 tail. On Irvine M1, laishere remains faster at that broader
+  boundary (`3s` `145.1 ms` vs our generator `168.9 ms`; `7s` `340.4 ms` vs
+  `384.7 ms`) and also has faster upstream stages. The next useful comparison
+  is an exact laishere-style decoder-plus-generator boundary probe against the
+  Swift dumps, not more `MLComputeUnits` experiments or static HAR-post
+  boundary splitting.
 
 **2026-05-17**
 

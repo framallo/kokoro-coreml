@@ -501,17 +501,23 @@ Each value below is the N=5 median after three discarded warmups.
 | irvine-m1 | 15s | 990.6 ms | 213.1 ms | 779.9 ms | 225.1 ms | 536.3 ms | 18.5 ms |
 | irvine-m1 | 30s | 2292.3 ms | 498.9 ms | 1799.7 ms | 490.5 ms | 1271.2 ms | 38.0 ms |
 
-The 3s/7s same-boundary comparison against our generator-isolation measurements
-is the useful interpretation layer:
+The 3s/7s comparison against our generator-isolation measurements is useful,
+but it is not a pure same-boundary comparison. Source audit of
+`laishere/kokoro-coreml` shows `CoreMLVocoderDualOutput` includes
+`F0_conv`, `N_conv`, `decoder.encode`, `decoder.decode`, and the generator
+upsample/resblock body, then returns a discarded `anchor` plus `x_pre` for a
+separate fp32 tail. Therefore laishere's `noise+vocoder+tail` is a
+decoder-plus-generator body, while Config F's isolated generator starts after
+`decoder_pre` at `x_pre + ref_s + har`.
 
 | Machine | Input | Config F full | Config F generator | Laishere chain | Laishere noise+vocoder+tail | Interpretation |
 | --- | --- | ---: | ---: | ---: | ---: | --- |
 | m2-studio | 3s | 60.2 ms | 27.2 ms | 104.5 ms | 90.4 ms | Config F wins decisively; laishere's split chain is slower here. |
 | m2-studio | 7s | 110.5 ms | 59.5 ms | 192.7 ms | 168.0 ms | Config F wins decisively; no laishere generator advantage. |
-| m2-air | 3s | 151.7 ms | 120.1 ms | 153.0 ms | 123.7 ms | Practical tie; laishere is not faster at the generator-equivalent boundary. |
+| m2-air | 3s | 151.7 ms | 120.1 ms | 153.0 ms | 123.7 ms | Practical tie despite laishere's broader boundary. |
 | m2-air | 7s | 335.0 ms | 277.6 ms | 334.7 ms | 279.0 ms | Practical tie; old laishere lead was measurement-scale, not a clear graph win. |
 | irvine-m1 | 3s | 239.2 ms | 168.9 ms | 195.0 ms | 145.1 ms | Laishere wins; about half the gap is source/vocoder/tail and half upstream. |
-| irvine-m1 | 7s | 510.2 ms | 384.7 ms | 444.2 ms | 340.4 ms | Laishere wins; the M1 gap is real on both generator-equivalent and upstream stages. |
+| irvine-m1 | 7s | 510.2 ms | 384.7 ms | 444.2 ms | 340.4 ms | Laishere wins; the M1 gap is real, but the split boundary is broader than our isolated generator. |
 
 This answers the "how is laishere/MLX faster?" question more narrowly. MLX is
 not faster after warmed Config F correction. Laishere is not faster on M2 Studio
@@ -520,6 +526,9 @@ remaining real loss is Irvine M1 short/medium. That loss is not explained by a
 simple Core ML compute-unit flip or by our already-tested split boundaries; the
 graph-surface inspection below checks whether laishere's visible
 `KokoroVocoder`/`KokoroNoise` operator choices explain it.
+The next boundary-level probe should recreate laishere's actual
+decoder-plus-generator body against the Swift dumps, not only the narrower
+HAR-post `GeneratorFromHar` boundary.
 
 #### Fused generator graph-surface probes
 
