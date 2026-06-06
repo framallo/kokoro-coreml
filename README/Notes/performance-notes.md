@@ -233,6 +233,12 @@ Fresh launch check on 2026-06-06 at 05:41 local time: CoreDevice still lists
 The app remains installed; Config F iPhone timing is still blocked by the
 physical lock state, not by build, signing, install, or model packaging.
 
+Fresh launch check on 2026-06-06 at 05:48 local time produced the same result:
+CoreDevice acquired a tunnel and usage assertion, then SpringBoard denied
+launching `com.kokoro.externalbakeoff.ConfigFIOSRunnerManual` because the
+device was locked. The device remains visible and paired; the runner still
+cannot execute until the physical phone is unlocked.
+
 Whisper, ASR, VAD, playback, and echo-demo dependencies are not part of this
 bakeoff boundary. The iOS runner is intentionally Kokoro TTS only.
 
@@ -246,6 +252,16 @@ reported fused `72.998 ms`, cos `73.114 ms`, speedup `-0.16%`, corr
 reported fused `105.926 ms`, cos `106.211 ms`, speedup `-0.27%`, corr
 `0.9999959374146906`, SNR `51.43 dB`, max abs `0.00219727`. This closes the
 cheap 10s/15s plain cos-Snake/iOS17 gap without changing the M1 frontier.
+
+The refreshed graph-surface comparison makes the next strict target sharper.
+First-party `GeneratorFromHar 3s` has `2207` MIL ops, including `88`
+`reduce_mean` ops and `96` `tile` ops from manual AdaIN lowering. laishere
+`KokoroVocoder` has `1534` ops, `42` native `instance_norm` ops, `0` tiles, and
+`101` LUT decompression ops. Prior native-InstanceNorm/cos/broadcast probes did
+not reproduce laishere's warmed runtime benefit, so the remaining useful strict
+research is not another isolated flag toggle; it is a single-package surface
+that removes the manual AdaIN/tile footprint while avoiding the measured
+multi-package synchronization penalty.
 
 ### Consolidated Warm Median and RTF by Platform
 

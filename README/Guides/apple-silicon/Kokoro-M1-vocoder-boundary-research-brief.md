@@ -19,6 +19,7 @@ laishere on Irvine M1 short and medium buckets. The live frontier is tracked by:
 - `outputs/external_bakeoff/frontier_freshness.md`
 - `outputs/external_bakeoff/irvine_next_targets.md`
 - `outputs/external_bakeoff/irvine_3s_placement_target.md`
+- `README/Guides/apple-silicon/Kokoro-M1-graph-surface-target.md`
 
 For `irvine-m1/3s`, the warmed profile gap is:
 
@@ -55,6 +56,13 @@ Core ML placement data for Irvine M1 `3s`:
 The last row is the trap: we can already create a strict first-party body with
 laishere-like NE placement, but it is slower. Therefore the target is not "get
 partial ANE placement." The target is a runtime-positive boundary and partition.
+
+The graph surface delta is now explicit: first-party `GeneratorFromHar 3s` has
+`2207` ops with `88` `reduce_mean` ops and `96` `tile` ops from manual AdaIN
+lowering; laishere `KokoroVocoder` has `1534` ops with `42` native
+`instance_norm` ops, `0` tiles, and `101` LUT decompression ops. The next strict
+surface should eliminate the manual AdaIN/tile footprint without adding the
+measured split-boundary synchronization penalty.
 
 ### Existing Strict Splits Lose
 
