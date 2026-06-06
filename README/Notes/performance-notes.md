@@ -129,6 +129,18 @@ Xcode/SwiftBuild environment blocker rather than a Config F source, packaging,
 signing, or on-device 30s model compile timeout. There are still no Config F
 iPhone warmed inference timings.
 
+Fresh check on 2026-06-06: `xcrun devicectl list devices` still shows
+`Matt's iPhone` connected as CoreDevice
+`F383FC46-FD64-5346-AEC6-59E3E2F8C9CA`; `xcrun xctrace list devices` shows the
+hardware UDID `00008101-001134561A0A001E`. `uv run --no-sync python
+scripts/prepare_swift_bench_inputs.py` and `DEVELOPMENT_TEAM=LCE6SSD8DB
+xcodegen generate` both completed for `ConfigFIOSRunner`. The physical-device
+build command then stalled again before any Swift/resource/model compile output:
+`xcodebuild` PID `55910` and `SWBBuildService` PID `55972` sat at `0.0%` CPU
+for more than 75 seconds, derived data was only `156K`, and the last build line
+was the initial `clang -v -E -dM ... /dev/null` SDK probe. The build was
+interrupted manually; this reconfirms the local SwiftBuild stall blocker.
+
 Whisper, ASR, VAD, playback, and echo-demo dependencies are not part of this
 bakeoff boundary. The iOS runner is intentionally Kokoro TTS only.
 
