@@ -432,6 +432,26 @@ dispatch plus noise/tail stages outweigh the smaller vocoder body. The next
 viable performance work is therefore an operator-surface rewrite or a larger
 end-to-end graph reshaping, not more generator package-boundary experiments.
 
+#### Fused cos-Snake probe
+
+`scripts/probe_generator_cos_snake.py` tests the one laishere operator rewrite
+that can be applied without changing package boundaries. It exports a fused
+`GeneratorFromHar` package where Snake uses the algebraic identity
+`sin^2(alpha * x) == (1 - cos(2 * alpha * x)) / 2`, then compares the temporary
+package to the shipping fused HAR-post package on the same Swift tensor dump.
+
+Local M2 Studio, CPU+GPU, N=10 median after three discarded warmups:
+
+| Input | Fused median | cos-Snake median | Speedup vs fused | Parity vs fused | Decision |
+| --- | ---: | ---: | ---: | --- | --- |
+| 3s | 28.3 ms | 27.9 ms | +1.27% | exact sample match, SNR 142.94 dB | reject as noise-sized |
+| 7s | 57.2 ms | 57.7 ms | -0.74% | exact sample match, SNR 147.04 dB | reject |
+
+The rewrite is numerically safe for the dumped 3s and 7s generator boundaries,
+but the speed signal is not consistent or large enough to justify changing the
+production exporter. Keep the fused package on the current Snake lowering until
+a broader operator rewrite has stronger evidence.
+
 #### HnSF vDSP optimization
 
 Current `main` vectorizes the Swift HnSF STFT path with cached 20-point DFT

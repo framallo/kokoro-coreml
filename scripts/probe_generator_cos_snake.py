@@ -1,0 +1,295 @@
+#!/usr/bin/env python3
+"""Probe cos-form Snake inside the fused HAR-post generator package.
+
+The public laishere exporter rewrites Snake as:
+
+``sin^2(alpha * x) == (1 - cos(2 * alpha * x)) / 2``
+
+This script tests that rewrite without changing package boundaries. It exports
+a temporary ``GeneratorFromHar`` package using the current Swift tensor dump
+shape, benchmarks it against the checked-in fused HAR-post package, and records
+parity against both the Swift dump and the shipping fused output.
+"""
+
+from __future__ import annotations
+
+import argparse
+import json
+import statistics
+import sys
+import time
+from pathlib import Path
+from typing import Any
+
+import numpy as np
+
+_ROOT = Path(__file__).resolve().parent.parent
+_SCRIPT_DIR = Path(__file__).resolve().parent
+sys.path.insert(0, str(_SCRIPT_DIR))
+sys.path.insert(0, str(_ROOT))
+
+from audio_parity_tensor_io import load_tensor_dump  # noqa: E402
+from probe_generator_dual_anchor_split import _patch_cos_snake  # noqa: E402
+from probe_generator_exact_geometry import _compute_units, _load_kmodel, _metrics  # noqa: E402
+from probe_generator_split import _duration_label_from_dump, _precision_arg, _remove_existing_package  # noqa: E402
+
+
+def _predict_inputs(tensors: dict[str, np.ndarray]) -> dict[str, np.ndarray]:
+    return {
+        "x_pre": tensors["x_pre_padded"].astype(np.float32),
+        "ref_s": tensors["ref_s"].astype(np.float32),
+        "har": tensors["har_padded"].astype(np.float32),
+    }
+
+
+def _export_package(
+    package: Path,
+    tensors: dict[str, np.ndarray],
+    precision: str,
+) -> dict[str, Any]:
+    import coremltools as ct
+    import torch
+
+    from export_synth.wrappers import GeneratorFromHar, remove_dropout
+
+    _patch_cos_snake()
+
+    ref_s_shape = tuple(int(v) for v in tensors["ref_s"].shape)
+    x_pre_shape = tuple(int(v) for v in tensors["x_pre_padded"].shape)
+    har_shape = tuple(int(v) for v in tensors["har_padded"].shape)
+
+    kmodel = _load_kmodel()
+    gen_from_har = GeneratorFromHar(kmodel.decoder.generator).eval()
+    removed_dropouts = remove_dropout(gen_from_har)
+
+    x_pre = torch.zeros(x_pre_shape, dtype=torch.float32)
+    ref_s = torch.zeros(ref_s_shape, dtype=torch.float32)
+    har = torch.zeros(har_shape, dtype=torch.float32)
+    with torch.no_grad():
+        traced = torch.jit.trace(
+            gen_from_har,
+            (x_pre, ref_s, har),
+            strict=False,
+            check_trace=False,
+        )
+        traced_out = traced(x_pre, ref_s, har)
+    traced_samples = int(traced_out.shape[-1])
+
+    mlmodel = ct.convert(
+        traced,
+        inputs=[
+            ct.TensorType(name="x_pre", shape=x_pre_shape, dtype=np.float32),
+            ct.TensorType(name="ref_s", shape=ref_s_shape, dtype=np.float32),
+            ct.TensorType(name="har", shape=har_shape, dtype=np.float32),
+        ],
+        outputs=[ct.TensorType(name="waveform")],
+        convert_to="mlprogram",
+        minimum_deployment_target=ct.target.macOS13,
+        compute_precision=_precision_arg(ct, precision),
+        compute_units=ct.ComputeUnit.ALL,
+    )
+    package.parent.mkdir(parents=True, exist_ok=True)
+    _remove_existing_package(package)
+    mlmodel.save(str(package))
+    return {
+        "package": str(package),
+        "precision": precision,
+        "cos_snake": True,
+        "removed_dropouts": removed_dropouts,
+        "traced_samples": traced_samples,
+        "x_pre_shape": list(x_pre_shape),
+        "ref_s_shape": list(ref_s_shape),
+        "har_shape": list(har_shape),
+    }
+
+
+def _predict(model: Any, inputs: dict[str, np.ndarray]) -> tuple[np.ndarray, float]:
+    start = time.perf_counter()
+    out = model.predict(inputs)
+    elapsed_ms = (time.perf_counter() - start) * 1000.0
+    key = "waveform" if "waveform" in out else next(iter(out))
+    return np.asarray(out[key], dtype=np.float32), elapsed_ms
+
+
+def _benchmark(
+    args: argparse.Namespace,
+    tensors: dict[str, np.ndarray],
+    cos_package: Path,
+) -> dict[str, Any]:
+    import coremltools as ct
+
+    inputs = _predict_inputs(tensors)
+    fused = ct.models.MLModel(
+        str(args.fused_package),
+        compute_units=_compute_units(ct, args.compute_units),
+    )
+    cos_model = ct.models.MLModel(
+        str(cos_package),
+        compute_units=_compute_units(ct, args.compute_units),
+    )
+
+    fused_first, fused_first_ms = _predict(fused, inputs)
+    cos_first, cos_first_ms = _predict(cos_model, inputs)
+
+    for _ in range(max(0, args.warmup)):
+        _predict(fused, inputs)
+        _predict(cos_model, inputs)
+
+    fused_times: list[float] = []
+    cos_times: list[float] = []
+    last_fused = fused_first
+    last_cos = cos_first
+    for _ in range(max(1, args.iterations)):
+        last_fused, fused_ms = _predict(fused, inputs)
+        last_cos, cos_ms = _predict(cos_model, inputs)
+        fused_times.append(fused_ms)
+        cos_times.append(cos_ms)
+
+    trim_len = int(tensors["waveform"].size)
+    fused_trim = last_fused.reshape(-1)[:trim_len]
+    cos_trim = last_cos.reshape(-1)[:trim_len]
+
+    fused_median = float(statistics.median(fused_times))
+    cos_median = float(statistics.median(cos_times))
+    speedup_vs_fused_pct = None
+    if fused_median > 0:
+        speedup_vs_fused_pct = 100.0 * (fused_median - cos_median) / fused_median
+
+    return {
+        "compute_units": args.compute_units,
+        "warmup": int(max(0, args.warmup)),
+        "iterations": int(max(1, args.iterations)),
+        "first_predict_ms": {
+            "fused": float(fused_first_ms),
+            "cos": float(cos_first_ms),
+        },
+        "warm_predict_times_ms": {
+            "fused": fused_times,
+            "cos": cos_times,
+        },
+        "warm_predict_median_ms": {
+            "fused": fused_median,
+            "cos": cos_median,
+        },
+        "speedup_vs_fused_pct": speedup_vs_fused_pct,
+        "metrics": {
+            "fused_vs_dump_full": _metrics(tensors["waveform_full"], last_fused),
+            "cos_vs_dump_full": _metrics(tensors["waveform_full"], last_cos),
+            "cos_vs_fused_full": _metrics(last_fused, last_cos),
+            "fused_vs_dump_trimmed": _metrics(tensors["waveform"], fused_trim),
+            "cos_vs_dump_trimmed": _metrics(tensors["waveform"], cos_trim),
+            "cos_vs_fused_trimmed": _metrics(fused_trim, cos_trim),
+        },
+    }
+
+
+def run(args: argparse.Namespace) -> dict[str, Any]:
+    manifest, tensors = load_tensor_dump(args.tensor_dump)
+    required = ["x_pre_padded", "ref_s", "har_padded", "waveform_full", "waveform"]
+    missing = [name for name in required if name not in tensors]
+    if missing:
+        raise SystemExit(f"tensor dump missing required tensors: {missing}")
+
+    label = args.label or _duration_label_from_dump(args.tensor_dump, manifest)
+    work_dir = args.output_dir / label
+    cos_package = work_dir / f"kokoro_generator_cos_snake_{label}.mlpackage"
+    report_name = Path(args.report_name)
+    if report_name.name != str(report_name):
+        raise SystemExit(f"--report-name must be a filename, got {args.report_name!r}")
+    report_path = work_dir / report_name
+
+    export_report: dict[str, Any] | None = None
+    if args.skip_export:
+        if not cos_package.is_dir():
+            raise SystemExit(f"--skip-export requested but package is missing: {cos_package}")
+    else:
+        export_report = _export_package(cos_package, tensors, args.precision)
+
+    benchmark = _benchmark(args, tensors, cos_package)
+    metrics = benchmark["metrics"]["cos_vs_fused_trimmed"]
+    passes = bool(
+        metrics["correlation"] is not None
+        and metrics["correlation"] >= args.min_corr
+        and metrics["snr_db"] >= args.min_snr
+        and metrics["max_abs_error"] <= args.max_abs_error
+    )
+
+    report = {
+        "tensor_dump": str(args.tensor_dump),
+        "fused_package": str(args.fused_package),
+        "cos_package": str(cos_package),
+        "report": str(report_path),
+        "manifest_metadata": manifest.get("metadata", {}),
+        "export": export_report,
+        "benchmark": benchmark,
+        "thresholds": {
+            "min_corr": args.min_corr,
+            "min_snr": args.min_snr,
+            "max_abs_error": args.max_abs_error,
+        },
+        "passes": passes,
+    }
+    report_path.parent.mkdir(parents=True, exist_ok=True)
+    report_path.write_text(json.dumps(report, indent=2, sort_keys=True) + "\n")
+    return report
+
+
+def main() -> None:
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument(
+        "--tensor-dump",
+        type=Path,
+        default=Path("outputs/generator_isolation/dumps/3s"),
+        help="Swift generator tensor dump.",
+    )
+    parser.add_argument(
+        "--fused-package",
+        type=Path,
+        default=Path("coreml/kokoro_decoder_har_post_3s.mlpackage"),
+        help="Shipping fused HAR-post package to compare against.",
+    )
+    parser.add_argument(
+        "--output-dir",
+        type=Path,
+        default=Path("outputs/generator_cos_snake"),
+        help="Directory for generated packages and reports.",
+    )
+    parser.add_argument("--label", default=None)
+    parser.add_argument("--report-name", default="report.json")
+    parser.add_argument(
+        "--precision",
+        default="fp16",
+        choices=("fp16", "float16", "fp32", "float32"),
+        help="Core ML conversion precision for the cos-Snake package.",
+    )
+    parser.add_argument("--compute-units", default="cpuAndGPU")
+    parser.add_argument("--warmup", type=int, default=3)
+    parser.add_argument("--iterations", type=int, default=10)
+    parser.add_argument("--min-corr", type=float, default=0.99)
+    parser.add_argument("--min-snr", type=float, default=35.0)
+    parser.add_argument("--max-abs-error", type=float, default=1e-2)
+    parser.add_argument("--skip-export", action="store_true")
+    parser.add_argument("--fail-on-difference", action="store_true")
+    args = parser.parse_args()
+
+    report = run(args)
+    med = report["benchmark"]["warm_predict_median_ms"]
+    metrics = report["benchmark"]["metrics"]["cos_vs_fused_trimmed"]
+    print(
+        "generator_cos_snake "
+        f"passes={report['passes']} "
+        f"label={Path(report['cos_package']).parent.name} "
+        f"fused_median_ms={med['fused']:.3f} "
+        f"cos_median_ms={med['cos']:.3f} "
+        f"speedup_vs_fused_pct={report['benchmark']['speedup_vs_fused_pct']:.2f} "
+        f"corr={metrics['correlation']} "
+        f"snr_db={metrics['snr_db']:.2f} "
+        f"max_abs={metrics['max_abs_error']:.6g} "
+        f"report={report['report']}"
+    )
+    if args.fail_on_difference and not report["passes"]:
+        raise SystemExit(1)
+
+
+if __name__ == "__main__":
+    main()

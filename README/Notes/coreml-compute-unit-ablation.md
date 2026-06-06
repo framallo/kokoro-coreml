@@ -231,6 +231,13 @@ sudo powermetrics -i 1000 --samplers ane
   reductions/broadcasts, and Snake lowering), or to evaluate a larger
   end-to-end graph reshape rather than the already-rejected static HAR-post
   splits.
+- **Fused cos-Snake rewrite rejected as a standalone production change:** `scripts/probe_generator_cos_snake.py`
+  exported the current fused `GeneratorFromHar` boundary with laishere's
+  algebraic cos-form Snake. Parity was exact on local M2 Studio `3s` and `7s`,
+  but latency was neutral: `3s` moved from `28.3 ms` to `27.9 ms` (+`1.27%`),
+  while `7s` moved from `57.2 ms` to `57.7 ms` (-`0.74%`). Cos-Snake may still
+  be useful inside a larger operator rewrite, but by itself it is not a
+  measured win.
 
 **2026-05-17**
 
