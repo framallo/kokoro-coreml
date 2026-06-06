@@ -160,11 +160,31 @@ def _patch_native_instance_norm_adain(broadcast_adain: bool) -> None:
     AdaIN1d.forward = _native_instance_norm_forward
 
 
-def _predict_inputs(tensors: dict[str, np.ndarray]) -> dict[str, np.ndarray]:
+def _trim_or_pad_last_dim(array: np.ndarray, length: int | None) -> np.ndarray:
+    """Return ``array`` with its last dimension cropped or zero-padded."""
+
+    arr = np.asarray(array, dtype=np.float32)
+    if length is None:
+        return np.ascontiguousarray(arr)
+    if length <= 0:
+        raise ValueError(f"length must be positive, got {length}")
+    current = int(arr.shape[-1])
+    if current == length:
+        return np.ascontiguousarray(arr)
+    if current > length:
+        return np.ascontiguousarray(arr[..., :length])
+    out_shape = list(arr.shape)
+    out_shape[-1] = length
+    out = np.zeros(out_shape, dtype=np.float32)
+    out[..., :current] = arr
+    return out
+
+
+def _predict_inputs(tensors: dict[str, np.ndarray], har_time: int | None = None) -> dict[str, np.ndarray]:
     return {
         "x_pre": tensors["x_pre_padded"].astype(np.float32),
         "ref_s": tensors["ref_s"].astype(np.float32),
-        "har": tensors["har_padded"].astype(np.float32),
+        "har": _trim_or_pad_last_dim(tensors["har_padded"], har_time),
     }
 
 
@@ -234,6 +254,7 @@ def _export_package(
     palettize: bool,
     linear_quantize: str | None,
     input_shape_mode: str,
+    har_time: int | None,
 ) -> dict[str, Any]:
     import coremltools as ct
     import torch
@@ -249,7 +270,7 @@ def _export_package(
 
     ref_s_shape = tuple(int(v) for v in tensors["ref_s"].shape)
     x_pre_shape = tuple(int(v) for v in tensors["x_pre_padded"].shape)
-    har_shape = tuple(int(v) for v in tensors["har_padded"].shape)
+    har_shape = tuple(int(v) for v in _trim_or_pad_last_dim(tensors["har_padded"], har_time).shape)
 
     kmodel = _load_kmodel()
     gen_from_har = GeneratorFromHar(kmodel.decoder.generator).eval()
@@ -293,6 +314,7 @@ def _export_package(
         "palettize": bool(palettize),
         "linear_quantize": linear_quantize,
         "input_shape_mode": input_shape_mode,
+        "har_time": har_time,
         "removed_dropouts": removed_dropouts,
         "traced_samples": traced_samples,
         "x_pre_shape": list(x_pre_shape),
@@ -316,7 +338,8 @@ def _benchmark(
 ) -> dict[str, Any]:
     import coremltools as ct
 
-    inputs = _predict_inputs(tensors)
+    fused_inputs = _predict_inputs(tensors)
+    candidate_inputs = _predict_inputs(tensors, args.har_time)
     fused = ct.models.MLModel(
         str(args.fused_package),
         compute_units=_compute_units(ct, args.compute_units),
@@ -326,20 +349,20 @@ def _benchmark(
         compute_units=_compute_units(ct, args.compute_units),
     )
 
-    fused_first, fused_first_ms = _predict(fused, inputs)
-    cos_first, cos_first_ms = _predict(cos_model, inputs)
+    fused_first, fused_first_ms = _predict(fused, fused_inputs)
+    cos_first, cos_first_ms = _predict(cos_model, candidate_inputs)
 
     for _ in range(max(0, args.warmup)):
-        _predict(fused, inputs)
-        _predict(cos_model, inputs)
+        _predict(fused, fused_inputs)
+        _predict(cos_model, candidate_inputs)
 
     fused_times: list[float] = []
     cos_times: list[float] = []
     last_fused = fused_first
     last_cos = cos_first
     for _ in range(max(1, args.iterations)):
-        last_fused, fused_ms = _predict(fused, inputs)
-        last_cos, cos_ms = _predict(cos_model, inputs)
+        last_fused, fused_ms = _predict(fused, fused_inputs)
+        last_cos, cos_ms = _predict(cos_model, candidate_inputs)
         fused_times.append(fused_ms)
         cos_times.append(cos_ms)
 
@@ -403,6 +426,8 @@ def run(args: argparse.Namespace) -> dict[str, Any]:
         label = f"{label}_{args.input_shape_mode}_inputs"
     if args.deployment_target.lower() != "macos13":
         label = f"{label}_{args.deployment_target.lower()}"
+    if args.har_time is not None:
+        label = f"{label}_har{args.har_time}"
     work_dir = args.output_dir / label
     cos_package = work_dir / f"kokoro_generator_cos_snake_{label}.mlpackage"
     report_name = Path(args.report_name)
@@ -426,6 +451,7 @@ def run(args: argparse.Namespace) -> dict[str, Any]:
             args.palettize,
             args.linear_quantize,
             args.input_shape_mode,
+            args.har_time,
         )
 
     benchmark = _benchmark(args, tensors, cos_package)
@@ -451,6 +477,7 @@ def run(args: argparse.Namespace) -> dict[str, Any]:
         "palettize": bool(args.palettize),
         "linear_quantize": args.linear_quantize,
         "input_shape_mode": args.input_shape_mode,
+        "har_time": args.har_time,
         "export": export_report,
         "benchmark": benchmark,
         "thresholds": {
@@ -517,6 +544,12 @@ def main() -> None:
         choices=("fixed", "range"),
         default="fixed",
         help="Input shape contract for x_pre/har. 'range' uses bounded RangeDim time axes.",
+    )
+    parser.add_argument(
+        "--har-time",
+        type=int,
+        default=None,
+        help="Optional candidate HAR axis length. Baseline still uses the full shipping HAR input.",
     )
     parser.add_argument(
         "--precision",

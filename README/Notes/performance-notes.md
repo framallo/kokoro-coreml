@@ -813,6 +813,7 @@ Local M2 Studio 3s, CPU+GPU, N=10 median after three discarded warmups:
 | corrected broadcast AdaIN | 8 | 2015 | `tile` 96 -> 0 | 30.92 ms | 30.93 ms | -0.03% | corr 0.999997, SNR 53.17 dB | reject |
 | native InstanceNorm AdaIN | 8 | 1731 | `reduce_mean` 88 -> 0, `instance_norm` 0 -> 44 | 31.00 ms | 30.93 ms | +0.24% | corr 0.999994, SNR 49.84 dB | reject |
 | native InstanceNorm + broadcast + cos | 8 | 1635 | no `tile`, native `instance_norm`, cos Snake | 30.08 ms | 30.68 ms | -2.02% | corr 0.999994, SNR 49.71 dB | reject |
+| native InstanceNorm + broadcast + cos + HAR28561 | 8 | 1635 | same graph cleanup plus strict HAR-axis trim | 27.96 ms | 28.61 ms | -2.33% | corr 0.999983, SNR 45.21 dB, max abs 0.00623 | reject; strict-equivalent combo is slower |
 | native InstanceNorm + broadcast + cos + pal8 | 8 | 1635 | adds 101 `constexpr_lut_to_dense` ops; package `38M` -> `19M` | 29.64 ms | 31.31 ms | -5.65% | corr 0.999879, SNR 36.54 dB, max abs 0.01007 | reject; slower and misses max-abs gate |
 
 The strongest visible graph cleanup is the combined native InstanceNorm +
@@ -834,6 +835,12 @@ remaining M1 loss is therefore likely below the visible MIL histogram: Core ML
 compute-plan/kernel selection, compiler/runtime/toolchain differences, or a
 larger pipeline boundary difference rather than a simple AdaIN/Snake source
 rewrite.
+
+`scripts/probe_generator_cos_snake.py --har-time 28561` now composes that same
+strict-equivalent graph cleanup with the HAR input-trim candidate while keeping
+the baseline on the full shipping HAR input. The combined local M2 Studio 3s
+probe remains quality-safe but slower, so the small graph-surface and HAR-trim
+effects do not compound into a promotable package.
 
 The palettized fused-generator row is the direct check against laishere's
 `KokoroVocoder` metadata surface. `xcrun coremlcompiler metadata` reports
@@ -1461,6 +1468,7 @@ Core ML predict results:
 | m2-studio | 27601 | 30.22 ms | 29.90 ms | +1.07% | corr 0.999827, SNR 35.05 dB, max 0.02661 | reject; strict parity fail |
 | m2-studio | 28561 | 30.07 ms | 30.41 ms | -1.15% | corr 0.999983, SNR 45.13 dB, max 0.00737 | reject; quality-safe but slower |
 | irvine-m1 | 28561 | 168.36 ms | 167.64 ms | +0.43% | corr 0.999984, SNR 45.28 dB, max 0.00684 | reject; too small to close laishere gap |
+| m2-studio | 28561 + native-IN/broadcast/cos | 27.96 ms | 28.61 ms | -2.33% | corr 0.999983, SNR 45.21 dB, max 0.00623 | reject; strict graph combo is slower |
 
 This closes the "just trim the HAR tail" path. It can recover less than one
 millisecond on M1 at strict parity, while the remaining laishere 3s gap is about

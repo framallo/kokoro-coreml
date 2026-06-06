@@ -28,6 +28,7 @@ from scripts.compare_coreml_metadata import (
     summarize_metadata as summarize_coreml_metadata,
 )
 from scripts.create_f0_source_listening_pack import _write_decisions_csv as _write_f0_decisions_csv
+from scripts.probe_generator_cos_snake import _trim_or_pad_last_dim
 from scripts.summarize_f0_source_candidates import (
     collect_rows as collect_f0_candidate_rows,
     load_decisions as load_f0_candidate_decisions,
@@ -568,6 +569,20 @@ def test_coreml_metadata_summary_normalizes_ios_op_names():
     assert "laishere" in markdown
     assert "asr:Float16 [1, 512, 120]" in markdown
     assert "constexprLutToDense=101" in markdown
+
+
+def test_generator_cos_snake_trim_or_pad_last_dim():
+    import numpy as np
+
+    arr = np.arange(6, dtype=np.float32).reshape(1, 2, 3)
+    trimmed = _trim_or_pad_last_dim(arr, 2)
+    padded = _trim_or_pad_last_dim(arr, 5)
+
+    assert trimmed.shape == (1, 2, 2)
+    assert trimmed.tolist() == [[[0.0, 1.0], [3.0, 4.0]]]
+    assert padded.shape == (1, 2, 5)
+    assert padded[..., :3].tolist() == arr.tolist()
+    assert np.count_nonzero(padded[..., 3:]) == 0
 
 
 def test_completion_verifier_allows_mlx_3s_error_but_requires_iphone():
