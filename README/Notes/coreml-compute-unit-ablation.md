@@ -420,6 +420,13 @@ sudo powermetrics -i 1000 --samplers ane
   `0.139881`). The issue is not merely NumPy-double constants in
   `CustomSTFT`; it is the raw Nyquist phase convention reaching learned conv
   features.
+- **Nyquist neutralization is not quality-safe:** `scripts/probe_nyquist_phase_contribution.py`
+  shows the Nyquist phase channel is low-weight-mass but still quality-sensitive
+  in `noise_convs`. At padded shipping length, copying the dumped Nyquist phase
+  recovers parity (`3s` corr `0.9999909`, `7s` corr `0.9999933`), but zero,
+  mean, `+pi`, and `-pi` substitutes all fail strict waveform parity. At compact
+  natural HAR length, even exact dumped HAR remains around corr `0.986-0.988`,
+  proving a separate natural-vs-padded geometry loss.
 - **HAR input-tail trimming is too small:** `scripts/probe_generator_har_input_trim.py`
   keeps the bucketed `x_pre` shape and current Swift HAR source, but exports a
   temporary `GeneratorFromHar` with a shorter static `har` axis. The aggressive

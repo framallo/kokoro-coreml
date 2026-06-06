@@ -933,6 +933,34 @@ Two contract details now matter:
   errors, channel-10 corr `0.139881`). The problem is the raw Nyquist branch
   convention itself, not simply NumPy-double versus Swift-float basis constants.
 
+`scripts/probe_nyquist_phase_contribution.py` closes the tempting
+"neutralize/fold Nyquist phase" shortcut. The learned `noise_convs` do not put
+large raw weight mass on HAR channel `21` (Nyquist phase): conv0 uses about
+`0.71%` of absolute weight mass / `2.10%` of L2 mass, and conv1 uses about
+`0.70%` of absolute mass / `3.29%` of L2 mass. But the feature is still
+quality-sensitive because it is a time-varying learned input before residual
+conditioning.
+
+The probe also separates two effects that were easy to conflate:
+
+- At the compact natural HAR length, even exact dumped HAR is only about `3s`
+  corr `0.988453` / SNR `16.74 dB` and `7s` corr `0.985991` / SNR `16.01 dB`
+  against the Swift waveform. That confirms a natural-vs-padded generator
+  geometry loss independent of Nyquist branch choice.
+- At the padded shipping HAR length, dumped HAR recovers parity (`3s` corr
+  `0.9999909`, SNR `47.76 dB`; `7s` corr `0.9999955`, SNR `50.78 dB`), and
+  replacing only recomputed Nyquist with the dumped channel recovers essentially
+  the same result (`3s` corr `0.9999909`; `7s` corr `0.9999933`). But deployable
+  substitutes fail: zero Nyquist is only `3s` corr `0.998239` / SNR `24.82 dB`
+  and `7s` corr `0.998804` / SNR `26.43 dB`; mean Nyquist is `3s` corr
+  `0.998349` / SNR `25.25 dB` and `7s` corr `0.998915` / SNR `27.17 dB`;
+  constant `+pi`/`-pi` is worse.
+
+Decision: reject neutralizing, mean-folding, or constant-folding raw Nyquist
+phase as a production path. The fused-source speed path still needs either an
+exactly reproduced Swift Nyquist convention or a representation/model boundary
+that was trained or transformed to avoid raw phase discontinuities.
+
 #### HAR input-trim probe
 
 `scripts/probe_generator_har_input_trim.py` tests a lower-risk variant of the
