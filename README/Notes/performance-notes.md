@@ -119,8 +119,10 @@ units, and the five runtime buckets. `xcodegen generate` succeeds and
 resources from `runtime_input_manifest.json` without loading the heavy pipeline.
 The first signed iPhone build attempt did not reach Swift compilation or Core ML
 model compilation: `xcodebuild` stalled idle in build-description creation with
-only `SWBBuildService` alive and no compiler/resource subprocesses. Treat this
-as a build-system/project packaging blocker, not an on-device 30s model compile
+only `SWBBuildService` alive and no compiler/resource subprocesses. A simulator
+compile through XcodeBuildMCP reproduced the same idle `xcodebuild` +
+`SWBBuildService` stall before Swift/resource compilation. Treat this as a
+build-system/project packaging blocker, not an on-device 30s model compile
 timeout. There are still no Config F iPhone warmed inference timings.
 
 Whisper, ASR, VAD, playback, and echo-demo dependencies are not part of this
