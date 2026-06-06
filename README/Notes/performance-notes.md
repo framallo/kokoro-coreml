@@ -306,6 +306,32 @@ Swift HnSF step is the second largest long-bucket cost on all machines.
 | irvine-m1 | 15s | 79.4 ms | 31.8 ms | 17.9 ms | 821.5 ms | 75.7 ms |
 | irvine-m1 | 30s | 140.7 ms | 42.6 ms | 34.9 ms | 1633.2 ms | 120.6 ms |
 
+#### Vectorized HnSF Gaussian noise
+
+The Swift HnSF path still used a scalar Box-Muller loop for Gaussian noise even
+after the vDSP STFT/vectorization pass. Replacing the scalar transcendental
+work with vectorized `vForce`/`vDSP` math preserves the same seeded RNG draw
+order and leaves the final waveform inside the existing parity tolerance.
+
+Matched local M2 Studio control: scalar `HEAD` (`3a2e083`) was built in a
+temporary worktree and compared against the vectorized candidate with the same
+models, inputs, `KOKORO_USE_EXACT_DURATION_MODELS=1`, `--compute-units staged`,
+`--warmup 2`, and `--iterations 5`.
+
+| Input | Scalar wall | Vector wall | Wall delta | Scalar HnSF | Vector HnSF | HnSF delta |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: |
+| 3s | 72.9 ms | 72.4 ms | +0.7% | 10.4 ms | 8.4 ms | +19.2% |
+| 7s | 131.1 ms | 125.9 ms | +3.9% | 24.9 ms | 19.8 ms | +20.6% |
+| 10s | 165.6 ms | 160.3 ms | +3.2% | 34.5 ms | 28.5 ms | +17.5% |
+| 15s | 278.7 ms | 253.6 ms | +9.0% | 56.4 ms | 45.5 ms | +19.3% |
+| 30s | 490.3 ms | 459.9 ms | +6.2% | 109.5 ms | 88.6 ms | +19.0% |
+
+Parity check against the pre-change `30s` tensor dump passed for
+`har_source`, `har_magnitude`, `har_phase`, `har`, `har_padded`, `waveform`,
+and `waveform_full` with no failing boundary. Final waveform correlation was
+`0.999997` with max abs `0.00274658`; the HnSF boundary tensors were
+correlation `1.0`.
+
 #### Direct HAR padding fast path
 
 Current `main` avoids constructing a temporary HAR `MLMultiArray` before

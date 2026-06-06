@@ -567,6 +567,17 @@ sudo powermetrics -i 1000 --samplers ane
   formulation/listening acceptance rather than Core ML conversion drift.
   Rendered the no-ASR 30s listening pack at
   `outputs/f0_source_listening/30s_speed_branch/README.md`.
+- **Vectorized Swift Gaussian noise is a quality-preserving HnSF win:** Replaced
+  the scalar Box-Muller transcendental loop in `HarmonicSource.swift` with
+  vectorized `vForce`/`vDSP` math while preserving the same seeded RNG draw
+  order. Matched local M2 Studio scalar-control vs vector runs
+  (`KOKORO_USE_EXACT_DURATION_MODELS=1`, staged, warmup 2, iterations 5) show
+  HnSF medians improve by `17.5-20.6%` and wall time improves by `0.7-9.0%`
+  across `3s`/`7s`/`10s`/`15s`/`30s`. The `30s` parity check against the
+  pre-change tensor dump passed through `waveform_full`; final waveform corr is
+  `0.999997`, and HnSF boundary tensors are corr `1.0`. This is production-safe
+  host-DSP cleanup, not a model-architecture escape from the generator
+  bottleneck.
 
 **2026-05-17**
 

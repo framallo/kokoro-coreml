@@ -560,24 +560,41 @@ struct SeededRNG: RandomNumberGenerator {
 /// Much faster than per-sample generation because it avoids protocol dispatch
 /// overhead on `RandomNumberGenerator` and can vectorize the math.
 func generateGaussianNoise(into buffer: inout [Float], count: Int, seed: UInt64? = nil) {
-    // Generate pairs of uniform random numbers, then Box-Muller transform
     var rng = SeededRNG(seed: seed ?? UInt64.random(in: 0..<UInt64.max))
+    let pairCount = (count + 1) / 2
+    guard pairCount > 0 else { return }
 
-    // Generate uniform random pairs and apply Box-Muller
-    var i = 0
-    while i < count - 1 {
-        let u1 = max(Float.ulpOfOne, Float(rng.next() & 0xFFFFFF) / Float(0xFFFFFF))
-        let u2 = Float(rng.next() & 0xFFFFFF) / Float(0xFFFFFF)
-        let r = sqrt(-2.0 * log(u1))
-        let theta = 2.0 * Float.pi * u2
-        buffer[i] = r * cos(theta)
-        buffer[i + 1] = r * sin(theta)
-        i += 2
+    var u1 = [Float](repeating: 0, count: pairCount)
+    var u2 = [Float](repeating: 0, count: pairCount)
+    let scale = Float(0xFFFFFF)
+    let tiny = Float.ulpOfOne
+    for i in 0..<pairCount {
+        u1[i] = max(tiny, Float(rng.next() & 0xFFFFFF) / scale)
+        u2[i] = Float(rng.next() & 0xFFFFFF) / scale
     }
-    // Handle odd count
-    if i < count {
-        let u1 = max(Float.ulpOfOne, Float(rng.next() & 0xFFFFFF) / Float(0xFFFFFF))
-        let u2 = Float(rng.next() & 0xFFFFFF) / Float(0xFFFFFF)
-        buffer[i] = sqrt(-2.0 * log(u1)) * cos(2.0 * Float.pi * u2)
+
+    var minusTwo = Float(-2.0)
+    var twoPi = Float(2.0 * Float.pi)
+    var radii = [Float](repeating: 0, count: pairCount)
+    var theta = [Float](repeating: 0, count: pairCount)
+    vForce.log(u1, result: &radii)
+    vDSP_vsmul(radii, 1, &minusTwo, &radii, 1, vDSP_Length(pairCount))
+    vForce.sqrt(radii, result: &radii)
+    vDSP_vsmul(u2, 1, &twoPi, &theta, 1, vDSP_Length(pairCount))
+
+    var cosTheta = [Float](repeating: 0, count: pairCount)
+    var sinTheta = [Float](repeating: 0, count: pairCount)
+    var n = Int32(pairCount)
+    vvcosf(&cosTheta, theta, &n)
+    vvsinf(&sinTheta, theta, &n)
+
+    var outIndex = 0
+    for i in 0..<pairCount {
+        buffer[outIndex] = radii[i] * cosTheta[i]
+        outIndex += 1
+        if outIndex < count {
+            buffer[outIndex] = radii[i] * sinTheta[i]
+            outIndex += 1
+        }
     }
 }
