@@ -3385,6 +3385,41 @@ while the PyTorch F0-source candidate vs dump is corr `0.939812`, SNR
 accept/reject the drift by listening review; more conversion flags are unlikely
 to solve this branch.
 
+#### Native InstanceNorm F0-source probe
+
+`scripts/probe_f0_noise_exact_shape.py` now supports
+`--native-instance-norm`, which patches the exporter-side `AdaIN1d` class before
+loading weights so Core ML receives native `instance_norm` ops instead of the
+manual `mean/var/sqrt/tile` AdaIN surface. This closes the last visible
+laishere `KokoroVocoder` package-surface difference for the first-party
+F0-source branch.
+
+Graph-surface comparison for the corrected 3s body packages:
+
+| Body package | Spec | Size | Ops | InstanceNorm | ReduceMean | Tile | LUT | Interpretation |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | --- |
+| first-party native InstanceNorm, no palette | 7 | 97.7 MB | 1526 | 42 | 1 | 0 | 0 | matches laishere op surface except palette/spec |
+| first-party native InstanceNorm + palette | 7 | 49.1 MB | 1526 | 42 | 1 | 0 | 101 | matches laishere size/LUT surface; spec still v7 |
+| laishere `KokoroVocoder` | 8 | 49.1 MB | 1534 | 42 | 1 | 0 | 101 | public comparator package |
+
+Warmed 3s timing, same tensor dump and strict waveform gate:
+
+| Machine | Variant | Baseline stack | Candidate stack | Candidate body | Speedup | Corr | SNR | Decision |
+| --- | --- | ---: | ---: | ---: | ---: | ---: | ---: | --- |
+| m2-studio | native InstanceNorm, no palette | 33.11 ms | 35.00 ms | 26.74 ms | -5.7% | 0.931816 | 9.19 dB | reject; local slower and quality fails |
+| irvine-m1 | native InstanceNorm, no palette | 174.49 ms | 161.67 ms | 117.46 ms | +7.3% | 0.931801 | 9.19 dB | speed-positive, still quality fail |
+| m2-studio | native InstanceNorm + palette | 31.86 ms | 36.90 ms | 28.16 ms | -15.8% | 0.931531 | 9.17 dB | reject; palette slows local |
+| irvine-m1 | native InstanceNorm + palette | 174.16 ms | 169.92 ms | 126.03 ms | +2.4% | 0.931617 | 9.17 dB | reject; palette slower than no-palette |
+
+Conclusion: native InstanceNorm is the real package-surface speed ingredient on
+M1; int8 palettization is size reduction, not speed, for this branch. The
+corrected native body nearly matches laishere's visible MIL surface, so the
+remaining 3s M1 gap is no longer explained by `tile`/manual AdaIN, fp16 inputs,
+or palette. It is more likely a spec v8/runtime compile-plan difference,
+flexible output metadata behavior, or laishere's exact upstream F0/source tensor
+contract. The branch is still not production-eligible because the PyTorch
+F0-source formulation itself diverges from the current HAR/HnSF output.
+
 Rendered a no-ASR listening pack for the 3s and 7s cos/residual speed branch at
 `outputs/f0_source_listening/cos_resblock_speed_branch/README.md`. Both
 candidates are `needs_listening` with no waveform-health reject reasons. This

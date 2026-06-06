@@ -1,0 +1,208 @@
+{
+  "benchmark": {
+    "body_compute_units": "cpuAndGPU",
+    "decoder_pre_compute_units": "cpuAndNeuralEngine",
+    "first_predict_ms": {
+      "baseline_decoder_pre": 7.612999994307756,
+      "baseline_generator": 112.19041596632451,
+      "baseline_total": 119.80341596063226,
+      "candidate_body": 428.7195419892669,
+      "candidate_noise": 206.40774990897626,
+      "candidate_tail": 20.309042069129646,
+      "candidate_total": 655.4363339673728
+    },
+    "fused_compute_units": "cpuAndGPU",
+    "iterations": 3,
+    "metrics": {
+      "baseline_vs_dump_trimmed": {
+        "candidate_samples": 67200,
+        "correlation": 0.9999961868925267,
+        "cosine_similarity": 0.9999965419206919,
+        "max_abs_error": 0.012786865234375,
+        "mean_abs_error": 9.83242506582845e-06,
+        "reference_samples": 67200,
+        "rmse": 0.0001423861832117895,
+        "samples_compared": 67200,
+        "snr_db": 51.601327941936844
+      },
+      "candidate_vs_baseline_trimmed": {
+        "candidate_samples": 67200,
+        "correlation": 0.9318163376081513,
+        "cosine_similarity": 0.9384813594064008,
+        "max_abs_error": 0.2375430092215538,
+        "mean_abs_error": 0.008583558762084763,
+        "reference_samples": 67200,
+        "rmse": 0.01880121957480953,
+        "samples_compared": 67200,
+        "snr_db": 9.186994589290459
+      },
+      "candidate_vs_dump_trimmed": {
+        "candidate_samples": 67200,
+        "correlation": 0.9318173959774766,
+        "cosine_similarity": 0.9384783056096383,
+        "max_abs_error": 0.2375430092215538,
+        "mean_abs_error": 0.008589940357836254,
+        "reference_samples": 67200,
+        "rmse": 0.01880156605573857,
+        "samples_compared": 67200,
+        "snr_db": 9.186804418672908
+      }
+    },
+    "noise_compute_units": "all",
+    "tail_compute_units": "all",
+    "toolchain": {
+      "coremltools": "8.3.0",
+      "numpy": "1.26.4",
+      "torch": "2.6.0"
+    },
+    "warm_predict_median_ms": {
+      "baseline_decoder_pre": 4.090416943654418,
+      "baseline_generator": 29.021082911640406,
+      "baseline_total": 33.111499855294824,
+      "candidate_body": 26.74466697499156,
+      "candidate_noise": 7.065583951771259,
+      "candidate_tail": 1.326209050603211,
+      "candidate_total": 35.003875964321196
+    },
+    "warm_predict_times_ms": {
+      "baseline_decoder_pre": [
+        4.165792022831738,
+        3.7818329874426126,
+        4.090416943654418
+      ],
+      "baseline_generator": [
+        29.03670899104327,
+        27.75066706817597,
+        29.021082911640406
+      ],
+      "baseline_total": [
+        33.20250101387501,
+        31.532500055618584,
+        33.111499855294824
+      ],
+      "candidate_body": [
+        28.42304192017764,
+        26.74466697499156,
+        26.326749939471483
+      ],
+      "candidate_noise": [
+        7.371624931693077,
+        7.043874938972294,
+        7.065583951771259
+      ],
+      "candidate_tail": [
+        1.326209050603211,
+        1.2153340503573418,
+        1.4524580910801888
+      ],
+      "candidate_total": [
+        37.12087590247393,
+        35.003875964321196,
+        34.84479198232293
+      ]
+    },
+    "warmup": 1
+  },
+  "body_package": "outputs/f0_noise_exact_shape/3s_padded_native_in_nopal_cos_rsqrt_native_in/kokoro_f0_noise_body_3s_padded_native_in_nopal_cos_rsqrt_native_in.mlpackage",
+  "decoder_pre_package": "coreml/kokoro_decoder_pre_3s.mlpackage",
+  "export": {
+    "anchor_shape": [
+      1,
+      1
+    ],
+    "asr_shape": [
+      1,
+      512,
+      120
+    ],
+    "body_input_dtype": "fp16",
+    "body_package": "outputs/f0_noise_exact_shape/3s_padded_native_in_nopal_cos_rsqrt_native_in/kokoro_f0_noise_body_3s_padded_native_in_nopal_cos_rsqrt_native_in.mlpackage",
+    "body_precision": "fp16",
+    "body_removed_dropouts": 5,
+    "cos_snake": true,
+    "deployment_target": "macos13",
+    "f0_shape": [
+      1,
+      240
+    ],
+    "n_shape": [
+      1,
+      240
+    ],
+    "native_instance_norm": true,
+    "natural_asr": false,
+    "noise_package": "outputs/f0_noise_exact_shape/3s_padded_native_in_nopal_cos_rsqrt_native_in/kokoro_f0_noise_3s_padded_native_in_nopal_cos_rsqrt_native_in.mlpackage",
+    "noise_precision": "fp32",
+    "noise_removed_dropouts": 0,
+    "palettize_body": false,
+    "palettize_noise": false,
+    "patch_resblock_scale": true,
+    "phase_mode": "atan2",
+    "pre_tail_shape": [
+      1,
+      128,
+      14401
+    ],
+    "source_shapes": [
+      [
+        1,
+        256,
+        2400
+      ],
+      [
+        1,
+        128,
+        14401
+      ]
+    ],
+    "style_shape": [
+      1,
+      128
+    ],
+    "tail_package": "outputs/f0_noise_exact_shape/3s_padded_native_in_nopal_cos_rsqrt_native_in/kokoro_f0_noise_tail_3s_padded_native_in_nopal_cos_rsqrt_native_in.mlpackage",
+    "tail_precision": "fp32",
+    "tail_removed_dropouts": 0,
+    "tail_samples": 72000,
+    "toolchain": {
+      "coremltools": "8.3.0",
+      "numpy": "1.26.4",
+      "torch": "2.6.0"
+    }
+  },
+  "fused_package": "coreml/kokoro_decoder_har_post_3s.mlpackage",
+  "manifest_metadata": {
+    "bucket_seconds": 3,
+    "canonical_duration_s": 2.8,
+    "decoder_frame_count": 120,
+    "duration_model": "padded_t64",
+    "duration_model_allows_padding": true,
+    "duration_token_length": 64,
+    "executable": "kokoro-bench",
+    "full_f0_len": 240,
+    "har_expected_time": 28801,
+    "hnsf_reference_command": "uv run --no-sync python scripts/validate_hnsf_swift.py generate",
+    "input_key": "3s",
+    "natural_frames": 112,
+    "num_tokens": 44,
+    "observed_audio_duration_s": 2.8,
+    "producer": "swift",
+    "seed": 42,
+    "speed": 1,
+    "t_frames": 120,
+    "text": "The quick brown fox jumps over the dog.",
+    "trim_len": 67200,
+    "voice": "af_heart",
+    "x_pre_expected_time": 240
+  },
+  "noise_package": "outputs/f0_noise_exact_shape/3s_padded_native_in_nopal_cos_rsqrt_native_in/kokoro_f0_noise_3s_padded_native_in_nopal_cos_rsqrt_native_in.mlpackage",
+  "passes": false,
+  "report": "outputs/f0_noise_exact_shape/3s_padded_native_in_nopal_cos_rsqrt_native_in/report_native_in_nopal.json",
+  "speedup_vs_baseline_pct": -5.71516276005771,
+  "tail_package": "outputs/f0_noise_exact_shape/3s_padded_native_in_nopal_cos_rsqrt_native_in/kokoro_f0_noise_tail_3s_padded_native_in_nopal_cos_rsqrt_native_in.mlpackage",
+  "tensor_dump": "outputs/generator_isolation/dumps/3s",
+  "thresholds": {
+    "max_abs_error": 0.01,
+    "min_corr": 0.99,
+    "min_snr": 35.0
+  }
+}

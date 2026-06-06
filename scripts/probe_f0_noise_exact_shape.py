@@ -100,6 +100,35 @@ def _patch_resblock_rsqrt() -> None:
     AdainResBlk1d.forward = _patched_forward
 
 
+def _patch_native_instance_norm_adain() -> None:
+    """Patch AdaIN1d to export native InstanceNorm instead of manual reductions."""
+
+    import torch
+    import torch.nn as nn
+
+    from export_synth import wrappers
+    from kokoro import istftnet
+
+    def _patched_init(self: Any, style_dim: int, num_features: int) -> None:
+        nn.Module.__init__(self)
+        self.num_features = num_features
+        self.eps = 1e-5
+        self.norm = nn.InstanceNorm1d(num_features, affine=False, eps=self.eps)
+        self.fc = nn.Linear(style_dim, num_features * 2)
+
+    def _patched_forward(self: Any, x: Any, s: Any) -> Any:
+        batch, channels, _ = x.shape
+        if channels != self.num_features:
+            raise AssertionError(f"AdaIN1d channel mismatch: got {channels}, expected {self.num_features}")
+        h = self.fc(s).view(batch, 2 * self.num_features, 1)
+        gamma, beta = torch.chunk(h, chunks=2, dim=1)
+        return (1.0 + gamma) * self.norm(x) + beta
+
+    for AdaIN1d in {istftnet.AdaIN1d, wrappers.kokoro_istftnet.AdaIN1d}:
+        AdaIN1d.__init__ = _patched_init
+        AdaIN1d.forward = _patched_forward
+
+
 def _make_f0_noise_module(generator: Any, phase_mode: str):
     """Return ``F0 + style -> x_source_*`` module using first-party weights."""
 
@@ -313,6 +342,8 @@ def _export_packages(
         _patch_cos_snake()
     if args.patch_resblock_scale:
         _patch_resblock_rsqrt()
+    if args.native_instance_norm:
+        _patch_native_instance_norm_adain()
     deployment_target = _deployment_target(ct, args.deployment_target)
 
     kmodel = _load_kmodel()
@@ -432,6 +463,7 @@ def _export_packages(
         "patch_resblock_scale": bool(args.patch_resblock_scale),
         "palettize_noise": bool(args.palettize_noise),
         "palettize_body": bool(args.palettize_body),
+        "native_instance_norm": bool(args.native_instance_norm),
         "noise_precision": args.noise_precision,
         "body_precision": args.body_precision,
         "body_input_dtype": args.body_input_dtype,
@@ -642,6 +674,8 @@ def run(args: argparse.Namespace) -> dict[str, Any]:
         label = f"{label}_noise_pal"
     if args.palettize_body:
         label = f"{label}_body_pal"
+    if args.native_instance_norm:
+        label = f"{label}_native_in"
 
     work_dir = args.output_dir / label
     noise_package = work_dir / f"kokoro_f0_noise_{label}.mlpackage"
@@ -727,6 +761,7 @@ def main() -> None:
     parser.add_argument("--patch-resblock-scale", action="store_true")
     parser.add_argument("--palettize-noise", action="store_true")
     parser.add_argument("--palettize-body", action="store_true")
+    parser.add_argument("--native-instance-norm", action="store_true")
     parser.add_argument("--noise-precision", default="fp32", choices=("fp16", "float16", "fp32", "float32"))
     parser.add_argument("--body-precision", default="fp16", choices=("fp16", "float16", "fp32", "float32"))
     parser.add_argument("--body-input-dtype", default="fp32", choices=("fp16", "float16", "fp32", "float32"))

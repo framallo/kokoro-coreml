@@ -1,0 +1,909 @@
+{
+  "models": [
+    {
+      "blocks": [
+        {
+          "block": "CoreML6",
+          "focus_op_counts": {
+            "concat": 6,
+            "constexpr_lut_to_dense": 101,
+            "conv": 54,
+            "conv_transpose": 3,
+            "cos": 36,
+            "instance_norm": 42,
+            "linear": 46,
+            "reduce_mean": 1,
+            "reshape": 47,
+            "split": 46
+          },
+          "function": "main",
+          "op_count": 1526,
+          "op_counts": {
+            "add": 193,
+            "concat": 6,
+            "const": 770,
+            "constexpr_lut_to_dense": 101,
+            "conv": 54,
+            "conv_transpose": 3,
+            "cos": 36,
+            "expand_dims": 3,
+            "instance_norm": 42,
+            "leaky_relu": 13,
+            "linear": 46,
+            "mul": 161,
+            "reduce_mean": 1,
+            "reshape": 47,
+            "slice_by_index": 2,
+            "split": 46,
+            "squeeze": 1,
+            "upsample_nearest_neighbor": 1
+          },
+          "top_ops": [
+            [
+              "const",
+              770
+            ],
+            [
+              "add",
+              193
+            ],
+            [
+              "mul",
+              161
+            ],
+            [
+              "constexpr_lut_to_dense",
+              101
+            ],
+            [
+              "conv",
+              54
+            ],
+            [
+              "reshape",
+              47
+            ],
+            [
+              "linear",
+              46
+            ],
+            [
+              "split",
+              46
+            ],
+            [
+              "instance_norm",
+              42
+            ],
+            [
+              "cos",
+              36
+            ],
+            [
+              "leaky_relu",
+              13
+            ],
+            [
+              "concat",
+              6
+            ],
+            [
+              "expand_dims",
+              3
+            ],
+            [
+              "conv_transpose",
+              3
+            ],
+            [
+              "slice_by_index",
+              2
+            ],
+            [
+              "upsample_nearest_neighbor",
+              1
+            ],
+            [
+              "squeeze",
+              1
+            ],
+            [
+              "reduce_mean",
+              1
+            ]
+          ],
+          "unique_op_count": 18
+        }
+      ],
+      "focus_op_counts": {
+        "concat": 6,
+        "constexpr_lut_to_dense": 101,
+        "conv": 54,
+        "conv_transpose": 3,
+        "cos": 36,
+        "instance_norm": 42,
+        "linear": 46,
+        "reduce_mean": 1,
+        "reshape": 47,
+        "split": 46
+      },
+      "inputs": [
+        {
+          "dtype": "FLOAT16",
+          "name": "asr",
+          "shape": [
+            1,
+            512,
+            120
+          ],
+          "shape_ranges": []
+        },
+        {
+          "dtype": "FLOAT16",
+          "name": "F0_curve",
+          "shape": [
+            1,
+            240
+          ],
+          "shape_ranges": []
+        },
+        {
+          "dtype": "FLOAT16",
+          "name": "N_pred",
+          "shape": [
+            1,
+            240
+          ],
+          "shape_ranges": []
+        },
+        {
+          "dtype": "FLOAT16",
+          "name": "style_timbre",
+          "shape": [
+            1,
+            128
+          ],
+          "shape_ranges": []
+        },
+        {
+          "dtype": "FLOAT16",
+          "name": "x_source_0",
+          "shape": [
+            1,
+            256,
+            2400
+          ],
+          "shape_ranges": []
+        },
+        {
+          "dtype": "FLOAT16",
+          "name": "x_source_1",
+          "shape": [
+            1,
+            128,
+            14401
+          ],
+          "shape_ranges": []
+        }
+      ],
+      "label": "f0_native_in_pal_v2",
+      "op_count": 1526,
+      "outputs": [
+        {
+          "dtype": "FLOAT16",
+          "name": "anchor",
+          "shape": [
+            1,
+            1
+          ],
+          "shape_ranges": []
+        },
+        {
+          "dtype": "FLOAT16",
+          "name": "pre_tail",
+          "shape": [
+            1,
+            128,
+            14401
+          ],
+          "shape_ranges": []
+        }
+      ],
+      "package_size_bytes": 49123184,
+      "path": "outputs/f0_noise_exact_shape/3s_padded_native_in_fp16_pal_v2_cos_rsqrt_body_pal_native_in/kokoro_f0_noise_body_3s_padded_native_in_fp16_pal_v2_cos_rsqrt_body_pal_native_in.mlpackage",
+      "specification_version": 7,
+      "top_ops": [
+        [
+          "const",
+          770
+        ],
+        [
+          "add",
+          193
+        ],
+        [
+          "mul",
+          161
+        ],
+        [
+          "constexpr_lut_to_dense",
+          101
+        ],
+        [
+          "conv",
+          54
+        ],
+        [
+          "reshape",
+          47
+        ],
+        [
+          "linear",
+          46
+        ],
+        [
+          "split",
+          46
+        ],
+        [
+          "instance_norm",
+          42
+        ],
+        [
+          "cos",
+          36
+        ],
+        [
+          "leaky_relu",
+          13
+        ],
+        [
+          "concat",
+          6
+        ],
+        [
+          "expand_dims",
+          3
+        ],
+        [
+          "conv_transpose",
+          3
+        ],
+        [
+          "slice_by_index",
+          2
+        ],
+        [
+          "upsample_nearest_neighbor",
+          1
+        ],
+        [
+          "squeeze",
+          1
+        ],
+        [
+          "reduce_mean",
+          1
+        ]
+      ],
+      "unique_op_count": 18
+    },
+    {
+      "blocks": [
+        {
+          "block": "CoreML6",
+          "focus_op_counts": {
+            "concat": 6,
+            "conv": 54,
+            "conv_transpose": 3,
+            "cos": 36,
+            "instance_norm": 42,
+            "linear": 46,
+            "reduce_mean": 1,
+            "reshape": 47,
+            "split": 46
+          },
+          "function": "main",
+          "op_count": 1526,
+          "op_counts": {
+            "add": 193,
+            "concat": 6,
+            "const": 871,
+            "conv": 54,
+            "conv_transpose": 3,
+            "cos": 36,
+            "expand_dims": 3,
+            "instance_norm": 42,
+            "leaky_relu": 13,
+            "linear": 46,
+            "mul": 161,
+            "reduce_mean": 1,
+            "reshape": 47,
+            "slice_by_index": 2,
+            "split": 46,
+            "squeeze": 1,
+            "upsample_nearest_neighbor": 1
+          },
+          "top_ops": [
+            [
+              "const",
+              871
+            ],
+            [
+              "add",
+              193
+            ],
+            [
+              "mul",
+              161
+            ],
+            [
+              "conv",
+              54
+            ],
+            [
+              "reshape",
+              47
+            ],
+            [
+              "linear",
+              46
+            ],
+            [
+              "split",
+              46
+            ],
+            [
+              "instance_norm",
+              42
+            ],
+            [
+              "cos",
+              36
+            ],
+            [
+              "leaky_relu",
+              13
+            ],
+            [
+              "concat",
+              6
+            ],
+            [
+              "expand_dims",
+              3
+            ],
+            [
+              "conv_transpose",
+              3
+            ],
+            [
+              "slice_by_index",
+              2
+            ],
+            [
+              "upsample_nearest_neighbor",
+              1
+            ],
+            [
+              "squeeze",
+              1
+            ],
+            [
+              "reduce_mean",
+              1
+            ]
+          ],
+          "unique_op_count": 17
+        }
+      ],
+      "focus_op_counts": {
+        "concat": 6,
+        "conv": 54,
+        "conv_transpose": 3,
+        "cos": 36,
+        "instance_norm": 42,
+        "linear": 46,
+        "reduce_mean": 1,
+        "reshape": 47,
+        "split": 46
+      },
+      "inputs": [
+        {
+          "dtype": "FLOAT16",
+          "name": "asr",
+          "shape": [
+            1,
+            512,
+            120
+          ],
+          "shape_ranges": []
+        },
+        {
+          "dtype": "FLOAT16",
+          "name": "F0_curve",
+          "shape": [
+            1,
+            240
+          ],
+          "shape_ranges": []
+        },
+        {
+          "dtype": "FLOAT16",
+          "name": "N_pred",
+          "shape": [
+            1,
+            240
+          ],
+          "shape_ranges": []
+        },
+        {
+          "dtype": "FLOAT16",
+          "name": "style_timbre",
+          "shape": [
+            1,
+            128
+          ],
+          "shape_ranges": []
+        },
+        {
+          "dtype": "FLOAT16",
+          "name": "x_source_0",
+          "shape": [
+            1,
+            256,
+            2400
+          ],
+          "shape_ranges": []
+        },
+        {
+          "dtype": "FLOAT16",
+          "name": "x_source_1",
+          "shape": [
+            1,
+            128,
+            14401
+          ],
+          "shape_ranges": []
+        }
+      ],
+      "label": "f0_native_in_nopal",
+      "op_count": 1526,
+      "outputs": [
+        {
+          "dtype": "FLOAT16",
+          "name": "anchor",
+          "shape": [
+            1,
+            1
+          ],
+          "shape_ranges": []
+        },
+        {
+          "dtype": "FLOAT16",
+          "name": "pre_tail",
+          "shape": [
+            1,
+            128,
+            14401
+          ],
+          "shape_ranges": []
+        }
+      ],
+      "package_size_bytes": 97720404,
+      "path": "outputs/f0_noise_exact_shape/3s_padded_native_in_nopal_cos_rsqrt_native_in/kokoro_f0_noise_body_3s_padded_native_in_nopal_cos_rsqrt_native_in.mlpackage",
+      "specification_version": 7,
+      "top_ops": [
+        [
+          "const",
+          871
+        ],
+        [
+          "add",
+          193
+        ],
+        [
+          "mul",
+          161
+        ],
+        [
+          "conv",
+          54
+        ],
+        [
+          "reshape",
+          47
+        ],
+        [
+          "linear",
+          46
+        ],
+        [
+          "split",
+          46
+        ],
+        [
+          "instance_norm",
+          42
+        ],
+        [
+          "cos",
+          36
+        ],
+        [
+          "leaky_relu",
+          13
+        ],
+        [
+          "concat",
+          6
+        ],
+        [
+          "expand_dims",
+          3
+        ],
+        [
+          "conv_transpose",
+          3
+        ],
+        [
+          "slice_by_index",
+          2
+        ],
+        [
+          "upsample_nearest_neighbor",
+          1
+        ],
+        [
+          "squeeze",
+          1
+        ],
+        [
+          "reduce_mean",
+          1
+        ]
+      ],
+      "unique_op_count": 17
+    },
+    {
+      "blocks": [
+        {
+          "block": "CoreML7",
+          "focus_op_counts": {
+            "concat": 6,
+            "constexpr_lut_to_dense": 101,
+            "conv": 54,
+            "conv_transpose": 3,
+            "cos": 36,
+            "instance_norm": 42,
+            "linear": 46,
+            "reduce_mean": 1,
+            "reshape": 46,
+            "split": 46
+          },
+          "function": "main",
+          "op_count": 1534,
+          "op_counts": {
+            "add": 193,
+            "concat": 6,
+            "const": 778,
+            "constexpr_lut_to_dense": 101,
+            "conv": 54,
+            "conv_transpose": 3,
+            "cos": 36,
+            "expand_dims": 4,
+            "instance_norm": 42,
+            "leaky_relu": 13,
+            "linear": 46,
+            "mul": 161,
+            "reduce_mean": 1,
+            "reshape": 46,
+            "slice_by_index": 2,
+            "split": 46,
+            "squeeze": 1,
+            "upsample_nearest_neighbor": 1
+          },
+          "top_ops": [
+            [
+              "const",
+              778
+            ],
+            [
+              "add",
+              193
+            ],
+            [
+              "mul",
+              161
+            ],
+            [
+              "constexpr_lut_to_dense",
+              101
+            ],
+            [
+              "conv",
+              54
+            ],
+            [
+              "linear",
+              46
+            ],
+            [
+              "reshape",
+              46
+            ],
+            [
+              "split",
+              46
+            ],
+            [
+              "instance_norm",
+              42
+            ],
+            [
+              "cos",
+              36
+            ],
+            [
+              "leaky_relu",
+              13
+            ],
+            [
+              "concat",
+              6
+            ],
+            [
+              "expand_dims",
+              4
+            ],
+            [
+              "conv_transpose",
+              3
+            ],
+            [
+              "slice_by_index",
+              2
+            ],
+            [
+              "upsample_nearest_neighbor",
+              1
+            ],
+            [
+              "squeeze",
+              1
+            ],
+            [
+              "reduce_mean",
+              1
+            ]
+          ],
+          "unique_op_count": 18
+        }
+      ],
+      "focus_op_counts": {
+        "concat": 6,
+        "constexpr_lut_to_dense": 101,
+        "conv": 54,
+        "conv_transpose": 3,
+        "cos": 36,
+        "instance_norm": 42,
+        "linear": 46,
+        "reduce_mean": 1,
+        "reshape": 46,
+        "split": 46
+      },
+      "inputs": [
+        {
+          "dtype": "FLOAT16",
+          "name": "asr",
+          "shape": [
+            1,
+            512,
+            120
+          ],
+          "shape_ranges": [
+            {
+              "lower": 1,
+              "upper": 1
+            },
+            {
+              "lower": 512,
+              "upper": 512
+            },
+            {
+              "lower": 1,
+              "upper": 2000
+            }
+          ]
+        },
+        {
+          "dtype": "FLOAT16",
+          "name": "F0_curve",
+          "shape": [
+            1,
+            240
+          ],
+          "shape_ranges": [
+            {
+              "lower": 1,
+              "upper": 1
+            },
+            {
+              "lower": 2,
+              "upper": 4000
+            }
+          ]
+        },
+        {
+          "dtype": "FLOAT16",
+          "name": "N_pred",
+          "shape": [
+            1,
+            240
+          ],
+          "shape_ranges": [
+            {
+              "lower": 1,
+              "upper": 1
+            },
+            {
+              "lower": 2,
+              "upper": 4000
+            }
+          ]
+        },
+        {
+          "dtype": "FLOAT16",
+          "name": "x_source_0",
+          "shape": [
+            1,
+            256,
+            2400
+          ],
+          "shape_ranges": [
+            {
+              "lower": 1,
+              "upper": 1
+            },
+            {
+              "lower": 256,
+              "upper": 256
+            },
+            {
+              "lower": 1,
+              "upper": 40000
+            }
+          ]
+        },
+        {
+          "dtype": "FLOAT16",
+          "name": "x_source_1",
+          "shape": [
+            1,
+            128,
+            14401
+          ],
+          "shape_ranges": [
+            {
+              "lower": 1,
+              "upper": 1
+            },
+            {
+              "lower": 128,
+              "upper": 128
+            },
+            {
+              "lower": 1,
+              "upper": 240001
+            }
+          ]
+        },
+        {
+          "dtype": "FLOAT16",
+          "name": "style_timbre",
+          "shape": [
+            1,
+            128
+          ],
+          "shape_ranges": []
+        }
+      ],
+      "label": "laishere_vocoder",
+      "op_count": 1534,
+      "outputs": [
+        {
+          "dtype": "FLOAT16",
+          "name": "anchor",
+          "shape": [
+            1
+          ],
+          "shape_ranges": []
+        },
+        {
+          "dtype": "FLOAT16",
+          "name": "x_pre",
+          "shape": [],
+          "shape_ranges": []
+        }
+      ],
+      "package_size_bytes": 49146391,
+      "path": "outputs/external_bakeoff/laishere_packages/KokoroVocoder.mlpackage",
+      "specification_version": 8,
+      "top_ops": [
+        [
+          "const",
+          778
+        ],
+        [
+          "add",
+          193
+        ],
+        [
+          "mul",
+          161
+        ],
+        [
+          "constexpr_lut_to_dense",
+          101
+        ],
+        [
+          "conv",
+          54
+        ],
+        [
+          "linear",
+          46
+        ],
+        [
+          "reshape",
+          46
+        ],
+        [
+          "split",
+          46
+        ],
+        [
+          "instance_norm",
+          42
+        ],
+        [
+          "cos",
+          36
+        ],
+        [
+          "leaky_relu",
+          13
+        ],
+        [
+          "concat",
+          6
+        ],
+        [
+          "expand_dims",
+          4
+        ],
+        [
+          "conv_transpose",
+          3
+        ],
+        [
+          "slice_by_index",
+          2
+        ],
+        [
+          "upsample_nearest_neighbor",
+          1
+        ],
+        [
+          "squeeze",
+          1
+        ],
+        [
+          "reduce_mean",
+          1
+        ]
+      ],
+      "unique_op_count": 18
+    }
+  ]
+}
