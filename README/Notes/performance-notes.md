@@ -440,13 +440,13 @@ uv run --no-sync python scripts/summarize_optimization_candidates.py \
   --json-output outputs/optimization_candidate_frontier.json
 ```
 
-Current scan result across `98` saved probe reports:
+Current scan result across `112` saved probe reports:
 
 | Category | Count | Interpretation |
 | --- | ---: | --- |
 | Quality-safe speed-positive candidates | `9` | All are noise-sized relative to the current frontier. |
 | Quality-safe material candidates (`>=3%`) | `0` | No saved strict-equivalent candidate should be promoted as the next fix. |
-| Speed-positive quality-fail candidates | `30` | The speed lives mostly in F0/source-shape branches that still fail parity. |
+| Speed-positive quality-fail candidates | `31` | The speed lives mostly in F0/source-shape branches that still fail parity. |
 
 Largest quality-safe speed-positive rows:
 
@@ -501,8 +501,9 @@ Exact-machine highlights from the generated report:
 | Machine | Bucket | Required Config F reduction | Best strict-pass estimate | Best quality-fail estimate |
 | --- | --- | ---: | --- | --- |
 | irvine-m1 | 3s | `57.2 ms` | `3s_har28561` estimates `232.8 ms`, still short of laishere `176.3 ms`. | `3s_natural_asr_cos_rsqrt` estimates `214.8 ms`, still short and quality-fail. |
-| irvine-m1 | 7s | `98.1 ms` | none | `7s_natural_asr_cos_rsqrt` estimates `444.1 ms`, still short of laishere `394.6 ms`. |
-| irvine-m1 | 10s | `91.6 ms` | none | `10s_natural_asr_cos_resblock_natural_asr_cos_rsqrt` estimates `608.7 ms`, still short of laishere `593.9 ms`. |
+| irvine-m1 | 7s | `98.1 ms` | `7s_har_cos_resblock_cos_rsqrt` estimates `541.5 ms`, slower than Config F. | `7s_natural_asr_cos_rsqrt` estimates `444.1 ms`, still short of laishere `394.6 ms`. |
+| irvine-m1 | 10s | `91.6 ms` | `10s_har_cos_resblock_cos_rsqrt` estimates `754.3 ms`, slower than Config F. | `10s_natural_asr_cos_resblock_natural_asr_cos_rsqrt` estimates `608.7 ms`, still short of laishere `593.9 ms`. |
+| irvine-m1 | 15s | `102.9 ms` | none | `15s_padded_cos_resblock_cos_rsqrt` estimates `936.1 ms`, still short of laishere `912.0 ms`. |
 | m2-air | 3s | `6.0 ms` | saved strict-pass probes are slower on this exact hardware. | none |
 
 This rules out the current saved probe pile as the route to the absolute-fastest
