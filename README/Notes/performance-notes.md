@@ -4269,8 +4269,19 @@ than the CPU+GPU path, fails the strict max-abs gate (`0.01245`), and logs
 and
 `outputs/generator_style_specialization/3s_style_specialized/report_cpu_ne.json`,
 plus the older remote reports under `outputs/generator_style_specialization/3s/`.
+
+Adding native `InstanceNorm1d` lowering to the style-specialized package shrinks
+the converted graph (`1558` PyTorch frontend ops versus `1926` for manual
+frozen AdaIN) but still does not create a material candidate. Local M2 Studio
+`3s` CPU+GPU is strict and only noise-positive: fused `26.398 ms`, native-IN
+style `26.327 ms` (`+0.27%`), corr `0.999993`, SNR `49.27 dB`, max abs
+`0.00220`. CPU+NE remains unusable: native-IN style is `641.826 ms`, fails the
+strict max-abs gate (`0.01099`), and logs `ANECCompile() FAILED`. Reports:
+`outputs/generator_style_specialization/3s_style_native_in_ios17/report_cpu_gpu.json`
+and
+`outputs/generator_style_specialization/3s_style_native_in_ios17/report_cpu_ne.json`.
 Do not carry style-specialization to Irvine unless a different operator rewrite
-changes the CPU+GPU result first.
+produces a material CPU+GPU result first.
 
 ---
 

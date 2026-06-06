@@ -1,0 +1,165 @@
+{
+  "benchmark": {
+    "compute_units": "cpuAndNeuralEngine",
+    "first_predict_ms": {
+      "fused": 1533.2956250058487,
+      "style_specialized": 685.9250001143664
+    },
+    "iterations": 20,
+    "metrics": {
+      "fused_vs_dump_full": {
+        "candidate_samples": 72000,
+        "correlation": 0.9991222210232619,
+        "cosine_similarity": 0.9992010897372899,
+        "max_abs_error": 0.0341796875,
+        "mean_abs_error": 0.0010948831770155164,
+        "reference_samples": 72000,
+        "rmse": 0.00216321504075831,
+        "samples_compared": 72000,
+        "snr_db": 27.66909993209481
+      },
+      "fused_vs_dump_trimmed": {
+        "candidate_samples": 67200,
+        "correlation": 0.9991123749264954,
+        "cosine_similarity": 0.9991975864616126,
+        "max_abs_error": 0.0341796875,
+        "mean_abs_error": 0.001181065986872212,
+        "reference_samples": 67200,
+        "rmse": 0.002243610448406954,
+        "samples_compared": 67200,
+        "snr_db": 27.65173583898264
+      },
+      "style_vs_dump_full": {
+        "candidate_samples": 72000,
+        "correlation": 0.999126890921659,
+        "cosine_similarity": 0.9992053457375344,
+        "max_abs_error": 0.03125,
+        "mean_abs_error": 0.001104737214744091,
+        "reference_samples": 72000,
+        "rmse": 0.0021597524727376086,
+        "samples_compared": 72000,
+        "snr_db": 27.683014212056335
+      },
+      "style_vs_dump_trimmed": {
+        "candidate_samples": 67200,
+        "correlation": 0.9991171161363771,
+        "cosine_similarity": 0.9992018824480564,
+        "max_abs_error": 0.03125,
+        "mean_abs_error": 0.0011916233471688388,
+        "reference_samples": 67200,
+        "rmse": 0.0022399806296370048,
+        "samples_compared": 67200,
+        "snr_db": 27.66579966040663
+      },
+      "style_vs_fused_full": {
+        "candidate_samples": 72000,
+        "correlation": 0.9998144169782032,
+        "cosine_similarity": 0.9998311452263686,
+        "max_abs_error": 0.010986328125,
+        "mean_abs_error": 0.0004818459409806463,
+        "reference_samples": 72000,
+        "rmse": 0.0009501946232476618,
+        "samples_compared": 72000,
+        "snr_db": 34.714921819371305
+      },
+      "style_vs_fused_trimmed": {
+        "candidate_samples": 67200,
+        "correlation": 0.9998131194964989,
+        "cosine_similarity": 0.9998311464612937,
+        "max_abs_error": 0.010986328125,
+        "mean_abs_error": 0.0005159028805792332,
+        "reference_samples": 67200,
+        "rmse": 0.0009835400966089842,
+        "samples_compared": 67200,
+        "snr_db": 34.71495358509524
+      }
+    },
+    "speedup_vs_fused_pct": 56.17160902549851,
+    "warm_predict_median_ms": {
+      "fused": 1464.4062289735302,
+      "style_specialized": 641.8256874894723
+    },
+    "warm_predict_times_ms": {
+      "fused": [
+        1465.2053338941187,
+        1457.3550829663873,
+        1460.1453749928623,
+        1464.3272499088198,
+        1464.6912919124588,
+        1460.4060420533642,
+        1467.215667013079,
+        1455.5553330574185,
+        1468.4321250533685,
+        1464.4852080382407,
+        1452.8919169679284,
+        1483.251833007671,
+        1451.6607499681413,
+        1464.0382919460535,
+        1458.9905000757426,
+        1469.7447499493137,
+        1466.2676659645513,
+        1468.0985830491409,
+        1461.389624979347,
+        1475.72020906955
+      ],
+      "style_specialized": [
+        640.3076670831069,
+        646.1052920203656,
+        640.198832959868,
+        635.0051659392193,
+        637.7108339220285,
+        651.1473749997094,
+        640.8246669452637,
+        647.8414160665125,
+        647.3922919249162,
+        647.6099999854341,
+        647.9659590404481,
+        648.1715000700206,
+        646.4781250106171,
+        641.7479169322178,
+        641.9034580467269,
+        638.2246250286698,
+        647.6282080402598,
+        640.3917500283569,
+        636.8003339739516,
+        634.4316250178963
+      ]
+    },
+    "warmup": 5
+  },
+  "export": null,
+  "fused_package": "coreml/kokoro_decoder_har_post_3s.mlpackage",
+  "manifest_metadata": {
+    "bucket_seconds": 3,
+    "canonical_duration_s": 2.8,
+    "decoder_frame_count": 120,
+    "duration_model": "padded_t64",
+    "duration_model_allows_padding": true,
+    "duration_token_length": 64,
+    "executable": "kokoro-bench",
+    "full_f0_len": 240,
+    "har_expected_time": 28801,
+    "hnsf_reference_command": "uv run --no-sync python scripts/validate_hnsf_swift.py generate",
+    "input_key": "3s",
+    "natural_frames": 112,
+    "num_tokens": 44,
+    "observed_audio_duration_s": 2.8,
+    "producer": "swift",
+    "seed": 42,
+    "speed": 1,
+    "t_frames": 120,
+    "text": "The quick brown fox jumps over the dog.",
+    "trim_len": 67200,
+    "voice": "af_heart",
+    "x_pre_expected_time": 240
+  },
+  "passes": false,
+  "report": "outputs/generator_style_specialization/3s_style_native_in_ios17/report_cpu_ne.json",
+  "style_package": "outputs/generator_style_specialization/3s_style_native_in_ios17/kokoro_generator_style_specialized_3s_style_native_in_ios17.mlpackage",
+  "tensor_dump": "outputs/generator_isolation/dumps/3s",
+  "thresholds": {
+    "max_abs_error": 0.01,
+    "min_corr": 0.99,
+    "min_snr": 35.0
+  }
+}

@@ -1,0 +1,183 @@
+{
+  "benchmark": {
+    "compute_units": "cpuAndGPU",
+    "first_predict_ms": {
+      "fused": 144.4660419365391,
+      "style_specialized": 401.72345796599984
+    },
+    "iterations": 20,
+    "metrics": {
+      "fused_vs_dump_full": {
+        "candidate_samples": 72000,
+        "correlation": 1.0,
+        "cosine_similarity": 1.0,
+        "max_abs_error": 0.0,
+        "mean_abs_error": 0.0,
+        "reference_samples": 72000,
+        "rmse": 0.0,
+        "samples_compared": 72000,
+        "snr_db": 142.9444187745472
+      },
+      "fused_vs_dump_trimmed": {
+        "candidate_samples": 67200,
+        "correlation": 0.9999961868925267,
+        "cosine_similarity": 0.9999965419206919,
+        "max_abs_error": 0.012786865234375,
+        "mean_abs_error": 9.83242506582845e-06,
+        "reference_samples": 67200,
+        "rmse": 0.0001423861832117895,
+        "samples_compared": 67200,
+        "snr_db": 51.601327941936844
+      },
+      "style_vs_dump_full": {
+        "candidate_samples": 72000,
+        "correlation": 0.9999935095005288,
+        "cosine_similarity": 0.999994092674378,
+        "max_abs_error": 0.002197265625,
+        "mean_abs_error": 8.09418045812183e-05,
+        "reference_samples": 72000,
+        "rmse": 0.00017981884460862107,
+        "samples_compared": 72000,
+        "snr_db": 49.27438975111623
+      },
+      "style_vs_dump_trimmed": {
+        "candidate_samples": 67200,
+        "correlation": 0.9999896545924456,
+        "cosine_similarity": 0.99999063605872,
+        "max_abs_error": 0.012786865234375,
+        "mean_abs_error": 9.644030489182921e-05,
+        "reference_samples": 67200,
+        "rmse": 0.00023432184157589806,
+        "samples_compared": 67200,
+        "snr_db": 47.27442947686512
+      },
+      "style_vs_fused_full": {
+        "candidate_samples": 72000,
+        "correlation": 0.9999935095005288,
+        "cosine_similarity": 0.999994092674378,
+        "max_abs_error": 0.002197265625,
+        "mean_abs_error": 8.09418045812183e-05,
+        "reference_samples": 72000,
+        "rmse": 0.00017981884460862107,
+        "samples_compared": 72000,
+        "snr_db": 49.27438975111623
+      },
+      "style_vs_fused_trimmed": {
+        "candidate_samples": 67200,
+        "correlation": 0.9999934642970486,
+        "cosine_similarity": 0.9999940927068888,
+        "max_abs_error": 0.002197265625,
+        "mean_abs_error": 8.665917884735834e-05,
+        "reference_samples": 67200,
+        "rmse": 0.0001861294380825792,
+        "samples_compared": 67200,
+        "snr_db": 49.27441369217614
+      }
+    },
+    "speedup_vs_fused_pct": 0.270535323095228,
+    "warm_predict_median_ms": {
+      "fused": 26.39804151840508,
+      "style_specialized": 26.32662549149245
+    },
+    "warm_predict_times_ms": {
+      "fused": [
+        26.527500012889504,
+        26.435583946295083,
+        26.271042064763606,
+        26.424082927405834,
+        26.440666057169437,
+        26.382667012512684,
+        26.30758297163993,
+        26.387167046777904,
+        26.335707982070744,
+        26.36050002183765,
+        26.455082930624485,
+        26.37308300472796,
+        26.360625051893294,
+        26.408915990032256,
+        26.35275002103299,
+        26.38233290053904,
+        26.533707976341248,
+        26.53629204723984,
+        26.514624943956733,
+        26.497666956856847
+      ],
+      "style_specialized": [
+        26.397666078992188,
+        26.194249978289008,
+        26.422208989970386,
+        26.40845801215619,
+        26.391124934889376,
+        26.200209045782685,
+        26.201416039839387,
+        26.26120892819017,
+        26.19154192507267,
+        26.469332980923355,
+        26.333834044635296,
+        26.169209042564034,
+        26.29104198422283,
+        26.421917020343244,
+        26.303458027541637,
+        26.319416938349605,
+        26.488917064853013,
+        26.368375052697957,
+        26.361667085438967,
+        26.285915984772146
+      ]
+    },
+    "warmup": 5
+  },
+  "export": {
+    "deployment_target": "ios17",
+    "frozen_adain_count": 48,
+    "har_shape": [
+      1,
+      22,
+      28801
+    ],
+    "native_instance_norm_adain": true,
+    "package": "outputs/generator_style_specialization/3s_style_native_in_ios17/kokoro_generator_style_specialized_3s_style_native_in_ios17.mlpackage",
+    "precision": "fp16",
+    "removed_dropouts": 0,
+    "traced_samples": 72000,
+    "x_pre_shape": [
+      1,
+      512,
+      240
+    ]
+  },
+  "fused_package": "coreml/kokoro_decoder_har_post_3s.mlpackage",
+  "manifest_metadata": {
+    "bucket_seconds": 3,
+    "canonical_duration_s": 2.8,
+    "decoder_frame_count": 120,
+    "duration_model": "padded_t64",
+    "duration_model_allows_padding": true,
+    "duration_token_length": 64,
+    "executable": "kokoro-bench",
+    "full_f0_len": 240,
+    "har_expected_time": 28801,
+    "hnsf_reference_command": "uv run --no-sync python scripts/validate_hnsf_swift.py generate",
+    "input_key": "3s",
+    "natural_frames": 112,
+    "num_tokens": 44,
+    "observed_audio_duration_s": 2.8,
+    "producer": "swift",
+    "seed": 42,
+    "speed": 1,
+    "t_frames": 120,
+    "text": "The quick brown fox jumps over the dog.",
+    "trim_len": 67200,
+    "voice": "af_heart",
+    "x_pre_expected_time": 240
+  },
+  "passes": true,
+  "report": "outputs/generator_style_specialization/3s_style_native_in_ios17/report_cpu_gpu.json",
+  "style_package": "outputs/generator_style_specialization/3s_style_native_in_ios17/kokoro_generator_style_specialized_3s_style_native_in_ios17.mlpackage",
+  "tensor_dump": "outputs/generator_isolation/dumps/3s",
+  "thresholds": {
+    "max_abs_error": 0.01,
+    "min_corr": 0.99,
+    "min_snr": 35.0
+  }
+}

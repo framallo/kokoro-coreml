@@ -35,7 +35,21 @@ from probe_generator_exact_geometry import _compute_units, _load_kmodel, _metric
 from probe_generator_split import _duration_label_from_dump, _precision_arg, _remove_existing_package  # noqa: E402
 
 
-def _make_frozen_adain(original: Any, style: Any):
+def _deployment_target(ct: Any, name: str) -> Any:
+    targets = {
+        "macos13": ct.target.macOS13,
+        "macos14": ct.target.macOS14,
+        "macos15": ct.target.macOS15,
+        "ios17": ct.target.iOS17,
+        "ios18": ct.target.iOS18,
+    }
+    try:
+        return targets[name.lower()]
+    except KeyError as exc:
+        raise ValueError(f"unsupported deployment target {name!r}") from exc
+
+
+def _make_frozen_adain(original: Any, style: Any, native_instance_norm: bool):
     import torch
     import torch.nn as nn
 
@@ -46,6 +60,16 @@ def _make_frozen_adain(original: Any, style: Any):
             super().__init__()
             self.num_features = int(source.num_features)
             self.eps = float(source.eps)
+            self.norm = (
+                nn.InstanceNorm1d(
+                    self.num_features,
+                    affine=False,
+                    track_running_stats=False,
+                    eps=self.eps,
+                )
+                if native_instance_norm
+                else None
+            )
             with torch.no_grad():
                 h = source.fc(style_tensor).view(1, 2 * self.num_features, 1)
                 gamma, beta = torch.chunk(h, chunks=2, dim=1)
@@ -54,10 +78,13 @@ def _make_frozen_adain(original: Any, style: Any):
 
         def forward(self, x: torch.Tensor, s: torch.Tensor) -> torch.Tensor:
             B, C, T = x.shape
-            mean = x.mean(dim=2, keepdim=True)
-            var = x.var(dim=2, unbiased=False, keepdim=True)
-            x_norm = (x - mean) / torch.sqrt(var + self.eps)
             assert C == self.num_features, f"AdaIN1d channel mismatch: got {C}, expected {self.num_features}"
+            if self.norm is not None:
+                x_norm = self.norm(x)
+            else:
+                mean = x.mean(dim=2, keepdim=True)
+                var = x.var(dim=2, unbiased=False, keepdim=True)
+                x_norm = (x - mean) / torch.sqrt(var + self.eps)
             gamma = self.gamma.expand(B, C, T)
             beta = self.beta.expand(B, C, T)
             return (1.0 + gamma) * x_norm + beta
@@ -65,16 +92,16 @@ def _make_frozen_adain(original: Any, style: Any):
     return _FrozenAdaIN1d(original, style)
 
 
-def _freeze_adain_modules(module: Any, style: Any) -> int:
+def _freeze_adain_modules(module: Any, style: Any, native_instance_norm: bool) -> int:
     """Replace all AdaIN1d children with fixed-style equivalents."""
 
     count = 0
     for name, child in list(module.named_children()):
         if type(child).__name__ == "AdaIN1d":
-            setattr(module, name, _make_frozen_adain(child, style))
+            setattr(module, name, _make_frozen_adain(child, style, native_instance_norm))
             count += 1
         else:
-            count += _freeze_adain_modules(child, style)
+            count += _freeze_adain_modules(child, style, native_instance_norm)
     return count
 
 
@@ -142,6 +169,8 @@ def _export_package(
     package: Path,
     tensors: dict[str, np.ndarray],
     precision: str,
+    deployment_target: str,
+    native_instance_norm_adain: bool,
 ) -> dict[str, Any]:
     import coremltools as ct
     import torch
@@ -153,7 +182,7 @@ def _export_package(
 
     kmodel = _load_kmodel()
     gen = kmodel.decoder.generator
-    frozen_adain_count = _freeze_adain_modules(gen, style)
+    frozen_adain_count = _freeze_adain_modules(gen, style, native_instance_norm_adain)
 
     x_pre_shape = tuple(int(v) for v in tensors["x_pre_padded"].shape)
     har_shape = tuple(int(v) for v in tensors["har_padded"].shape)
@@ -175,7 +204,7 @@ def _export_package(
         ],
         outputs=[ct.TensorType(name="waveform")],
         convert_to="mlprogram",
-        minimum_deployment_target=ct.target.macOS13,
+        minimum_deployment_target=_deployment_target(ct, deployment_target),
         compute_precision=_precision_arg(ct, precision),
         compute_units=ct.ComputeUnit.ALL,
     )
@@ -186,6 +215,8 @@ def _export_package(
     return {
         "package": str(package),
         "precision": precision,
+        "deployment_target": deployment_target,
+        "native_instance_norm_adain": native_instance_norm_adain,
         "frozen_adain_count": frozen_adain_count,
         "removed_dropouts": removed_dropouts,
         "traced_samples": traced_samples,
@@ -295,7 +326,13 @@ def run(args: argparse.Namespace) -> dict[str, Any]:
         if not style_package.is_dir():
             raise SystemExit(f"--skip-export requested but package is missing: {style_package}")
     else:
-        export_report = _export_package(style_package, tensors, args.precision)
+        export_report = _export_package(
+            style_package,
+            tensors,
+            args.precision,
+            args.deployment_target,
+            args.native_instance_norm_adain,
+        )
 
     benchmark = _benchmark(args, tensors, style_package)
     metrics = benchmark["metrics"]["style_vs_fused_trimmed"]
@@ -354,6 +391,8 @@ def main() -> None:
         choices=("fp16", "float16", "fp32", "float32"),
         help="Core ML conversion precision for the style-specialized package.",
     )
+    parser.add_argument("--deployment-target", default="macos13")
+    parser.add_argument("--native-instance-norm-adain", action="store_true")
     parser.add_argument("--compute-units", default="cpuAndGPU")
     parser.add_argument("--warmup", type=int, default=3)
     parser.add_argument("--iterations", type=int, default=10)
