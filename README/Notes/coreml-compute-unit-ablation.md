@@ -264,6 +264,16 @@ sudo powermetrics -i 1000 --samplers ane
   shipping `167.900 ms` vs CT9 `167.947 ms`. The 7s local CT9 candidate was
   slower (`60.49 ms` vs `59.87 ms`). Do not pursue a CT9-only migration for the
   current fused final-waveform package without a new compute-plan signal.
+- **RangeDim input contract rejected for the fused generator:** laishere's
+  vocoder uses flexible ranges, so `scripts/probe_generator_cos_snake.py` now
+  supports `--input-shape-mode range` for `x_pre` and `har`. Plain RangeDim
+  converted but ran catastrophically (`1561.07 ms` vs `49.73 ms` fused) and
+  emitted E5RT `tile` shape-propagation failures. The tile-free
+  native+broadcast+cos graph still failed quality and speed on both CT8 and
+  CT9 (`343.61-343.96 ms` candidate vs `31.91-33.05 ms` fused) with E5RT
+  dynamic `add` broadcast failures. The flexible-shape advantage, if any, is
+  tied to laishere's different split boundary; it is not a safe drop-in for the
+  current fused final-waveform package.
 - **Style-specialized generator rejected:** `scripts/probe_generator_style_specialization.py`
   bakes the dump's `ref_s` into the generator and replaces all `AdaIN1d`
   projections with fixed gamma/beta constants. The 3s MIL graph shrank from

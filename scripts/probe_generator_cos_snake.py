@@ -150,6 +150,61 @@ def _predict_inputs(tensors: dict[str, np.ndarray]) -> dict[str, np.ndarray]:
     }
 
 
+def _input_shape(ct: Any, name: str, shape: tuple[int, ...], mode: str) -> Any:
+    """Return the Core ML input shape for the requested shape-contract probe."""
+
+    if mode == "fixed":
+        return shape
+    if mode != "range":
+        raise ValueError(f"unsupported input shape mode {mode!r}")
+
+    if name == "x_pre":
+        return ct.Shape(
+            shape=(
+                shape[0],
+                shape[1],
+                ct.RangeDim(lower_bound=1, upper_bound=2000, default=shape[2]),
+            )
+        )
+    if name == "har":
+        return ct.Shape(
+            shape=(
+                shape[0],
+                shape[1],
+                ct.RangeDim(lower_bound=1, upper_bound=240001, default=shape[2]),
+            )
+        )
+    return shape
+
+
+def _input_tensor_types(
+    ct: Any,
+    x_pre_shape: tuple[int, ...],
+    ref_s_shape: tuple[int, ...],
+    har_shape: tuple[int, ...],
+    shape_mode: str,
+) -> list[Any]:
+    """Return TensorType declarations for the generator package export."""
+
+    return [
+        ct.TensorType(
+            name="x_pre",
+            shape=_input_shape(ct, "x_pre", x_pre_shape, shape_mode),
+            dtype=np.float32,
+        ),
+        ct.TensorType(
+            name="ref_s",
+            shape=_input_shape(ct, "ref_s", ref_s_shape, shape_mode),
+            dtype=np.float32,
+        ),
+        ct.TensorType(
+            name="har",
+            shape=_input_shape(ct, "har", har_shape, shape_mode),
+            dtype=np.float32,
+        ),
+    ]
+
+
 def _export_package(
     package: Path,
     tensors: dict[str, np.ndarray],
@@ -159,6 +214,7 @@ def _export_package(
     deployment_target: str,
     native_instance_norm_adain: bool,
     palettize: bool,
+    input_shape_mode: str,
 ) -> dict[str, Any]:
     import coremltools as ct
     import torch
@@ -195,11 +251,7 @@ def _export_package(
 
     mlmodel = ct.convert(
         traced,
-        inputs=[
-            ct.TensorType(name="x_pre", shape=x_pre_shape, dtype=np.float32),
-            ct.TensorType(name="ref_s", shape=ref_s_shape, dtype=np.float32),
-            ct.TensorType(name="har", shape=har_shape, dtype=np.float32),
-        ],
+        inputs=_input_tensor_types(ct, x_pre_shape, ref_s_shape, har_shape, input_shape_mode),
         outputs=[ct.TensorType(name="waveform")],
         convert_to="mlprogram",
         minimum_deployment_target=_deployment_target(ct, deployment_target),
@@ -219,6 +271,7 @@ def _export_package(
         "native_instance_norm_adain": bool(native_instance_norm_adain),
         "deployment_target": deployment_target,
         "palettize": bool(palettize),
+        "input_shape_mode": input_shape_mode,
         "removed_dropouts": removed_dropouts,
         "traced_samples": traced_samples,
         "x_pre_shape": list(x_pre_shape),
@@ -323,6 +376,8 @@ def run(args: argparse.Namespace) -> dict[str, Any]:
         label = f"{label}_native_in"
     if args.palettize:
         label = f"{label}_pal8"
+    if args.input_shape_mode != "fixed":
+        label = f"{label}_{args.input_shape_mode}_inputs"
     if args.deployment_target.lower() != "macos13":
         label = f"{label}_{args.deployment_target.lower()}"
     work_dir = args.output_dir / label
@@ -346,6 +401,7 @@ def run(args: argparse.Namespace) -> dict[str, Any]:
             args.deployment_target,
             args.native_instance_norm_adain,
             args.palettize,
+            args.input_shape_mode,
         )
 
     benchmark = _benchmark(args, tensors, cos_package)
@@ -369,6 +425,7 @@ def run(args: argparse.Namespace) -> dict[str, Any]:
         "native_instance_norm_adain": bool(args.native_instance_norm_adain),
         "deployment_target": args.deployment_target,
         "palettize": bool(args.palettize),
+        "input_shape_mode": args.input_shape_mode,
         "export": export_report,
         "benchmark": benchmark,
         "thresholds": {
@@ -423,6 +480,12 @@ def main() -> None:
         "--palettize",
         action="store_true",
         help="Apply 8-bit k-means weight palettization to the candidate package.",
+    )
+    parser.add_argument(
+        "--input-shape-mode",
+        choices=("fixed", "range"),
+        default="fixed",
+        help="Input shape contract for x_pre/har. 'range' uses bounded RangeDim time axes.",
     )
     parser.add_argument(
         "--precision",

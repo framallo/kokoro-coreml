@@ -599,6 +599,31 @@ CT9 iOS17, and shipping fused within run noise. On M2 Air and Irvine M1, CT9
 was effectively identical to shipping fused. Therefore a coremltools 9
 conversion alone is not the reason laishere retains an M1 short-bucket lead.
 
+The flexible-shape hypothesis is rejected for the current fused generator
+boundary. Laishere's `KokoroVocoder` advertises bounded flexible input ranges,
+so `scripts/probe_generator_cos_snake.py` now has `--input-shape-mode range`.
+That mode marks `x_pre` as `1 x 512 x 1...2000` and `har` as
+`1 x 22 x 1...240001`, with the current dump dimensions as defaults. This
+successfully produces packages with `hasShapeFlexibility=1`, but prediction is
+not usable:
+
+| Probe | Toolchain | MIL ops | Fused median | Candidate median | Parity vs fused | Runtime signal | Decision |
+| --- | --- | ---: | ---: | ---: | --- | --- | --- |
+| plain RangeDim | CT8.3 / torch 2.6 | 3135 | 49.73 ms | 1561.07 ms | corr 0.999136, SNR 27.77 dB, max abs 0.03076 | `tile` shape-propagation failure | reject |
+| native+broadcast+cos RangeDim | CT8.3 / torch 2.6 | 1659 | 31.91 ms | 343.61 ms | corr 0.999135, SNR 27.76 dB, max abs 0.02783 | dynamic `add` broadcast failure | reject |
+| native+broadcast+cos RangeDim | CT9.0 / torch 2.6 | 1659 | 33.05 ms | 343.96 ms | corr 0.999135, SNR 27.76 dB, max abs 0.02783 | dynamic `add` broadcast failure | reject |
+
+The plain range package keeps explicit `tile`, and E5RT reports
+`All values of reps must be at least 1` during shape propagation. The
+tile-free native+broadcast graph removes that failure, but E5RT then reports
+`Shapes are not compatible for broadcasting` on dynamic `add`. CT9 does not
+change that outcome. Coremltools also refuses explicit output shapes for
+conversion outputs, so the dynamic output metadata cannot be fixed by simply
+declaring the traced waveform shape. This strongly suggests laishere's flexible
+inputs only work because its package boundary exposes different intermediate
+tensors and avoids the fused generator's dynamic broadcast surface; RangeDim is
+not a production path for our current final-waveform fused package.
+
 #### Style-specialized generator probe
 
 `scripts/probe_generator_style_specialization.py` tests a more aggressive
