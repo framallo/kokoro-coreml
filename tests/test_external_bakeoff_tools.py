@@ -27,6 +27,7 @@ from scripts.compare_coreml_metadata import (
     render_markdown as render_coreml_metadata_markdown,
     summarize_metadata as summarize_coreml_metadata,
 )
+from scripts.analyze_waveform_alignment import analyze_pair
 from scripts.create_f0_source_listening_pack import _write_decisions_csv as _write_f0_decisions_csv
 from scripts.probe_generator_cos_snake import _trim_or_pad_last_dim
 from scripts.summarize_f0_source_candidates import (
@@ -583,6 +584,23 @@ def test_generator_cos_snake_trim_or_pad_last_dim():
     assert padded.shape == (1, 2, 5)
     assert padded[..., :3].tolist() == arr.tolist()
     assert np.count_nonzero(padded[..., 3:]) == 0
+
+
+def test_waveform_alignment_detects_lag_and_affine_fix():
+    import numpy as np
+
+    x = np.linspace(0.0, 8.0 * np.pi, 2048, dtype=np.float32)
+    reference = np.sin(x).astype(np.float32)
+    candidate = np.concatenate(
+        [np.zeros(23, dtype=np.float32), (reference[:-23] * 0.5 + 0.05).astype(np.float32)]
+    )
+
+    result = analyze_pair(reference, candidate, max_lag=64, downsample=2)
+
+    assert result["lagged"]["lag_samples"] == 23
+    assert result["raw"]["snr_db"] < 10.0
+    assert result["lagged_affine"]["metrics"]["snr_db"] > 60.0
+    assert result["lagged_affine"]["gain"] > 1.9
 
 
 def test_completion_verifier_allows_mlx_3s_error_but_requires_iphone():

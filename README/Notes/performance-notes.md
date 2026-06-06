@@ -1142,6 +1142,25 @@ pack contains 3s/7s/10s/15s/30s `acos` phase-repair candidates plus the original
 `missing human_decision` errors, so this no-ASR pack is evidence for listening
 review only, not approval.
 
+Cheap post-hoc quality repair is also rejected. `scripts/analyze_waveform_alignment.py`
+loads the phase-repair listening pack and checks whether candidate-vs-baseline
+drift can be explained by a sample lag plus affine gain/offset correction:
+
+```bash
+uv run --no-sync python scripts/analyze_waveform_alignment.py \
+  --index outputs/f0_source_listening/phase_repair_speed_branch/index.json \
+  --max-lag 2400 \
+  --downsample 8 \
+  --output outputs/f0_source_listening/phase_repair_speed_branch/waveform_alignment_analysis.md \
+  --json-output outputs/f0_source_listening/phase_repair_speed_branch/waveform_alignment_analysis.json
+```
+
+Result: all six rows choose best lag `0`. Gain/offset improves SNR only
+slightly: 7s `acos` moves from `12.60` to `13.14 dB`, 10s from `12.66` to
+`12.68 dB`, 15s from `12.71` to `12.73 dB`, and 30s from `12.07` to
+`12.11 dB`. This rules out a simple alignment or amplitude correction as the
+strict-parity fix for the F0-source branch.
+
 `scripts/summarize_f0_source_candidates.py` ranks all saved
 `outputs/f0_noise_exact_shape/**/report*.json` probes by warm median speedup
 and joins any filled `f0_source_listening_decisions.csv` rows when available.
