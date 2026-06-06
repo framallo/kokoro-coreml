@@ -1113,6 +1113,24 @@ native-IN iOS17/spec8 pack, the current pre-listening state is
 `valid=false` with `missing human_decision`, which prevents this speed branch
 from silently becoming a production claim before human review.
 
+Phase-repair listening pack:
+
+```bash
+uv run --no-sync python scripts/create_f0_source_listening_pack.py \
+  --out-dir outputs/f0_source_listening/phase_repair_speed_branch \
+  --report \
+  outputs/f0_noise_exact_shape/7s_padded_cos_resblock_cos_rsqrt/report_cos_resblock.json \
+  outputs/f0_noise_exact_shape/7s_padded_cos_resblock_phase_acos_cos_rsqrt/report_cos_resblock_phase_acos.json \
+  --plots
+```
+
+Output index:
+`outputs/f0_source_listening/phase_repair_speed_branch/README.md`. The pack
+contains the original 7s padded F0-source candidate and the stronger `acos`
+phase-repair candidate. The validator currently fails closed with two
+`missing human_decision` errors, so this no-ASR pack is evidence for listening
+review only, not approval.
+
 `scripts/summarize_f0_source_candidates.py` ranks all saved
 `outputs/f0_noise_exact_shape/**/report*.json` probes by warm median speedup
 and joins any filled `f0_source_listening_decisions.csv` rows when available.
