@@ -317,21 +317,21 @@ sudo powermetrics -i 1000 --samplers ane
   is an exact laishere-style decoder-plus-generator boundary probe against the
   Swift dumps, not more `MLComputeUnits` experiments or static HAR-post
   boundary splitting.
-- **Laishere-style decoder+vocoder boundary rejected on local 3s:** `scripts/probe_decoder_vocoder_split.py`
+- **Laishere-style decoder+vocoder boundary rejected on cross-machine 3s:** `scripts/probe_decoder_vocoder_split.py`
   ports the broader laishere boundary onto the Swift tensor dumps: checked-in
   `decoder_pre` + fused HAR-post generator as the baseline versus a candidate
   chain of HAR-noise, decoder encode/decode plus generator body with a discarded
   anchor, and an fp32 tail. Parity passed against the fused baseline, but the
-  boundary did not win. With body on CPU+ANE, Core ML emitted an ANE compiler
-  failure and the warmed median was `119.5 ms` versus `32.9 ms` baseline
-  (`noise 12.0 ms`, `body 105.6 ms`, `tail 1.5 ms`; corr `0.999917`, SNR
-  `38.19 dB`). Reusing the same packages with body on CPU+GPU removed the ANE
-  catastrophe but still lost: `38.0 ms` versus `33.2 ms` baseline
-  (`noise 11.9 ms`, `body 24.7 ms`, `tail 1.4 ms`; corr `0.999991`, SNR
-  `47.76 dB`). This rejects a simple "move our split to laishere's
-  decoder+generator boundary" explanation. The remaining laishere gap is either
-  from its full chain/runtime details, a hardware-specific Core ML compile plan,
-  or work reduction outside this boundary; do not ship this split.
+  boundary did not win on any tested Mac. M2 Studio CPU+ANE emitted an ANE
+  compiler failure and lost (`119.5 ms` vs `32.9 ms` baseline); M2 Air CPU+ANE
+  was stopped after more than `110s` in `ANECompilerService`; Irvine M1 CPU+ANE
+  lost (`314.6 ms` vs `176.3 ms`). CPU+GPU removed the ANE catastrophe but still
+  lost on every machine: M2 Studio `38.0 ms` vs `33.2 ms`, M2 Air `138.8 ms` vs
+  `123.7 ms`, and Irvine M1 `199.3 ms` vs `174.6 ms`. This rejects a simple
+  "move our split to laishere's decoder+generator boundary" explanation. The
+  remaining laishere gap is either from its full chain/runtime details, a
+  hardware-specific Core ML compile plan, or work reduction outside this
+  boundary; do not ship this split.
 
 **2026-05-17**
 

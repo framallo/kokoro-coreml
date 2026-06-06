@@ -671,16 +671,23 @@ includes decoder F0/N conv, decoder encode/decode, and the generator body, then
 a separate fp32 tail. The baseline is the same Swift tensor dump run through the
 checked-in `decoder_pre` package plus the checked-in fused HAR-post generator.
 
-Local M2 Studio `3s` results:
+Cross-machine `3s` results:
 
 | Candidate body units | Baseline median | Candidate median | Stage medians | Parity vs fused | Decision |
 | --- | ---: | ---: | --- | --- | --- |
-| CPU+ANE | 32.9 ms | 119.5 ms | noise 12.0 ms, body 105.6 ms, tail 1.5 ms | corr 0.999917, SNR 38.19 dB | reject; ANE compiler failure emitted |
-| CPU+GPU | 33.2 ms | 38.0 ms | noise 11.9 ms, body 24.7 ms, tail 1.4 ms | corr 0.999991, SNR 47.76 dB | reject; dispatch/noise overhead beats body reduction |
+| m2-studio CPU+ANE | 32.9 ms | 119.5 ms | noise 12.0 ms, body 105.6 ms, tail 1.5 ms | corr 0.999917, SNR 38.19 dB | reject; ANE compiler failure emitted |
+| m2-studio CPU+GPU | 33.2 ms | 38.0 ms | noise 11.9 ms, body 24.7 ms, tail 1.4 ms | corr 0.999991, SNR 47.76 dB | reject |
+| m2-air CPU+ANE | n/a | n/a | n/a | n/a | reject; stopped after more than 110s in `ANECompilerService` |
+| m2-air CPU+GPU | 123.7 ms | 138.8 ms | noise 52.2 ms, body 84.4 ms, tail 2.1 ms | corr 0.999991, SNR 47.70 dB | reject |
+| irvine-m1 CPU+ANE | 176.3 ms | 314.6 ms | noise 75.2 ms, body 235.5 ms, tail 3.9 ms | corr 0.999907, SNR 37.69 dB | reject |
+| irvine-m1 CPU+GPU | 174.6 ms | 199.3 ms | noise 74.9 ms, body 119.8 ms, tail 4.8 ms | corr 0.999991, SNR 47.72 dB | reject |
 
 This closes the direct "copy laishere's decoder+vocoder split boundary" path for
-our current Swift dump contract. The remaining laishere advantage on Irvine M1
-short/medium rows is not explained by this boundary alone.
+our current Swift dump contract on every tested Mac. The remaining laishere
+advantage on Irvine M1 short/medium rows is not explained by this boundary
+alone. It must come from laishere's full runtime/package details, a
+hardware-specific Core ML compile plan, or work reduction outside the reproduced
+boundary.
 
 #### HnSF vDSP optimization
 
