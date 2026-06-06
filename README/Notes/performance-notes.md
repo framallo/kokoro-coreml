@@ -763,6 +763,23 @@ Cross-machine `3s` results:
 | irvine-m1 CPU+ANE | 176.3 ms | 314.6 ms | noise 75.2 ms, body 235.5 ms, tail 3.9 ms | corr 0.999907, SNR 37.69 dB | reject |
 | irvine-m1 CPU+GPU | 174.6 ms | 199.3 ms | noise 74.9 ms, body 119.8 ms, tail 4.8 ms | corr 0.999991, SNR 47.72 dB | reject |
 
+Local long-bucket `har_source -> STFT/noise_convs` split results:
+
+| Input | Baseline median | Candidate median | Speedup | Stage medians | Parity vs fused | Decision |
+| --- | ---: | ---: | ---: | --- | --- | --- |
+| 10s | 85.9 ms | 78.1 ms | +9.1% | noise 19.1 ms, body 56.2 ms, tail 2.6 ms | corr 0.977328, SNR 12.81 dB | speed-positive, reject for strict quality |
+| 15s | 122.5 ms | 110.1 ms | +10.1% | noise 27.3 ms, body 79.0 ms, tail 3.5 ms | corr 0.978868, SNR 13.02 dB | speed-positive, reject for strict quality |
+| 30s | 234.2 ms | 206.8 ms | +11.7% | noise 51.8 ms, body 149.0 ms, tail 5.6 ms | corr 0.974779, SNR 12.45 dB | speed-positive, reject for strict quality |
+
+The long sweep was run with `uv run --no-sync python
+scripts/probe_har_source_noise_split.py ... --warmup 3 --iterations 10`; reports
+are under `outputs/har_source_noise_split/{10s,15s,30s}/report_har_source_noise.json`.
+This branch scales in the right direction and is now the strongest
+quality-adjacent speed lead, but the parity gap is still too large for
+production. The next useful work is phase/STFT parity repair for this compact
+source boundary, or a no-ASR listening review if the paper accepts an
+audio-equivalent rather than tensor-equivalent branch.
+
 This closes the direct "copy laishere's decoder+vocoder split boundary" path for
 our current Swift dump contract on every tested Mac. The remaining laishere
 advantage on Irvine M1 short/medium rows is not explained by this boundary
