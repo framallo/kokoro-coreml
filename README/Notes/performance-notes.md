@@ -4548,6 +4548,29 @@ treat it as sufficient for the absolute-fastest claim. Irvine still needs either
 another strict source/body improvement or a stronger single-package graph
 change.
 
+The fully rewritten probe surface was also tested as a drop-in Swift overlay:
+cos-Snake, native InstanceNorm AdaIN, broadcast AdaIN, fp16 inputs, iOS17, and
+the upsample rewrite, with only the five HAR-post package symlinks redirected.
+The Core ML contract matches the production HAR-post contract (`x_pre`,
+`ref_s`, `har` -> `waveform`), and local waveform metrics remain strict-like
+versus `vector_noise_batch` spotchecks: corr `0.999993675-0.999995451`, SNR
+`48.01-50.62 dB`, max abs `<=0.007263`. Warmed local M2 Studio end-to-end
+medians:
+
+| Bucket | Current best local | Production rewrite | Full probe surface |
+| --- | ---: | ---: | ---: |
+| 3s | 50.665 ms | 49.669 ms | 49.532 ms |
+| 7s | 95.503 ms | 93.792 ms | 94.128 ms |
+| 10s | 125.687 ms | 123.655 ms | 123.617 ms |
+| 15s | 185.782 ms | 183.511 ms | 183.980 ms |
+| 30s | 383.906 ms | 373.985 ms | 376.200 ms |
+
+Decision: reject the full probe surface as a production replacement for now.
+It proves the interface is compatible, but it is only better than the simpler
+production rewrite on `3s` and noise-tied on `10s`; it regresses `7s/15s/30s`.
+Result:
+`outputs/external_bakeoff/results_config_f_reference_m2-studio-local_full_surface_ups_as_conv.json`.
+
 ---
 
 ## Bakeoff v5: Corrected benchmark (3s-30s) on M2 Ultra

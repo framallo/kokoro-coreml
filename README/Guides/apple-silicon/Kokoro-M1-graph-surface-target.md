@@ -397,6 +397,14 @@ projected gaps of `31.4 ms`, `36.4 ms`, `23.2 ms`, and `3.0 ms` against
 warmed laishere. The rewrite is a keeper, but it must combine with another
 strict source/body gain to prove absolute fastest on Irvine M1.
 
+The larger cos/native-IN/broadcast/fp16/ups-as-conv probe packages were also
+tested as a Swift overlay and are contract-compatible, but they do not beat the
+simpler production-rewrite overlay overall. Local M2 Studio full-surface medians
+were `49.532/94.128/123.617/183.980/376.200 ms` for
+`3s/7s/10s/15s/30s`; that is only better than the production rewrite on `3s`
+and effectively tied on `10s`, while slower on `7s/15s/30s`. Decision: do not
+promote the full probe surface as the production package set.
+
 ## Deep Research Request
 
 A useful external deep-research guide would be narrower than "Core ML
