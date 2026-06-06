@@ -39,7 +39,8 @@ candidates from quality-changing speed branches.
 
 ## Next Actions
 
-- Retest the HAR-post upsample rewrite on Irvine M1 and M2 Air only when Spotlight/mediaanalysis load is quiet.
+- Run scripts/external_bakeoff/check_remote_host_quiet.py before any lower-end Mac promotion run.
+- Retest the HAR-post upsample rewrite on Irvine M1 and M2 Air only when outputs/external_bakeoff/remote_host_quiet_latest.md reports quiet=yes.
 - Do not use cold compile/cache timings; every frontier update must use warmed medians.
 - For a new strict candidate, require a single-package graph or a removed Core ML call boundary before lower-end promotion.
 - Run the installed Config F iPhone runner only after the physical iPhone is unlocked; current launch blocker is device_locked.

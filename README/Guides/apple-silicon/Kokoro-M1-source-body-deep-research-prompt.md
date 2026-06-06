@@ -55,6 +55,7 @@ Authoritative frontier and target files:
 - `outputs/external_bakeoff/irvine_3s_placement_target.md`
 - `outputs/external_bakeoff/irvine_next_targets.md`
 - `outputs/external_bakeoff/candidate_frontier_matrix.md`
+- `outputs/external_bakeoff/remote_host_quiet_latest.md`
 - `README/Guides/apple-silicon/Kokoro-M1-vocoder-boundary-research-brief.md`
 - `README/Guides/apple-silicon/Kokoro-M1-graph-surface-target.md`
 - `README/Notes/performance-notes.md`
@@ -156,6 +157,8 @@ Every candidate must leave a durable report containing:
 - `MLComputePlan` preferred-device counts and cost weights;
 - local M2 Studio timing before any Irvine timing;
 - Irvine timing only when the host is quiet enough for publishable data.
+- the current `outputs/external_bakeoff/remote_host_quiet_latest.md` result for
+  any lower-end Mac run;
 - an updated `outputs/external_bakeoff/candidate_frontier_matrix.md` row if
   the candidate is promoted, rejected, or remains quality-fail speed evidence.
 

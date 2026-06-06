@@ -4584,6 +4584,14 @@ and paired, but launching `com.kokoro.externalbakeoff.ConfigFIOSRunnerManual`
 still fails with `RequestDenied ... Locked`; Config F iPhone warmed timing is
 therefore still blocked only by the physical lock state.
 
+`scripts/external_bakeoff/check_remote_host_quiet.py` now records the lower-end
+Mac timing gate at `outputs/external_bakeoff/remote_host_quiet_latest.md`.
+The 2026-06-06 07:12 local run reports `publishable_timing_allowed=false`:
+Irvine M1 has load `2.08/2.56/2.80` with `mediaanalysisd` at `98.7%` CPU and
+`mds_stores` at `16.4%`, while M2 Air has load `3.87/3.83/3.77` with
+`mds_stores` at `94.1%` and `mediaanalysisd` at `45.9%`. Skip lower-end Mac
+frontier promotion until this gate reports `quiet=yes` for the target host.
+
 ---
 
 ## Bakeoff v5: Corrected benchmark (3s-30s) on M2 Ultra

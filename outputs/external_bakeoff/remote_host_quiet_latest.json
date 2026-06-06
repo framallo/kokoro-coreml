@@ -1,0 +1,186 @@
+{
+  "checked_at_local": "2026-06-06T07:12:50-07:00",
+  "publishable_timing_allowed": false,
+  "rows": [
+    {
+      "blockers": [
+        "load1 2.08 exceeds 1.00",
+        "/System/Library/PrivateFrameworks/MediaAnalysis.framework/Versions/A/mediaanalysisd at 98.7% CPU",
+        "/System/Library/Frameworks/CoreServices.framework/Frameworks/Metadata.framework/Versions/A/Support/mds_stores at 16.4% CPU"
+      ],
+      "load": {
+        "fifteen_minutes": 2.8,
+        "five_minutes": 2.56,
+        "one_minute": 2.08
+      },
+      "machine_id": "irvine-m1",
+      "ok": true,
+      "processes": [
+        {
+          "command": "/System/Library/PrivateFrameworks/MediaAnalysis.framework/Versions/A/mediaanalysisd",
+          "cpu_pct": 98.7,
+          "noisy": true
+        },
+        {
+          "command": "/Applications/Usage.app/Contents/MacOS/Usage",
+          "cpu_pct": 20.8,
+          "noisy": false
+        },
+        {
+          "command": "sshd-session: mattmireles [priv]",
+          "cpu_pct": 17.1,
+          "noisy": false
+        },
+        {
+          "command": "/System/Library/Frameworks/CoreServices.framework/Frameworks/Metadata.framework/Versions/A/Support/mds_stores",
+          "cpu_pct": 16.4,
+          "noisy": true
+        },
+        {
+          "command": "/System/Library/PrivateFrameworks/SkyLight.framework/Resources/WindowServer",
+          "cpu_pct": 6.2,
+          "noisy": false
+        },
+        {
+          "command": "/usr/libexec/opendirectoryd",
+          "cpu_pct": 4.0,
+          "noisy": false
+        },
+        {
+          "command": "/Applications/Botnet.app/Contents/MacOS/Brave Browser",
+          "cpu_pct": 3.8,
+          "noisy": false
+        },
+        {
+          "command": "/Applications/Botnet.app/Contents/Frameworks/Brave Browser Framework.framework/Versions/147.1.89.132/Helpers/Brave Browser Helper.app/Contents/MacOS/Brave Browser Helper",
+          "cpu_pct": 3.5,
+          "noisy": false
+        },
+        {
+          "command": "/Users/mattmireles/Library/Application Support/Usage Helper/Usage Helper.app/Contents/MacOS/Usage Helper",
+          "cpu_pct": 3.1,
+          "noisy": false
+        },
+        {
+          "command": "/Applications/Botnet.app/Contents/Frameworks/Brave Browser Framework.framework/Versions/147.1.89.132/Helpers/Brave Browser Helper (Renderer).app/Contents/MacOS/Brave Browser Helper (Renderer)",
+          "cpu_pct": 2.9,
+          "noisy": false
+        },
+        {
+          "command": "/usr/libexec/lsd",
+          "cpu_pct": 2.7,
+          "noisy": false
+        },
+        {
+          "command": "/usr/libexec/syspolicyd",
+          "cpu_pct": 2.4,
+          "noisy": false
+        }
+      ],
+      "quiet": false,
+      "target": "mattmireles@irvine-m1.local",
+      "thresholds": {
+        "max_load_1": 1.0,
+        "max_noisy_cpu_pct": 10.0,
+        "noisy_process_patterns": [
+          "mds",
+          "mdworker",
+          "mediaanalysisd",
+          "mediaanalysisd-access",
+          "photoanalysisd"
+        ]
+      },
+      "uptime": " 7:12  up 6 days, 16:12, 1 user, load averages: 2.08 2.56 2.80"
+    },
+    {
+      "blockers": [
+        "load1 3.87 exceeds 1.00",
+        "/System/Library/Frameworks/CoreServices.framework/Frameworks/Metadata.framework/Versions/A/Support/mds_stores at 94.1% CPU",
+        "/System/Library/PrivateFrameworks/MediaAnalysis.framework/Versions/A/mediaanalysisd at 45.9% CPU"
+      ],
+      "load": {
+        "fifteen_minutes": 3.77,
+        "five_minutes": 3.83,
+        "one_minute": 3.87
+      },
+      "machine_id": "m2-air",
+      "ok": true,
+      "processes": [
+        {
+          "command": "/System/Library/Frameworks/CoreServices.framework/Frameworks/Metadata.framework/Versions/A/Support/mds_stores",
+          "cpu_pct": 94.1,
+          "noisy": true
+        },
+        {
+          "command": "/Applications/Usage.app/Contents/MacOS/Usage",
+          "cpu_pct": 48.6,
+          "noisy": false
+        },
+        {
+          "command": "/System/Library/PrivateFrameworks/MediaAnalysis.framework/Versions/A/mediaanalysisd",
+          "cpu_pct": 45.9,
+          "noisy": true
+        },
+        {
+          "command": "sshd-session: mattmireles [priv]",
+          "cpu_pct": 11.5,
+          "noisy": false
+        },
+        {
+          "command": "/Applications/Botnet.app/Contents/MacOS/Brave Browser",
+          "cpu_pct": 8.1,
+          "noisy": false
+        },
+        {
+          "command": "/Applications/Botnet.app/Contents/Frameworks/Brave Browser Framework.framework/Versions/148.1.90.122/Helpers/Brave Browser Helper.app/Contents/MacOS/Brave Browser Helper",
+          "cpu_pct": 7.2,
+          "noisy": false
+        },
+        {
+          "command": "/Applications/Usage.app/Contents/MacOS/Usage Menu.app/Contents/MacOS/Usage Menu",
+          "cpu_pct": 6.1,
+          "noisy": false
+        },
+        {
+          "command": "/Applications/Botnet.app/Contents/Frameworks/Brave Browser Framework.framework/Versions/148.1.90.122/Helpers/Brave Browser Helper (Renderer).app/Contents/MacOS/Brave Browser Helper (Renderer)",
+          "cpu_pct": 6.1,
+          "noisy": false
+        },
+        {
+          "command": "/System/Library/PrivateFrameworks/MediaAnalysisAccess.framework/Versions/A/XPCServices/mediaanalysisd-access.xpc/Contents/MacOS/mediaanalysisd-access",
+          "cpu_pct": 5.2,
+          "noisy": true
+        },
+        {
+          "command": "/usr/libexec/syspolicyd",
+          "cpu_pct": 3.9,
+          "noisy": false
+        },
+        {
+          "command": "/usr/sbin/system_profiler",
+          "cpu_pct": 2.8,
+          "noisy": false
+        },
+        {
+          "command": "/System/Library/PrivateFrameworks/TCC.framework/Support/tccd",
+          "cpu_pct": 2.2,
+          "noisy": false
+        }
+      ],
+      "quiet": false,
+      "target": "mattmireles@m2-air.local",
+      "thresholds": {
+        "max_load_1": 1.0,
+        "max_noisy_cpu_pct": 10.0,
+        "noisy_process_patterns": [
+          "mds",
+          "mdworker",
+          "mediaanalysisd",
+          "mediaanalysisd-access",
+          "photoanalysisd"
+        ]
+      },
+      "uptime": " 7:12  up 8 days,  8:49, 1 user, load averages: 3.87 3.83 3.77"
+    }
+  ]
+}

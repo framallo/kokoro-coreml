@@ -20,6 +20,7 @@ laishere on Irvine M1 short and medium buckets. The live frontier is tracked by:
 - `outputs/external_bakeoff/irvine_next_targets.md`
 - `outputs/external_bakeoff/irvine_3s_placement_target.md`
 - `outputs/external_bakeoff/candidate_frontier_matrix.md`
+- `outputs/external_bakeoff/remote_host_quiet_latest.md`
 - `README/Guides/apple-silicon/Kokoro-M1-graph-surface-target.md`
 
 For `irvine-m1/3s`, the warmed profile gap is:
@@ -137,6 +138,10 @@ any new strict candidate before changing the research prompt. The candidate
 frontier matrix at `outputs/external_bakeoff/candidate_frontier_matrix.md`
 summarizes the current strict wins, strict rejections, quality-fail speed
 branches, and iPhone launch gate; update it whenever a candidate changes status.
+Before any lower-end Mac promotion run, regenerate
+`outputs/external_bakeoff/remote_host_quiet_latest.md` with
+`scripts/external_bakeoff/check_remote_host_quiet.py` and run timing only when
+the target host reports `quiet=yes`.
 
 ## High-Value Directions
 
