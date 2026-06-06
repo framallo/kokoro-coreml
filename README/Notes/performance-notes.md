@@ -667,12 +667,27 @@ decoder-plus-generator body, while Config F's isolated generator starts after
 
 | Machine | Input | Config F full | Config F generator | Laishere chain | Laishere noise+vocoder+tail | Interpretation |
 | --- | --- | ---: | ---: | ---: | ---: | --- |
-| m2-studio | 3s | 60.2 ms | 27.2 ms | 104.5 ms | 90.4 ms | Config F wins decisively; laishere's split chain is slower here. |
-| m2-studio | 7s | 110.5 ms | 59.5 ms | 192.7 ms | 168.0 ms | Config F wins decisively; no laishere generator advantage. |
-| m2-air | 3s | 151.7 ms | 120.1 ms | 153.0 ms | 123.7 ms | Practical tie despite laishere's broader boundary. |
-| m2-air | 7s | 335.0 ms | 277.6 ms | 334.7 ms | 279.0 ms | Practical tie; old laishere lead was measurement-scale, not a clear graph win. |
-| irvine-m1 | 3s | 239.2 ms | 168.9 ms | 195.0 ms | 145.1 ms | Laishere wins; about half the gap is source/vocoder/tail and half upstream. |
-| irvine-m1 | 7s | 510.2 ms | 384.7 ms | 444.2 ms | 340.4 ms | Laishere wins; the M1 gap is real, but the split boundary is broader than our isolated generator. |
+| m2-studio | 3s | 55.1 ms | 27.2 ms | 104.5 ms | 90.4 ms | Config F wins decisively; laishere's split chain is slower here. |
+| m2-studio | 7s | 103.8 ms | 59.5 ms | 192.7 ms | 168.0 ms | Config F wins decisively; no laishere generator advantage. |
+| m2-air | 3s | 148.0 ms | 120.1 ms | 153.0 ms | 123.7 ms | Practical tie despite laishere's broader boundary. |
+| m2-air | 7s | 330.7 ms | 277.6 ms | 334.7 ms | 279.0 ms | Practical tie; old laishere lead was measurement-scale, not a clear graph win. |
+| irvine-m1 | 3s | 233.6 ms | 168.9 ms | 195.0 ms | 145.1 ms | Laishere wins; about half the gap is source/vocoder/tail and half upstream. |
+| irvine-m1 | 7s | 492.7 ms | 384.7 ms | 444.2 ms | 340.4 ms | Laishere wins; the M1 gap is real, but the split boundary is broader than our isolated generator. |
+
+Fresh Irvine current-vs-laishere deltas show where the remaining lower-end Mac
+loss lives. `Config F non-generator` is the current full warmed median minus
+`t_coreml_predict_s` from `results_config_f_reference_irvine-m1_vector_noise_batch.json`.
+`Laishere other+prep` is laishere chain time outside `noise+vocoder+tail` plus
+the separately reported feed-preparation time, so this row is intentionally
+conservative against laishere's narrower benchmark boundary.
+
+| Input | Config F full | Config F generator | Config F non-generator | Laishere chain | Laishere noise+vocoder+tail | Laishere other+prep |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: |
+| 3s | 233.6 ms | 167.0 ms | 66.6 ms | 195.0 ms | 145.1 ms | 54.0 ms |
+| 7s | 492.7 ms | 388.7 ms | 103.9 ms | 444.2 ms | 340.4 ms | 106.7 ms |
+| 10s | 685.5 ms | 549.9 ms | 135.6 ms | 644.9 ms | 492.7 ms | 155.9 ms |
+| 15s | 1014.9 ms | 823.1 ms | 191.9 ms | 990.6 ms | 779.9 ms | 215.3 ms |
+| 30s | 1959.4 ms | 1631.6 ms | 327.8 ms | 2292.3 ms | 1799.7 ms | 501.4 ms |
 
 This answers the "how is laishere/MLX faster?" question more narrowly. MLX is
 not faster after warmed Config F correction. Laishere is not faster on M2 Studio
@@ -1481,9 +1496,10 @@ excluded. Config F now beats laishere on every M2 Studio bucket, M2 Air `30s`,
 and M1 `30s`. Soniqo is a useful iOS/Core ML comparator, but its public artifact
 emits 5s audio for the long buckets, so its long-bucket latency cannot prove
 full-duration parity. The connected iPhone currently has Soniqo-on-device
-results only; Config F has a dedicated iOS runner scaffold, but local
-Xcode/SwiftBuild stalls before producing an installable app, so Config F has not
-yet been benchmarked on that iPhone.
+results only. Config F now has a manually built and signed iOS runner installed
+as `com.kokoro.externalbakeoff.ConfigFIOSRunnerManual`, bypassing the local
+Xcode/SwiftBuild stall, but `devicectl` launch is still denied while the device
+is locked. Config F has therefore still not produced warmed iPhone timings.
 
 The next optimization target is clear: make the generator stage faster on M2 Air
 and M1, then rerun against laishere's chain-only boundary and an on-device
