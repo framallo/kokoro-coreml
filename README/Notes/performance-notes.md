@@ -911,6 +911,29 @@ partial NE placement of our strict HAR-post graph will beat laishere. The target
 is narrower: reproduce laishere's useful mixed plan without the synchronization
 penalty and without changing the Swift source/HAR quality contract.
 
+`profile_laishere_stages.py` now accepts `--noise-compute-units`,
+`--vocoder-compute-units`, and `--tail-compute-units` for controlled stage
+policy ablations while preserving laishere's public policy by default. A
+same-window Irvine M1 ablation over every current Irvine loss bucket confirms
+that laishere's vocoder-side compute policy is causal, not just decorative
+placement metadata. Keeping Albert/Post/Alignment/Prosody on `cpuAndNeuralEngine`
+but forcing Noise/Vocoder/Tail to `cpuAndGPU` leaves Noise mostly unchanged and
+makes Vocoder much slower:
+
+| Input | Public policy total | CPU+GPU N/V/T total | Total delta | Public vocoder | CPU+GPU vocoder | Vocoder delta |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: |
+| 3s | `208.5 ms` | `331.2 ms` | `+122.7 ms` | `84.2 ms` | `202.2 ms` | `+118.0 ms` |
+| 7s | `448.6 ms` | `679.2 ms` | `+230.6 ms` | `216.1 ms` | `417.5 ms` | `+201.4 ms` |
+| 10s | `661.0 ms` | `913.9 ms` | `+252.9 ms` | `330.0 ms` | `555.8 ms` | `+225.8 ms` |
+| 15s | `1020.4 ms` | `1270.4 ms` | `+250.0 ms` | `544.4 ms` | `793.8 ms` | `+249.4 ms` |
+
+This sharpens the next implementation target: do not chase MLX or generic
+Core ML cleanup. The lower-end Mac gap is specifically a useful laishere
+`KokoroVocoder` mixed CPU/NE plan at its broader decoder-plus-vocoder boundary.
+Our quality-safe HAR-post graph must either be reshaped into a similarly useful
+mixed plan without the `.all` synchronization penalty, or we need a different
+quality-preserving source/body contract.
+
 This answers the "how is laishere/MLX faster?" question more narrowly. MLX is
 not faster after warmed Config F correction. Laishere is not faster on M2 Studio
 and is effectively tied on M2 Air when the stage-profile boundary is rerun. The

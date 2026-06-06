@@ -5,6 +5,10 @@ from pathlib import Path
 
 from scripts.external_bakeoff.create_listening_review import _write_decisions_csv
 from scripts.external_bakeoff.ingest_ios_runner_result import _ingest_records
+from scripts.external_bakeoff.run_laishere_kokoro_coreml import (
+    DEFAULT_COMPUTE_UNITS as LAISHERE_DEFAULT_COMPUTE_UNITS,
+    _compute_units as laishere_compute_units,
+)
 from scripts.external_bakeoff.schema import (
     RUNTIME_BUCKETS,
     result_file_payload,
@@ -56,6 +60,17 @@ from scripts.summarize_optimization_candidates import (
 from scripts.validate_f0_source_listening_decisions import validate_rows as validate_f0_rows
 
 
+class _FakeComputeUnit:
+    ALL = "ALL"
+    CPU_AND_GPU = "CPU_AND_GPU"
+    CPU_AND_NE = "CPU_AND_NE"
+    CPU_ONLY = "CPU_ONLY"
+
+
+class _FakeCoreMLTools:
+    ComputeUnit = _FakeComputeUnit
+
+
 def _manifest() -> dict:
     inputs = {}
     for index, key in enumerate(RUNTIME_BUCKETS, start=1):
@@ -100,6 +115,22 @@ def _ios_payload(manifest: dict) -> dict:
         "warm_iterations": 5,
         "records": records,
     }
+
+
+def test_laishere_compute_unit_policy_defaults_and_aliases():
+    assert LAISHERE_DEFAULT_COMPUTE_UNITS == {
+        "albert": "cpuAndNeuralEngine",
+        "post_albert": "cpuAndNeuralEngine",
+        "alignment": "cpuAndNeuralEngine",
+        "prosody": "cpuAndNeuralEngine",
+        "noise": "all",
+        "vocoder": "cpuAndNeuralEngine",
+        "tail": "all",
+    }
+    assert laishere_compute_units(_FakeCoreMLTools, "all") == "ALL"
+    assert laishere_compute_units(_FakeCoreMLTools, "CPU_AND_GPU") == "CPU_AND_GPU"
+    assert laishere_compute_units(_FakeCoreMLTools, "cpu-and-ne") == "CPU_AND_NE"
+    assert laishere_compute_units(_FakeCoreMLTools, "cpuOnly") == "CPU_ONLY"
 
 
 def test_ingest_ios_runner_result_validates_manifest_and_schema():
