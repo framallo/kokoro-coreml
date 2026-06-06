@@ -26,8 +26,10 @@ These numbers do **not** include:
 ## External Bakeoff: surgical Core ML vs MLX and iOS/Core ML Kokoro
 
 **Collected:** 2026-06-05
-**Status:** Complete; signed iPhone execution ingested, waveform sanity passed,
-human listening decisions recorded, and final completion verifier passed.
+**Status:** Complete for warmed Mac external bakeoff and Soniqo iPhone
+comparator ingestion; Config F iPhone timings remain absent until the installed
+manual runner can launch on the unlocked device. Waveform sanity passed, human
+listening decisions are recorded, and the final completion verifier passes.
 
 This bakeoff compares the current Swift + Core ML Config F reference against
 popular Apple Silicon Kokoro implementations:
@@ -1466,7 +1468,7 @@ After filling the CSV, run
 before any latency cell is interpreted as quality parity.
 The overall plan-completion check is
 `python scripts/external_bakeoff/verify_external_bakeoff_completion.py`; it
-passes with `result_record_count=65`, `ios_preflight_ok=true`, and
+passes with `result_record_count=143`, `ios_preflight_ok=true`, and
 `decisions={'pass': 57}`.
 
 Known caveats:
