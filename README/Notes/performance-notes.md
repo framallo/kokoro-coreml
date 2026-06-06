@@ -112,18 +112,22 @@ device execution evidence for the public Soniqo artifact, not full-duration
 7s/10s/15s/30s parity evidence.
 
 Config F now has a dedicated physical-device runner scaffold at
-`scripts/external_bakeoff/ConfigFIOSRunner/`. It uses the shared
-`KokoroPipeline` Swift package, exact-duration model discovery, staged compute
-units, and the five runtime buckets. `xcodegen generate` succeeds and
-`scripts/prepare_swift_bench_inputs.py` now refreshes the small ignored input
-resources from `runtime_input_manifest.json` without loading the heavy pipeline.
-The first signed iPhone build attempt did not reach Swift compilation or Core ML
-model compilation: `xcodebuild` stalled idle in build-description creation with
-only `SWBBuildService` alive and no compiler/resource subprocesses. A simulator
-compile through XcodeBuildMCP reproduced the same idle `xcodebuild` +
-`SWBBuildService` stall before Swift/resource compilation. Treat this as a
-build-system/project packaging blocker, not an on-device 30s model compile
-timeout. There are still no Config F iPhone warmed inference timings.
+`scripts/external_bakeoff/ConfigFIOSRunner/`. It uses exact-duration model
+discovery, staged compute units, and the five runtime buckets. The runner now
+compiles the `KokoroPipeline` Swift sources directly into the app target instead
+of depending on the local Swift package, and it copies benchmark `.mlpackage`
+and JSON inputs with a post-compile script rather than asking Xcode's resource
+build phase to model the packages.
+
+`xcodegen generate` succeeds. A direct Swift frontend check against the iOS
+simulator SDK also succeeds for the runner plus `KokoroPipeline` sources. The
+remaining build failure is earlier than Swift compilation, resource copying, Core
+ML model compilation, or device signing: `xcodebuild` stalls idle in
+build-description creation with only `SWBBuildService` alive. The same stall
+reproduced for a minimal one-file XcodeGen iOS app, so treat this as a local
+Xcode/SwiftBuild environment blocker rather than a Config F source, packaging,
+signing, or on-device 30s model compile timeout. There are still no Config F
+iPhone warmed inference timings.
 
 Whisper, ASR, VAD, playback, and echo-demo dependencies are not part of this
 bakeoff boundary. The iOS runner is intentionally Kokoro TTS only.
@@ -1357,7 +1361,9 @@ excluded. Config F now beats laishere on every M2 Studio bucket, M2 Air `30s`,
 and M1 `30s`. Soniqo is a useful iOS/Core ML comparator, but its public artifact
 emits 5s audio for the long buckets, so its long-bucket latency cannot prove
 full-duration parity. The connected iPhone currently has Soniqo-on-device
-results only; Config F has not yet been ported and benchmarked on that iPhone.
+results only; Config F has a dedicated iOS runner scaffold, but local
+Xcode/SwiftBuild stalls before producing an installable app, so Config F has not
+yet been benchmarked on that iPhone.
 
 The next optimization target is clear: make the generator stage faster on M2 Air
 and M1, then rerun against laishere's chain-only boundary and an on-device

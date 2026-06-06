@@ -1,5 +1,4 @@
 import CoreML
-import KokoroPipeline
 import SwiftUI
 import UIKit
 
