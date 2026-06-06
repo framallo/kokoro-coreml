@@ -15,6 +15,7 @@ The remaining real loss is not MLX. After warmed-inference correction, Config F
 beats or ties MLX on the validated Mac cells. The remaining strict competitor is
 laishere on Irvine M1 short and medium buckets. The live frontier is tracked by:
 
+- `outputs/external_bakeoff/goal_frontier_status.md`
 - `outputs/external_bakeoff/frontier_freshness.md`
 - `outputs/external_bakeoff/irvine_next_targets.md`
 - `outputs/external_bakeoff/irvine_3s_placement_target.md`
@@ -67,6 +68,10 @@ Saved Irvine M1 `3s` strict-equivalent results:
 | Generator stage split | `-15.5 ms` | Split overhead exceeds graph savings. |
 | Exact decoder+vocoder split | `-24.8 ms` CPU+GPU, `-138.3 ms` CPU+NE | Boundary too broad or sync-heavy. |
 | Exact iOS17/native-IN decoder+vocoder split | `-29.3 ms` CPU+GPU, `-116.3 ms` CPU+NE | Matching laishere's visible surface is insufficient. |
+| Exact decoder+vocoder split with fp16 body inputs | local `3s` `-10.1 ms` | Halving `x_source_*` transfer made body slower. |
+| Style-specialized fused generator | Irvine `3s` `-3.0 ms`; M2 Air `3s` `-2.2 ms` | Freezing `af_heart` AdaIN projections is slower remotely. |
+| Native-IN style-specialized fused generator | local `3s` `+0.07 ms`; CPU+NE fails | Noise-sized, not a frontier candidate. |
+| Native-IN style-specialized fused generator + HAR trim | local `3s` `+0.06 ms` | Strict but only `0.22%`; do not promote to Irvine. |
 | HAR-source fused strict path | `-22.9 ms` CPU+GPU, `-163.8 ms` CPU+NE | Source/STFT boundary not a win. |
 
 Do not spend research budget on another broad split of the current
@@ -204,6 +209,11 @@ Do not prioritize these unless new evidence changes the premises:
 - iOS17/spec8-only changes. Helpful for metadata matching, not sufficient.
 - More exact decoder+vocoder multi-package splits. The matching mixed CPU/NE
   body exists and still loses.
+- fp16 body inputs for the exact decoder+vocoder split. Local strict quality
+  passed, but candidate total regressed from `30.242 ms` to `40.316 ms`.
+- Style specialization for the fixed `af_heart` voice. Plain style-specialized,
+  native-IN style-specialized, and native-IN style-specialized plus HAR trim are
+  all slower or noise-sized and do not justify Irvine timing.
 - More broad generator noise/stage splits. The extra Core ML call boundary is
   currently more expensive than the saved graph work.
 
