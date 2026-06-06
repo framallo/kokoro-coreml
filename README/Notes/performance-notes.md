@@ -1019,6 +1019,8 @@ uv run --no-sync python scripts/probe_har_source_fused.py \
 | fused `har_source`, 3s `atan_manual` fp32 + Nyquist input + HAR pad 28801 | 28.7 ms | 29.3 ms | corr 0.999991, SNR 47.75 dB | quality-safe but slower |
 | fused `har_source`, 7s fp16 | 60.9 ms | 51.2 ms | corr 0.979271, SNR 13.06 dB | speed-positive, blocked on Core ML parity |
 | fused `har_source`, 7s `atan_manual` fp32 + Nyquist input + HAR pad 67201 | 57.6 ms | 60.2 ms | corr 0.999993, SNR 49.15 dB | quality-safe but slower |
+| fused `har_source`, 10s `atan_manual` fp32 + Nyquist input + HAR pad 96001 | 78.3 ms | 82.3 ms | corr 0.999994, SNR 49.87 dB | quality-safe but slower |
+| fused `har_source`, 30s `atan_manual` fp32 + Nyquist input + HAR pad 288001 | 218.8 ms | 238.8 ms | corr 0.999992, SNR 48.43 dB | quality-safe but slower |
 
 Interpretation: exact dumped source improves quality over the F0-source path,
 but the Core ML/STFT source-boundary path still fails strict parity. The staged
@@ -1026,7 +1028,11 @@ source split has too little speed margin once Swift source generation is
 counted. Feeding the dumped Swift Nyquist phase as a tiny extra input closes the
 raw phase convention gap only when the recomputed HAR is padded back to the
 shipping geometry; those padded 3s/7s packages pass the strict waveform gate but
-are slower than the existing fused generator. The fused source graph therefore
+are slower than the existing fused generator. A 10s/30s continuation confirms
+the same production decision: release Swift benchmark tests measure the removed
+STFT-only work at only ~2 ms for 10s and ~6 ms for 30s, while the quality-safe
+fused source model is ~4 ms slower at 10s and ~20 ms slower at 30s before adding
+the still-required Swift source generation. The fused source graph therefore
 has no current production path: native Core ML `atan2` conversion is broken,
 natural geometry is fast but quality-negative, and padded quality-safe geometry
 loses the speed edge.
