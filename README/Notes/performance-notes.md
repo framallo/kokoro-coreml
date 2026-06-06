@@ -428,13 +428,13 @@ uv run --no-sync python scripts/summarize_optimization_candidates.py \
   --json-output outputs/optimization_candidate_frontier.json
 ```
 
-Current scan result across `97` saved probe reports:
+Current scan result across `98` saved probe reports:
 
 | Category | Count | Interpretation |
 | --- | ---: | --- |
 | Quality-safe speed-positive candidates | `9` | All are noise-sized relative to the current frontier. |
 | Quality-safe material candidates (`>=3%`) | `0` | No saved strict-equivalent candidate should be promoted as the next fix. |
-| Speed-positive quality-fail candidates | `29` | The speed lives mostly in F0/source-shape branches that still fail parity. |
+| Speed-positive quality-fail candidates | `30` | The speed lives mostly in F0/source-shape branches that still fail parity. |
 
 Largest quality-safe speed-positive rows:
 
@@ -1061,6 +1061,7 @@ At `7s`, the natural-ASR export uses `x_source_0=[1,256,5400]` and
 | m2-studio | padded `asr=400`, `F0=800`, `acos` phase | 81.0 ms | 73.1 ms | noise 16.8 ms, body 53.8 ms, tail 2.6 ms | corr 0.968904, SNR 12.57 dB | recorded in `report_cos_resblock_phase_acos.json` | faster, better quality than padded, still not strict parity |
 | irvine-m1 | natural `asr=384`, `F0=768` | 563.9 ms | 487.1 ms | noise 122.8 ms, body 353.5 ms, tail 10.2 ms | corr 0.867049, SNR 6.55 dB | not rerun | faster, reject for quality |
 | irvine-m1 | padded `asr=400`, `F0=800` | 565.7 ms | 509.0 ms | noise 127.5 ms, body 369.6 ms, tail 11.1 ms | corr 0.955223, SNR 10.87 dB | not rerun | faster, quality closer but not parity |
+| irvine-m1 | padded `asr=400`, `F0=800`, `acos` phase | 562.9 ms | 506.9 ms | noise 127.1 ms, body 369.4 ms, tail 10.4 ms | corr 0.968961, SNR 12.58 dB | recorded in `remote_reports/report_f0_noise_phase_acos_10s_irvine.json` | faster, better quality than padded, still not strict parity and still not enough for laishere 10s |
 | m2-studio | natural `asr=556`, `F0=1112` | 129.9 ms | 101.4 ms | noise 23.8 ms, body 74.5 ms, tail 3.2 ms | corr 0.838603, SNR 5.73 dB | corr 0.818057, SNR 4.78 dB | faster, reject for quality |
 | m2-studio | padded `asr=600`, `F0=1200` | 130.0 ms | 109.2 ms | noise 25.6 ms, body 79.5 ms, tail 3.6 ms | corr 0.956701, SNR 10.99 dB | corr 0.949135, SNR 10.29 dB | faster, quality closer but not parity |
 | m2-studio | padded `asr=600`, `F0=1200`, `acos` phase | 122.7 ms | 102.0 ms | noise 24.0 ms, body 74.9 ms, tail 3.2 ms | corr 0.969391, SNR 12.60 dB | recorded in `report_cos_resblock_phase_acos.json` | faster, better quality than padded, still not strict parity |
@@ -1080,6 +1081,13 @@ must either make the F0-noise path match the current Swift HnSF/HAR source
 closely enough, or prove through listening review that the different source is
 acceptable. Until then, this is a research target rather than a production
 replacement.
+
+The Irvine M1 10s `acos` row is the direct check against one remaining real
+frontier loss. It removes about `56 ms` from the measured
+decoder-pre+source/vocoder stack, but the current full Config F 10s frontier row
+is `685.5 ms` versus laishere at `593.9 ms`; substituting this branch would
+estimate roughly `629.5 ms` before any other changes. That is still slower than
+laishere, and the row is not quality-safe.
 
 #### F0-source listening pack
 
