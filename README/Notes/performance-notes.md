@@ -586,6 +586,17 @@ split: its palettized vocoder emits an intermediate audio anchor that is
 discarded, while a separate tail emits the listener-facing waveform. Do not
 ship or rank palettized fused-generator packages without a fresh quality gate.
 
+Linear weight quantization is also rejected for the final-waveform generator.
+`scripts/probe_generator_cos_snake.py --linear-quantize int8` compressed the
+plain fixed-shape 3s candidate from `39.7 MB` to `20.2 MB` without changing the
+visible MIL op histogram, but both macOS13 and iOS17 CPU+GPU runs crashed during
+runtime specialization with `MPSGraphExecutable.mm:5070: failed assertion
+'Error: MLIR pass manager failed'`. The saved package loads under CPU-only, but
+the CPU-only row is not shippable: `93.27 ms` vs `97.43 ms` fused CPU-only and
+fails parity (`corr 0.999051`, SNR `27.62 dB`, max abs `0.03387`). Compression
+can reduce bundle size, but it is not the missing lower-end Mac speed path for
+our final-waveform generator.
+
 The toolchain-only hypothesis is also rejected for the current fused generator.
 `scripts/probe_generator_cos_snake.py` now records `coremltools`, `torch`, and
 `numpy` versions in its JSON reports, so the CT8/CT9 comparison is reproducible.

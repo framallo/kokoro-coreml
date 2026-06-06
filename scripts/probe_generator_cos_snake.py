@@ -86,6 +86,24 @@ def _maybe_palettize(mlmodel: Any, enabled: bool) -> Any:
     return cto.palettize_weights(mlmodel, pal_config)
 
 
+def _maybe_linear_quantize(mlmodel: Any, dtype: str | None) -> Any:
+    """Optionally apply Core ML linear weight quantization."""
+
+    if not dtype:
+        return mlmodel
+
+    import coremltools.optimize.coreml as cto
+
+    quant_config = cto.OptimizationConfig(
+        global_config=cto.OpLinearQuantizerConfig(
+            mode="linear_symmetric",
+            dtype=dtype,
+            granularity="per_channel",
+        )
+    )
+    return cto.linear_quantize_weights(mlmodel, quant_config)
+
+
 def _patch_broadcast_adain() -> None:
     """Patch AdaIN1d to rely on broadcast instead of explicit expand/tile."""
 
@@ -214,6 +232,7 @@ def _export_package(
     deployment_target: str,
     native_instance_norm_adain: bool,
     palettize: bool,
+    linear_quantize: str | None,
     input_shape_mode: str,
 ) -> dict[str, Any]:
     import coremltools as ct
@@ -259,6 +278,7 @@ def _export_package(
         compute_units=ct.ComputeUnit.ALL,
     )
     mlmodel = _maybe_palettize(mlmodel, palettize)
+    mlmodel = _maybe_linear_quantize(mlmodel, linear_quantize)
     package.parent.mkdir(parents=True, exist_ok=True)
     _remove_existing_package(package)
     mlmodel.save(str(package))
@@ -271,6 +291,7 @@ def _export_package(
         "native_instance_norm_adain": bool(native_instance_norm_adain),
         "deployment_target": deployment_target,
         "palettize": bool(palettize),
+        "linear_quantize": linear_quantize,
         "input_shape_mode": input_shape_mode,
         "removed_dropouts": removed_dropouts,
         "traced_samples": traced_samples,
@@ -376,6 +397,8 @@ def run(args: argparse.Namespace) -> dict[str, Any]:
         label = f"{label}_native_in"
     if args.palettize:
         label = f"{label}_pal8"
+    if args.linear_quantize:
+        label = f"{label}_w{args.linear_quantize}"
     if args.input_shape_mode != "fixed":
         label = f"{label}_{args.input_shape_mode}_inputs"
     if args.deployment_target.lower() != "macos13":
@@ -401,6 +424,7 @@ def run(args: argparse.Namespace) -> dict[str, Any]:
             args.deployment_target,
             args.native_instance_norm_adain,
             args.palettize,
+            args.linear_quantize,
             args.input_shape_mode,
         )
 
@@ -425,6 +449,7 @@ def run(args: argparse.Namespace) -> dict[str, Any]:
         "native_instance_norm_adain": bool(args.native_instance_norm_adain),
         "deployment_target": args.deployment_target,
         "palettize": bool(args.palettize),
+        "linear_quantize": args.linear_quantize,
         "input_shape_mode": args.input_shape_mode,
         "export": export_report,
         "benchmark": benchmark,
@@ -480,6 +505,12 @@ def main() -> None:
         "--palettize",
         action="store_true",
         help="Apply 8-bit k-means weight palettization to the candidate package.",
+    )
+    parser.add_argument(
+        "--linear-quantize",
+        choices=("int8", "uint8", "int4", "uint4"),
+        default=None,
+        help="Apply Core ML linear weight quantization to the candidate package.",
     )
     parser.add_argument(
         "--input-shape-mode",

@@ -254,6 +254,18 @@ sudo powermetrics -i 1000 --samplers ane
   Laishere's palettized vocoder output is discarded before its separate tail,
   so its quantization error does not map directly onto our fused final
   waveform output.
+- **Linear-quantized fused generator rejected:** `scripts/probe_generator_cos_snake.py`
+  now also supports Core ML linear weight quantization via
+  `--linear-quantize {int8,uint8,int4,uint4}`. A plain fixed-shape 3s int8
+  candidate compressed the package from `39.7 MB` to `20.2 MB` while preserving
+  the same visible MIL op histogram (`2207` ops, `51` conv, `4` conv_transpose,
+  `88` reduce_mean, `96` tile, `50` sin). Both macOS13 and iOS17 CPU+GPU runs
+  crashed during runtime specialization with
+  `MPSGraphExecutable.mm:5070: failed assertion 'Error: MLIR pass manager failed'`.
+  The saved package loads under CPU-only, but CPU-only predict is slow
+  (`93.27 ms` vs `97.43 ms` fused CPU-only) and fails the waveform gate
+  (`corr 0.999051`, SNR `27.62 dB`, max abs `0.03387`). This rejects Core ML
+  linear weight compression for the final-waveform generator path.
 - **coremltools 9 conversion-only path rejected:** the probe now records
   conversion toolchain versions. A plain iOS17 fused-generator export with
   `coremltools==9.0` preserved the same visible MIL surface as CT8 (`2207`
