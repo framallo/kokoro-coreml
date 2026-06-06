@@ -354,20 +354,24 @@ sudo powermetrics -i 1000 --samplers ane
   (`asr=120`, `F0=240`) improved parity (corr `0.931896`, SNR `9.19 dB`) but
   lost speed (`33.7 ms` vs `33.5 ms`). On Irvine M1 natural shape, the
   candidate was materially faster (`153.3 ms` vs `172.0 ms`) but failed the
-  same parity threshold (corr `0.814046`, SNR `5.08 dB`). The PyTorch candidate
-  metrics are similarly poor (`corr ~0.804`, SNR `~4.54 dB` for natural shape),
-  so the issue is inherent source-path drift rather than Core ML conversion
-  drift. Next work must recover or validate audio quality before any runtime
-  integration.
+  same parity threshold (corr `0.814046`, SNR `5.08 dB`). The 7s probe keeps the
+  speed-positive signal: M2 Studio natural shape is `56.5 ms` vs `63.1 ms`
+  (`+10.4%`), M2 Studio padded is `58.8 ms` vs `63.0 ms` (`+6.7%`), Irvine M1
+  natural is `349.8 ms` vs `398.4 ms` (`+12.2%`), and Irvine M1 padded is
+  `358.9 ms` vs `390.8 ms` (`+8.2%`). The PyTorch candidate metrics are
+  similarly poor for natural shape (`corr ~0.796`, SNR `~4.33-4.54 dB`), so the
+  issue is inherent source-path drift rather than Core ML conversion drift. Next
+  work must recover or validate audio quality before any runtime integration.
 - **F0-source candidates are listening-ready but not approved:** `scripts/create_f0_source_listening_pack.py`
   renders saved F0-source probe reports into WAVs, waveform plots, quality
-  reports, and fillable listening reviews without ASR/Whisper. The local 3s
-  natural and padded F0-source candidates both pass the machine waveform-health
-  gate as `needs_listening`, not `reject_without_listening`, but strict waveform
-  parity still rejects them (natural candidate vs baseline corr `0.814034`, SNR
-  `5.08 dB`; padded corr `0.931895`, SNR `9.19 dB`). Treat this as a human
-  listening gate or source-formulation research path, not a runtime integration
-  approval.
+  reports, and fillable listening reviews without ASR/Whisper. The local 3s and
+  7s natural and padded F0-source candidates all pass the machine
+  waveform-health gate as `needs_listening`, not `reject_without_listening`, but
+  strict waveform parity still rejects them (`3s` natural corr `0.814034`, SNR
+  `5.08 dB`; `3s` padded corr `0.931895`, SNR `9.19 dB`; `7s` natural corr
+  `0.796791`, SNR `4.77 dB`; `7s` padded corr `0.962251`, SNR `11.51 dB`).
+  Treat this as a human listening gate or source-formulation research path, not
+  a runtime integration approval.
 - **HAR input-tail trimming is too small:** `scripts/probe_generator_har_input_trim.py`
   keeps the bucketed `x_pre` shape and current Swift HAR source, but exports a
   temporary `GeneratorFromHar` with a shorter static `har` axis. The aggressive

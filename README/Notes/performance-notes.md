@@ -731,15 +731,22 @@ reference so conversion drift can be separated from inherent path drift.
 The source-shape reduction is real: local `3s` natural-ASR export produces
 `x_source_0=[1,256,2240]` and `x_source_1=[1,128,13441]`, compared with the
 HAR-noise split's `x_source_0=[1,256,4800]` and `x_source_1=[1,128,28801]`.
+At `7s`, the natural-ASR export uses `x_source_0=[1,256,5400]` and
+`x_source_1=[1,128,32401]`; padded uses `x_source_0=[1,256,5600]` and
+`x_source_1=[1,128,33601]`.
 
 | Machine | Shape | Baseline median | Candidate median | Stage medians | Parity vs current dump | PyTorch candidate vs dump | Decision |
 | --- | --- | ---: | ---: | --- | --- | --- | --- |
 | m2-studio | natural `asr=112`, `F0=224` | 33.4 ms | 32.7 ms | noise 7.3 ms, body 23.5 ms, tail 2.1 ms | corr 0.814046, SNR 5.08 dB | corr 0.804153, SNR 4.54 dB | reject for quality; speed tie |
 | m2-studio | padded `asr=120`, `F0=240` | 33.5 ms | 33.7 ms | noise 7.6 ms, body 24.4 ms, tail 1.5 ms | corr 0.931896, SNR 9.19 dB | corr 0.939812, SNR 9.57 dB | reject; quality better but no speed |
 | irvine-m1 | natural `asr=112`, `F0=224` | 172.0 ms | 153.3 ms | noise 37.1 ms, body 111.4 ms, tail 4.6 ms | corr 0.814046, SNR 5.08 dB | corr 0.804153, SNR 4.54 dB | promising M1 speed, not quality-safe |
+| m2-studio | natural `asr=270`, `F0=540` | 63.1 ms | 56.5 ms | noise 12.8 ms, body 41.5 ms, tail 2.2 ms | corr 0.796791, SNR 4.77 dB | corr 0.795823, SNR 4.33 dB | faster, reject for quality |
+| m2-studio | padded `asr=280`, `F0=560` | 63.0 ms | 58.8 ms | noise 13.5 ms, body 43.0 ms, tail 2.3 ms | corr 0.962251, SNR 11.51 dB | corr 0.968596, SNR 12.51 dB | faster, quality closer but not parity |
+| irvine-m1 | natural `asr=270`, `F0=540` | 398.4 ms | 349.8 ms | noise 87.1 ms, body 255.3 ms, tail 8.0 ms | corr 0.796785, SNR 4.77 dB | corr 0.795823, SNR 4.33 dB | faster, reject for quality |
+| irvine-m1 | padded `asr=280`, `F0=560` | 390.8 ms | 358.9 ms | noise 89.6 ms, body 261.5 ms, tail 7.4 ms | corr 0.962306, SNR 11.52 dB | corr 0.968596, SNR 12.51 dB | faster, quality closer but not parity |
 
 This is a useful narrowing result. The first-party candidate reproduces the M1
-speed opportunity without relying on external packages, but the PyTorch
+and `7s` speed opportunity without relying on external packages, but the PyTorch
 candidate itself diverges from the current HAR output. That means the quality
 failure is inherent to the F0-noise/source formulation being tested, not a Core
 ML conversion bug. A shippable optimization must either make the F0-noise path
@@ -763,6 +770,8 @@ uv run --no-sync python scripts/create_f0_source_listening_pack.py \
   --report \
   outputs/f0_noise_exact_shape/3s_natural_asr_cos_rsqrt/report_f0_noise_exact_3s_local.json \
   outputs/f0_noise_exact_shape/3s_cos_rsqrt/report_f0_noise_padded_3s_local.json \
+  outputs/f0_noise_exact_shape/7s_natural_asr_cos_rsqrt/report_f0_noise_exact_7s_local.json \
+  outputs/f0_noise_exact_shape/7s_cos_rsqrt/report_f0_noise_padded_7s_local.json \
   --plots
 ```
 
@@ -772,12 +781,17 @@ Output index: `outputs/f0_source_listening/README.md`.
 | --- | --- | --- | --- |
 | natural `asr=112`, `F0=224` | `needs_listening` | corr 0.814034, SNR 5.08 dB, max 0.43998 | `outputs/f0_source_listening/3s_natural_asr_cos_rsqrt/wav/3s_natural_asr_cos_rsqrt_candidate.wav` |
 | padded `asr=120`, `F0=240` | `needs_listening` | corr 0.931895, SNR 9.19 dB, max 0.23766 | `outputs/f0_source_listening/3s_cos_rsqrt/wav/3s_cos_rsqrt_candidate.wav` |
+| natural `asr=270`, `F0=540` | `needs_listening` | corr 0.796791, SNR 4.77 dB, max 0.36303 | `outputs/f0_source_listening/7s_natural_asr_cos_rsqrt/wav/7s_natural_asr_cos_rsqrt_candidate.wav` |
+| padded `asr=280`, `F0=560` | `needs_listening` | corr 0.962251, SNR 11.51 dB, max 0.24742 | `outputs/f0_source_listening/7s_cos_rsqrt/wav/7s_cos_rsqrt_candidate.wav` |
 
 Interpretation: strict tensor parity still rejects both candidates, but the
 machine audio-health gate does not reject them as silence, clipping, or broken
-spectral content. The exact-shape F0-source path is now a human-listening
-question, not an automatic machine reject. It is still not production-approved
-until listening decisions accept the different source character or a
+spectral content. The `7s` data keeps the speed-positive signal on both local
+M2 Studio and Irvine M1, and the padded source improves objective similarity
+while preserving some of that speed. The exact-shape F0-source path is now a
+human-listening question, not an automatic machine reject. It is still not
+production-approved until listening decisions accept the different source
+character or a
 quality-preserving source formulation closes the metric gap.
 
 #### HAR input-trim probe
