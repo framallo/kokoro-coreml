@@ -48,7 +48,7 @@ def _toolchain_report() -> dict[str, str | None]:
     }
 
 
-def _make_har_source_noise_module(generator: Any, phase_mode: str):
+def _make_har_source_noise_module(generator: Any, phase_mode: str, *, nyquist_input: bool):
     import torch
     import torch.nn as nn
     import torch.nn.functional as F
@@ -142,8 +142,12 @@ def _make_har_source_noise_module(generator: Any, phase_mode: str):
             self.noise_convs = gen.noise_convs
             self.noise_res = gen.noise_res
 
-        def forward(self, har_source: Any, style_timbre: Any):
+        def forward(self, har_source: Any, style_timbre: Any, nyquist_phase: Any | None = None):
             har_spec, har_phase = self.stft.transform(har_source)
+            if nyquist_input:
+                if nyquist_phase is None:
+                    raise RuntimeError("nyquist_phase input is required")
+                har_phase = torch.cat([har_phase[:, :-1, :], nyquist_phase], dim=1)
             har = torch.cat([har_spec, har_phase], dim=1)
             outputs = []
             for conv, res in zip(self.noise_convs, self.noise_res):
@@ -164,6 +168,7 @@ def _select_inputs(tensors: dict[str, np.ndarray]) -> dict[str, np.ndarray]:
         "style_timbre": tensors["ref_s"][:, :128].astype(np.float32),
         "har": tensors["har_padded"].astype(np.float32),
         "har_source": tensors["har_source"].astype(np.float32),
+        "nyquist_phase": tensors["har_phase"][:, -1:, :].astype(np.float32),
     }
 
 
@@ -188,18 +193,21 @@ def _export_packages(
     inputs = _select_inputs(tensors)
 
     har_source_shape = tuple(int(v) for v in inputs["har_source"].shape)
+    nyquist_shape = tuple(int(v) for v in inputs["nyquist_phase"].shape)
     style_shape = tuple(int(v) for v in inputs["style_timbre"].shape)
     asr_shape = tuple(int(v) for v in inputs["asr"].shape)
     f0_shape = tuple(int(v) for v in inputs["f0"].shape)
     n_shape = tuple(int(v) for v in inputs["n_input"].shape)
 
     har_source = torch.zeros(har_source_shape, dtype=torch.float32)
+    nyquist_phase = torch.zeros(nyquist_shape, dtype=torch.float32)
     style = torch.zeros(style_shape, dtype=torch.float32)
-    noise = _make_har_source_noise_module(gen, args.phase_mode)
+    noise = _make_har_source_noise_module(gen, args.phase_mode, nyquist_input=args.nyquist_input)
     noise_removed_dropouts = remove_dropout(noise)
+    trace_inputs = (har_source, style, nyquist_phase) if args.nyquist_input else (har_source, style)
     with torch.no_grad():
-        traced_noise = torch.jit.trace(noise, (har_source, style), strict=False, check_trace=False)
-        sources = tuple(traced_noise(har_source, style))
+        traced_noise = torch.jit.trace(noise, trace_inputs, strict=False, check_trace=False)
+        sources = tuple(traced_noise(*trace_inputs))
     source_shapes = [tuple(int(v) for v in source.shape) for source in sources]
 
     noise_model = ct.convert(
@@ -207,7 +215,8 @@ def _export_packages(
         inputs=[
             ct.TensorType(name="har_source", shape=har_source_shape, dtype=np.float32),
             ct.TensorType(name="style_timbre", shape=style_shape, dtype=np.float32),
-        ],
+        ]
+        + ([ct.TensorType(name="nyquist_phase", shape=nyquist_shape, dtype=np.float32)] if args.nyquist_input else []),
         outputs=[ct.TensorType(name=f"x_source_{idx}") for idx in range(len(source_shapes))],
         convert_to="mlprogram",
         minimum_deployment_target=ct.target.macOS13,
@@ -286,9 +295,11 @@ def _export_packages(
         "palettize_body": bool(args.palettize_body),
         "noise_precision": args.noise_precision,
         "phase_mode": args.phase_mode,
+        "nyquist_input": bool(args.nyquist_input),
         "body_precision": args.body_precision,
         "tail_precision": args.tail_precision,
         "har_source_shape": list(har_source_shape),
+        "nyquist_shape": list(nyquist_shape) if args.nyquist_input else None,
         "asr_shape": list(asr_shape),
         "f0_shape": list(f0_shape),
         "n_shape": list(n_shape),
@@ -325,6 +336,7 @@ def _load_models(args: argparse.Namespace, noise_package: Path, body_package: Pa
         str(noise_package),
         compute_units=_compute_units(ct, args.noise_compute_units),
     )
+    setattr(noise, "_kokoro_nyquist_input", bool(args.nyquist_input))
     body = ct.models.MLModel(
         str(body_package),
         compute_units=_compute_units(ct, args.body_compute_units),
@@ -353,9 +365,12 @@ def _baseline_predict(decoder_pre: Any, fused: Any, inputs: dict[str, np.ndarray
 
 
 def _candidate_predict(noise: Any, body: Any, tail: Any, inputs: dict[str, np.ndarray]) -> tuple[np.ndarray, dict[str, float]]:
+    noise_feed = {"har_source": inputs["har_source"], "style_timbre": inputs["style_timbre"]}
+    if getattr(noise, "_kokoro_nyquist_input", False):
+        noise_feed["nyquist_phase"] = inputs["nyquist_phase"]
     noise_out, noise_ms = _predict(
         noise,
-        {"har_source": inputs["har_source"], "style_timbre": inputs["style_timbre"]},
+        noise_feed,
     )
     body_feed = {
         "asr": inputs["asr"],
@@ -461,6 +476,8 @@ def run(args: argparse.Namespace) -> dict[str, Any]:
     label = args.label or _duration_label_from_dump(args.tensor_dump, manifest)
     if args.cos_snake:
         label = f"{label}_cos"
+    if args.nyquist_input:
+        label = f"{label}_nyquist"
     if args.palettize_noise:
         label = f"{label}_noise_pal"
     if args.palettize_body:
@@ -520,6 +537,7 @@ def main() -> None:
     parser.add_argument("--body-precision", default="fp16", choices=["fp16", "fp32"])
     parser.add_argument("--tail-precision", default="fp32", choices=["fp16", "fp32"])
     parser.add_argument("--phase-mode", default="atan2", choices=["atan2", "acos", "atan_manual", "atan_swift"])
+    parser.add_argument("--nyquist-input", action="store_true")
     parser.add_argument("--anchor-mode", default="mean", choices=["mean", "sum", "first"])
     parser.add_argument("--decoder-pre-compute-units", default="all")
     parser.add_argument("--fused-compute-units", default="all")

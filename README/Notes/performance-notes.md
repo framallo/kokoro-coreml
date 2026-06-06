@@ -1155,11 +1155,17 @@ Phase/STFT repair probe:
 | --- | ---: | ---: | ---: | --- | --- |
 | 3s `atan_manual`, noise fp32 | 32.3 ms | 31.7 ms | +1.7% | corr 0.987931, SNR 16.62 dB | better, still reject |
 | 3s `acos`, noise fp32 | 32.5 ms | 31.8 ms | +2.2% | corr 0.987922, SNR 16.62 dB | better, still reject |
+| 3s `atan_manual`, noise fp32 + dumped Nyquist input | 31.3 ms | 29.3 ms | +6.5% | corr 0.988458, SNR 16.75 dB | faster, still reject |
 
 This uses the new `--phase-mode` option in
 `scripts/probe_har_source_noise_split.py`. It confirms the standalone STFT
 semantics finding: fp32 phase formulas reduce the phase-induced waveform error,
-but they do not close the raw generator sensitivity enough for production.
+but they do not close the raw generator sensitivity enough for production. The
+Nyquist-input variant threads the dumped Swift Nyquist phase into the compact
+`har_source -> STFT/noise_convs` package, closing the known raw phase branch but
+still failing strict quality at natural geometry; this mirrors the fused
+HAR-source result where parity only closes after preserving the padded shipping
+HAR geometry, which loses the speed edge.
 
 This closes the direct "copy laishere's decoder+vocoder split boundary" path for
 our current Swift dump contract on every tested Mac, including the exact Irvine
