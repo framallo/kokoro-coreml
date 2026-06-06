@@ -3510,17 +3510,21 @@ Warmed 3s timing, same tensor dump and strict waveform gate:
 | --- | --- | ---: | ---: | ---: | ---: | ---: | ---: | --- |
 | m2-studio | native InstanceNorm, no palette | 33.11 ms | 35.00 ms | 26.74 ms | -5.7% | 0.931816 | 9.19 dB | reject; local slower and quality fails |
 | irvine-m1 | native InstanceNorm, no palette | 174.49 ms | 161.67 ms | 117.46 ms | +7.3% | 0.931801 | 9.19 dB | speed-positive, still quality fail |
+| m2-studio | native InstanceNorm, no palette, iOS17/spec8 | 33.04 ms | 32.46 ms | 24.66 ms | +1.8% | 0.931854 | 9.19 dB | speed-positive, still quality fail |
+| irvine-m1 | native InstanceNorm, no palette, iOS17/spec8 | 173.02 ms | 162.14 ms | 118.15 ms | +6.3% | 0.931840 | 9.19 dB | speed-positive, still quality fail |
 | m2-studio | native InstanceNorm + palette | 31.86 ms | 36.90 ms | 28.16 ms | -15.8% | 0.931531 | 9.17 dB | reject; palette slows local |
 | irvine-m1 | native InstanceNorm + palette | 174.16 ms | 169.92 ms | 126.03 ms | +2.4% | 0.931617 | 9.17 dB | reject; palette slower than no-palette |
 
 Conclusion: native InstanceNorm is the real package-surface speed ingredient on
-M1; int8 palettization is size reduction, not speed, for this branch. The
-corrected native body nearly matches laishere's visible MIL surface, so the
-remaining 3s M1 gap is no longer explained by `tile`/manual AdaIN, fp16 inputs,
-or palette. It is more likely a spec v8/runtime compile-plan difference,
-flexible output metadata behavior, or laishere's exact upstream F0/source tensor
-contract. The branch is still not production-eligible because the PyTorch
-F0-source formulation itself diverges from the current HAR/HnSF output.
+M1; iOS17/spec8 gives a small additional local win and preserves the same
+roughly `6-7%` Irvine M1 speed signal, while int8 palettization is size
+reduction, not speed, for this branch. The corrected native body now closes the
+visible package-surface suspects: `tile`/manual AdaIN, fp16 inputs, palette, and
+spec-v8 target are not enough to make this branch production-safe. The branch is
+still not production-eligible because the PyTorch F0-source formulation itself
+diverges from the current HAR/HnSF output. Any future work here must either
+change the source formulation, retrain/accept the source character through
+listening review, or find a different strict-equivalent generator boundary.
 
 #### Swift-like source export probe
 
