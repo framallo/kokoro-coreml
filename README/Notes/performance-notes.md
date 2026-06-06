@@ -4589,10 +4589,10 @@ therefore still blocked only by the physical lock state.
 
 `scripts/external_bakeoff/check_remote_host_quiet.py` now records the lower-end
 Mac timing gate at `outputs/external_bakeoff/remote_host_quiet_latest.md`.
-The 2026-06-06 07:12 local run reports `publishable_timing_allowed=false`:
-Irvine M1 has load `2.08/2.56/2.80` with `mediaanalysisd` at `98.7%` CPU and
-`mds_stores` at `16.4%`, while M2 Air has load `3.87/3.83/3.77` with
-`mds_stores` at `94.1%` and `mediaanalysisd` at `45.9%`. Skip lower-end Mac
+The 2026-06-06 07:16 local run reports `publishable_timing_allowed=false`:
+Irvine M1 has load `2.54/2.64/2.78` with `mediaanalysisd` at `83.0%` CPU and
+`mds_stores` at `28.6%`, while M2 Air has load `4.05/3.76/3.74` with
+`mds_stores` at `107.9%` and `mediaanalysisd` at `36.2%`. Skip lower-end Mac
 frontier promotion until this gate reports `quiet=yes` for the target host.
 
 ---
