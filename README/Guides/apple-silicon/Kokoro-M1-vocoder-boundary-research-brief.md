@@ -188,6 +188,9 @@ Do not prioritize these unless new evidence changes the premises:
   severe slowdowns on strict partial-NE candidates.
 - Palette-only changes. They reduce package size but did not deliver the needed
   runtime win.
+- Linear quantization of the final-waveform fused generator. Int8 crashed on
+  CPU+GPU runtime specialization; int4 requires iOS18 and was slower while
+  failing quality locally.
 - fp16-input-only changes. Tested and rejected for the current static body.
 - iOS17/spec8-only changes. Helpful for metadata matching, not sufficient.
 - More exact decoder+vocoder multi-package splits. The matching mixed CPU/NE

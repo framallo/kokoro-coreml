@@ -1188,6 +1188,17 @@ fails parity (`corr 0.999051`, SNR `27.62 dB`, max abs `0.03387`). Compression
 can reduce bundle size, but it is not the missing lower-end Mac speed path for
 our final-waveform generator.
 
+The 4-bit version is also rejected. Core ML refused `--linear-quantize int4`
+with an iOS17 deployment target (`4-bit quantization is supported since
+iOS18`). Re-exporting the same fixed-shape fused 3s generator with
+`--deployment-target ios18 --linear-quantize int4` succeeded, but the local
+M2 Studio CPU+GPU row was both slower and below quality thresholds:
+candidate `27.15 ms` vs fused `26.52 ms` (`-2.36%`), corr `0.958562`, SNR
+`11.28 dB`, max abs `0.145416`. Report:
+`outputs/generator_cos_snake/3s_linear_int4_ios18_wint4_ios18/report_ios18_linear_int4.json`.
+This closes "try newer 4-bit compression inside the single fused
+final-waveform package" as a strict speed path.
+
 The toolchain-only hypothesis is also rejected for the current fused generator.
 `scripts/probe_generator_cos_snake.py` now records `coremltools`, `torch`, and
 `numpy` versions in its JSON reports, so the CT8/CT9 comparison is reproducible.
