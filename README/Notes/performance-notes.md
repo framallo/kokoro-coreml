@@ -451,6 +451,27 @@ next production candidate must remove work or change operator lowering within
 all three generator regions; merely moving a substage to ANE is not supported
 by the data.
 
+The same 3s predict-only stage packages were copied to the two machines where
+Config F still loses to laishere's chain-only short rows and run with
+`--skip-export` against the same dumped tensors. CPU+GPU parity passed on both
+hosts, and the stage distribution scales with each machine's known generator
+cost:
+
+| Machine | Placement | Pass | Fused median | Split median | Split stages | Parity vs fused |
+| --- | --- | --- | ---: | ---: | --- | --- |
+| m2-air | CPU+GPU | yes | 120.5 ms | 126.6 ms | noise 51.2 ms, stage0 31.2 ms, stage1+tail 44.1 ms | corr 0.999997, SNR 52.83 dB |
+| irvine-m1 | CPU+GPU | yes | 168.4 ms | 184.0 ms | noise 74.4 ms, stage0 44.9 ms, stage1+tail 64.6 ms | corr 0.999997, SNR 52.62 dB |
+| m2-air | stage0 CPU+ANE | no | 120.0 ms | 123.7 ms | noise 50.8 ms, stage0 28.3 ms, stage1+tail 44.5 ms | corr 0.403806, SNR 0.47 dB |
+| m2-air | stage1+tail CPU+ANE | no | 120.9 ms | 150.8 ms | noise 50.8 ms, stage0 31.0 ms, stage1+tail 69.3 ms | corr 0.120825, SNR 0.05 dB |
+| irvine-m1 | stage0 CPU+ANE | no | 167.5 ms | 197.4 ms | noise 73.4 ms, stage0 58.7 ms, stage1+tail 65.8 ms | corr 0.403829, SNR 0.47 dB |
+| irvine-m1 | stage1+tail CPU+ANE | no | 172.7 ms | 315.8 ms | noise 74.4 ms, stage0 44.7 ms, stage1+tail 196.2 ms | corr 0.121443, SNR 0.05 dB |
+
+This closes the per-stage ANE fallback hypothesis on the losing machines too.
+On M2 Air, stage0 CPU+ANE is superficially faster (`28.3 ms` vs `31.2 ms`) but
+the audio output is invalid, so it is not a candidate. On Irvine M1, CPU+ANE is
+both slower and invalid. The next speed work must target the CPU+GPU generator
+operator count and memory movement directly.
+
 #### Fused cos-Snake probe
 
 `scripts/probe_generator_cos_snake.py` tests the one laishere operator rewrite

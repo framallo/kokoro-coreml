@@ -251,6 +251,15 @@ sudo powermetrics -i 1000 --samplers ane
   `562`, stage0 `807`, stage1+tail `856`. There is no hidden ANE island inside
   the current generator; the next real optimization must remove/rewrite work
   across the generator regions instead of only repartitioning them.
+- **Remote stage-placement check:** the same 3s stage packages and tensor dump
+  were copied to `m2-air` and `irvine-m1` and run predict-only. CPU+GPU parity
+  passed, with M2 Air stage medians noise `51.2 ms`, stage0 `31.2 ms`,
+  stage1+tail `44.1 ms`, and Irvine M1 medians noise `74.4 ms`, stage0
+  `44.9 ms`, stage1+tail `64.6 ms`. CPU+ANE substage placement is invalid on
+  both losing machines: M2 Air stage0 CPU+ANE corr `0.403806`, stage1+tail
+  CPU+ANE corr `0.120825`; Irvine M1 stage0 CPU+ANE corr `0.403829`,
+  stage1+tail CPU+ANE corr `0.121443`. Do not use ANE for any current generator
+  substage on these hosts.
 
 **2026-05-17**
 
