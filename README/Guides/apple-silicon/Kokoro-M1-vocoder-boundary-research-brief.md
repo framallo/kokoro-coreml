@@ -1,0 +1,260 @@
+# Kokoro M1 Vocoder Boundary Research Brief
+
+June 6, 2026
+
+> **Scope:** This is a targeted research brief for making the first-party
+> Swift+Core ML Kokoro path faster than laishere on lower-end Apple Silicon,
+> especially Irvine M1 `3s`. It is intentionally narrower than a generic Core
+> ML optimization guide. Do not repeat broad `.all`, palette, fp16, or
+> native-InstanceNorm experiments unless the proposed change creates a different
+> runtime boundary or a different Core ML partition.
+
+## Current Conclusion
+
+The remaining real loss is not MLX. After warmed-inference correction, Config F
+beats or ties MLX on the validated Mac cells. The remaining strict competitor is
+laishere on Irvine M1 short and medium buckets. The live frontier is tracked by:
+
+- `outputs/external_bakeoff/frontier_freshness.md`
+- `outputs/external_bakeoff/irvine_next_targets.md`
+- `outputs/external_bakeoff/irvine_3s_placement_target.md`
+
+For `irvine-m1/3s`, the warmed profile gap is:
+
+| Runtime | Warm median |
+| --- | ---: |
+| Config F | `233.6 ms` |
+| laishere | `195.0 ms` |
+| Gap | `38.5 ms` |
+
+The best saved quality-fail source branch still leaves `19.8 ms` against warmed
+laishere, and even an optimistic combination of known positive estimates leaves
+`6.2 ms`. Existing strict-pass probes do not close the gap.
+
+## What Is Proven
+
+### MLX Is Not the Bottleneck
+
+The apparent MLX win came from polluted comparisons: cold compile/cache work,
+padding, `.all` behavior, and HAR overhead mixed into non-equivalent timings.
+Paper-facing comparisons must use warmed inference only. Under that rule, the
+real Mac-side gap is laishere on Irvine M1, not MLX.
+
+### Compute-Unit Flags Are Not Enough
+
+Core ML placement data for Irvine M1 `3s`:
+
+| Plan | Compute units | Ops | Preferred counts | NE cost |
+| --- | --- | ---: | --- | ---: |
+| First-party HAR-post | `cpuAndNeuralEngine` | `2207` | `cpu=1038`, `unknown=1169` | `0.0%` |
+| First-party HAR-post | `cpuAndGPU` | `2207` | `gpu=1041`, `unknown=1166` | `0.0%` |
+| laishere vocoder | `cpuAndNeuralEngine` | `1534` | `cpu=58`, `neuralEngine=597`, `unknown=879` | `47.5%` |
+| First-party exact decoder+vocoder body | `cpuAndNeuralEngine` | `1546` | `cpu=64`, `neuralEngine=599`, `unknown=883` | `48.7%` |
+
+The last row is the trap: we can already create a strict first-party body with
+laishere-like NE placement, but it is slower. Therefore the target is not "get
+partial ANE placement." The target is a runtime-positive boundary and partition.
+
+### Existing Strict Splits Lose
+
+Saved Irvine M1 `3s` strict-equivalent results:
+
+| Family | Best relevant result | Decision |
+| --- | --- | --- |
+| HAR input trim | `+0.7 ms` | Too small. |
+| Native-IN/broadcast/cos fused surface | `+0.2 ms` or `.all` `-141.2 ms` | Not material; `.all` is harmful. |
+| Generator noise split | `-11.5 ms` CPU+GPU, CPU+NE fails quality/speed | Split overhead exceeds graph savings. |
+| Generator stage split | `-15.5 ms` | Split overhead exceeds graph savings. |
+| Exact decoder+vocoder split | `-24.8 ms` CPU+GPU, `-138.3 ms` CPU+NE | Boundary too broad or sync-heavy. |
+| Exact iOS17/native-IN decoder+vocoder split | `-29.3 ms` CPU+GPU, `-116.3 ms` CPU+NE | Matching laishere's visible surface is insufficient. |
+| HAR-source fused strict path | `-22.9 ms` CPU+GPU, `-163.8 ms` CPU+NE | Source/STFT boundary not a win. |
+
+Do not spend research budget on another broad split of the current
+`GeneratorFromHar` package unless it removes a Core ML call boundary or changes
+the actual partitioning/synchronization behavior.
+
+### Existing Speed-Positive Branches Change Quality
+
+The speed-positive candidates are F0/source simplifications:
+
+| Candidate | Irvine `3s` speed signal | Quality |
+| --- | ---: | --- |
+| `3s_natural_asr_cos_rsqrt` | `+18.7 ms` | corr `0.813995`, SNR `5.08 dB` |
+| native-IN no-palette F0/source | `+12.8 ms` | corr `0.931801`, SNR `9.19 dB` |
+| iOS17 native-IN no-palette F0/source | `+10.9 ms` | corr `0.931840`, SNR `9.19 dB` |
+
+These branches are useful evidence but not strict parity. They require either a
+source formulation recovery or explicit human listening acceptance before they
+can support a time-to-parity claim.
+
+## Research Question
+
+Find a first-party Core ML graph boundary for Kokoro's source/body/vocoder path
+that satisfies all of the following:
+
+1. Preserves the current Swift HAR/source semantics or produces an accepted
+   quality-equivalent waveform.
+2. Avoids adding extra Core ML prediction calls on the `3s` hot path unless the
+   saved compute is larger than the call/sync overhead on M1.
+3. Produces a mixed CPU/Neural Engine plan only when it improves warmed runtime,
+   not merely because the compute plan reports NE-preferred ops.
+4. Beats warmed laishere on Irvine M1, with priority order `3s`, `7s`, `10s`,
+   `15s`, then `30s`.
+
+The shortest useful formulation is:
+
+> Design an M1 MLProgram source/STFT/vocoder body that preserves current Swift
+> HAR/source semantics, keeps strict waveform parity, and shifts the expensive
+> conv/add/mul/instance_norm body work into a laishere-like mixed CPU/NE plan
+> without the existing split-boundary synchronization penalty or a `3s` warmed
+> regression.
+
+## High-Value Directions
+
+### 1. Single-Package Body Reshaping
+
+The most promising strict direction is not another multi-package split. It is a
+single package that changes the operator surface inside the existing
+`GeneratorFromHar` call boundary while preserving the same runtime inputs and
+outputs.
+
+Research targets:
+
+- Can native InstanceNorm, broadcast AdaIN, cos Snake, HAR trim, and residual
+  scale changes be fused into one `GeneratorFromHar` package without changing
+  the externally visible boundary?
+- Can the graph be rewritten so M1 chooses useful NE partitions without
+  crossing CPU/NE/GPU boundaries repeatedly?
+- Can layout be changed to reduce ANE padding or memory movement while keeping
+  the Swift input contract stable?
+
+Acceptance:
+
+- Strict waveform gate passes against the shipped fused package.
+- Irvine M1 `3s` improves by at least `20 ms` warmed median, or a smaller `3s`
+  win combines with measured upstream/runtime savings that fully close the gap.
+- M2 Studio does not regress materially.
+
+### 2. In-Package HAR Source Consumption
+
+Current strict source/STFT split paths lose because they add package boundaries
+or recompute source/STFT with drift. A useful path may be to consume a smaller
+Swift-prepared tensor inside the same package boundary rather than exporting a
+standalone source/noise package.
+
+Research targets:
+
+- Identify the minimal Swift-produced tensor that preserves source quality but
+  avoids the large HAR-post input cost.
+- Determine whether passing `x_source_0/x_source_1` directly into a single
+  body+tail package can be faster than fused `GeneratorFromHar` once call
+  overhead is eliminated or amortized.
+- Validate whether the tail can stay fused with the body without causing ANE
+  fallback or CPU sync.
+
+Acceptance:
+
+- No extra Core ML call on the hot path unless timing proves it is profitable.
+- Strict parity or listening-approved quality.
+- Same bucket contract: `3s`, `7s`, `10s`, `15s`, `30s`.
+
+### 3. Source-Quality Recovery for the Fast F0 Branch
+
+The non-strict branch is the only saved branch with enough speed signal to beat
+laishere for `7s`, `10s`, and `15s`, and nearly enough for `3s` after upstream
+savings. It is worth researching, but it must be labeled separately from strict
+parity.
+
+Research targets:
+
+- Explain why the deterministic/laishere-style source changes waveform
+  character relative to the seeded Swift Double-accumulator HnSF source.
+- Find a Core ML-friendly source formulation that improves correlation/SNR
+  without losing the speed signal.
+- If objective parity remains impossible, define a listening-review protocol
+  that can support a "quality-equivalent" paper claim without Whisper/ASR.
+
+Acceptance:
+
+- Either strict waveform gate passes, or human listening decisions explicitly
+  accept the exact speed-branch WAVs under
+  `outputs/f0_source_listening/irvine_exact_speed_branch/`.
+
+## Low-Value Directions
+
+Do not prioritize these unless new evidence changes the premises:
+
+- More `.all` toggles. `.all` is a request, not proof, and already produced
+  severe slowdowns on strict partial-NE candidates.
+- Palette-only changes. They reduce package size but did not deliver the needed
+  runtime win.
+- fp16-input-only changes. Tested and rejected for the current static body.
+- iOS17/spec8-only changes. Helpful for metadata matching, not sufficient.
+- More exact decoder+vocoder multi-package splits. The matching mixed CPU/NE
+  body exists and still loses.
+- More broad generator noise/stage splits. The extra Core ML call boundary is
+  currently more expensive than the saved graph work.
+
+## Required Measurements
+
+Every candidate must report:
+
+- exact git SHA and command line;
+- model paths and whether packages were freshly exported or reused;
+- deployment target, precision, input dtypes, compute units;
+- warmup count and warm iteration count;
+- cold latency separately from warm median;
+- waveform metrics against the same tensor dump or emitted reference;
+- `MLComputePlan` preferred-device counts and cost weights;
+- local M2 Studio timing before remote Irvine timing;
+- Irvine M1 timing only when the machine is quiet enough for publishable data.
+
+Do not promote a candidate from M2 Studio alone. M2 Studio is useful as a fast
+rejection filter, but the remaining loss is on Irvine M1.
+
+## Current External-State Blocks
+
+- The iPhone 12 Pro is visible and paired, but app launch fails while the device
+  is physically locked. Unlock the phone before iOS runner execution.
+- Irvine M1 timing is not publishable while background indexing or
+  `mediaanalysisd` consumes CPU. Use saved artifacts until the host is quiet.
+
+## Useful Commands
+
+Regenerate the target summaries:
+
+```bash
+uv run --no-sync python scripts/external_bakeoff/summarize_competitive_frontier.py \
+  --output outputs/external_bakeoff/competitive_frontier.md \
+  --json-output outputs/external_bakeoff/competitive_frontier.json
+
+uv run --no-sync python scripts/external_bakeoff/summarize_frontier_freshness.py \
+  --output outputs/external_bakeoff/frontier_freshness.md \
+  --json-output outputs/external_bakeoff/frontier_freshness.json
+
+uv run --no-sync python scripts/external_bakeoff/summarize_irvine_3s_placement_target.py
+```
+
+Run the reusable gates:
+
+```bash
+uv run --no-sync pytest tests/test_external_bakeoff_tools.py -q
+uv run --no-sync python scripts/external_bakeoff/verify_external_bakeoff_completion.py
+```
+
+Check iPhone state:
+
+```bash
+xcrun devicectl list devices
+xcrun devicectl device process launch \
+  --device F383FC46-FD64-5346-AEC6-59E3E2F8C9CA \
+  --console --terminate-existing \
+  com.kokoro.externalbakeoff.ConfigFIOSRunnerManual
+```
+
+Check Irvine load before remote timing:
+
+```bash
+ssh mattmireles@irvine-m1.local \
+  'uptime; ps -axo pcpu,pid,comm | sort -nr | head -12'
+```

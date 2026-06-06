@@ -10,6 +10,7 @@ April 14, 2026
 - **[Hugging Face Transformers on Apple Silicon](HF-transformers-MPS-guide.md)**: MPS-side Trainer and dtype pitfalls that surface again at export time.
 - **[PyTorch LSTM → Core ML (padding, EnumeratedShapes)](CoreML-LSTM-export-guide.md)**: BiLSTM padding, MIL `lstm` limits, `ct.EnumeratedShapes`, and ANE tradeoffs for recurrent exports.
 - **[LSTM enumerated shapes and ANE (deep dive)](CoreML-LSTM-Enumerated-Shapes.md)**: Flexible inputs, `RangeDim` vs enumerated lists, verification tooling, and Swift inference caveats.
+- **[Kokoro M1 vocoder boundary research brief](Kokoro-M1-vocoder-boundary-research-brief.md)**: Current Kokoro-specific lower-end Mac gap, falsified Core ML placement paths, and the exact research target for beating laishere without repeating failed `.all` or split-boundary probes.
 
 The landscape of on-device machine learning execution on Apple Silicon is defined by a delicate interplay between high-level software abstraction and rigid, heterogeneous hardware architecture. Core ML serves as the primary orchestration layer, designed to seamlessly distribute mathematical operations across the Central Processing Unit (CPU), Graphics Processing Unit (GPU), and the highly specialized Apple Neural Engine (ANE).1 However, beneath this polished abstraction lies a complex, opaque scheduling heuristic characterized by stringent hardware constraints, volatile graph partitioning logic, and a pervasive phenomenon known within the engineering community as "silent fallback".2
 
