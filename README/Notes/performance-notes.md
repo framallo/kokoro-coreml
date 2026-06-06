@@ -385,6 +385,39 @@ prefix. If exact-duration packages are revisited, they need an end-to-end
 exact graph and a listening/quality gate, not just a shorter HAR-post package
 fed by cropped bucket tensors.
 
+#### Generator split probes
+
+`scripts/probe_generator_split.py` and
+`scripts/probe_generator_noise_split.py` test whether laishere-style package
+boundaries help the current static HAR-post generator. The generated packages
+and reports are ignored under `outputs/generator_split/` and
+`outputs/generator_noise_split/`.
+
+Local M2 Studio, N=10 median after three discarded warmups:
+
+| Probe | Input | Placement | Fused median | Split median | Split stages | Parity vs fused | Decision |
+| --- | --- | --- | ---: | ---: | --- | --- | --- |
+| final tail only | 3s | body CPU+GPU, tail CPU-only | 28.3 ms | 29.1 ms | body 28.4 ms, tail 0.8 ms | corr 0.999996, SNR 51.55 dB | reject |
+| final tail only | 7s | body CPU+GPU, tail CPU-only | 57.5 ms | 58.4 ms | body 57.2 ms, tail 1.2 ms | corr 0.999996, SNR 52.08 dB | reject |
+| HAR noise split | 3s | noise CPU+GPU, body CPU+GPU | 28.9 ms | 32.5 ms | noise 13.1 ms, body 19.5 ms | exact sample match | reject |
+| HAR noise split | 7s | noise CPU+GPU, body CPU+GPU | 57.6 ms | 63.4 ms | noise 25.8 ms, body 37.7 ms | exact sample match | reject |
+| HAR noise split | 3s | noise CPU+GPU/ALL, body CPU+ANE | 29-30 ms | 249-260 ms | body 237-248 ms | corr 0.999906, SNR 37.65 dB | reject |
+
+The final-tail split is too small to matter; the tail costs only about 1-2 ms.
+The HAR-noise split is more informative: it proves the graph can be partitioned
+with exact output parity and reduces the body package itself, but total latency
+gets worse because the noise package plus extra dispatch cost outweighs the
+body reduction. Forcing the noise-split body to CPU+ANE is catastrophic on this
+local M2 Studio run.
+
+The laishere architecture is therefore not "split off the tail" in a generic
+sense. Its own README says tail split alone failed; the working path uses a
+separate fp32 noise stage, a dual-output vocoder with a discarded anchor to keep
+the scheduler committed, a separate fp32 tail, cos-form Snake activations, and
+palettization where the audio output is discarded. The next viable experiment
+is to port that exact scheduler trick or rewrite the body operator surface, not
+to add more naive split boundaries.
+
 #### HnSF vDSP optimization
 
 Current `main` vectorizes the Swift HnSF STFT path with cached 20-point DFT

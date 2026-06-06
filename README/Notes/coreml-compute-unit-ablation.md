@@ -193,6 +193,27 @@ sudo powermetrics -i 1000 --samplers ane
   median `55.7 ms`. A shorter HAR-post package fed by cropped bucket tensors is
   not a production-safe optimization. If exact-duration generator packages are
   revisited, they need an end-to-end exact graph plus listening/quality gates.
+- **Final-tail split rejected:** `scripts/probe_generator_split.py` exported a
+  body package ending at pre-tail logits plus a tiny tail package for
+  `exp`/`sin`/iSTFT. Parity passed, but the split was slower on local M2 Studio:
+  3s fused `28.3 ms` vs split `29.1 ms`; 7s fused `57.5 ms` vs split `58.4 ms`.
+  The tail costs only `0.8-1.2 ms`, so separating it does not address the body
+  bottleneck.
+- **HAR-noise split rejected as a direct static-HAR optimization:** `scripts/probe_generator_noise_split.py`
+  exported `ref_s + har -> x_source_0/x_source_1` and a separate body package.
+  Output matched the fused package exactly on 3s and 7s, proving the boundary is
+  semantically safe, but total latency got worse: 3s fused `28.9 ms` vs split
+  `32.5 ms`; 7s fused `57.6 ms` vs split `63.4 ms`. The body package shrank
+  materially (`19.5 ms` at 3s and `37.7 ms` at 7s), but the noise package
+  (`13.1 ms` / `25.8 ms`) plus dispatch overhead outweighed it. Forcing the
+  noise-split body to CPU+ANE was catastrophic (`~237-248 ms` body at 3s), so
+  the direct split does not recreate laishere's ANE residency.
+- **Actual laishere lesson:** its own README says tail split alone failed. Its
+  working path combines a separate fp32 noise stage, a dual-output vocoder with
+  a discarded anchor to influence scheduling, a separate fp32 tail, cos-form
+  Snake, and palettization where the audio output is discarded. The next graph
+  experiment should port that scheduler trick or rewrite the body operator
+  surface; more naive split boundaries are not supported by the data.
 
 **2026-05-17**
 
