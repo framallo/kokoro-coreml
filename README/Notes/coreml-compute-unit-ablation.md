@@ -384,6 +384,15 @@ sudo powermetrics -i 1000 --samplers ane
   (`36.5 ms` vs `35.2 ms`) and 7s has only a small pre-source speedup
   (`62.8 ms` vs `67.4 ms`), while both fail strict waveform parity (corr
   `~0.98`, SNR `~13.1 dB`).
+- **Fused HAR-source graph is fast but not parity-safe:** `scripts/probe_har_source_fused.py`
+  avoids the lossy body/tail split by exporting one temporary
+  `x_pre + ref_s + har_source -> waveform` graph. The package is materially
+  faster than the current `GeneratorFromHar` package on local warmed inference
+  (`3s` fp16 `26.4 ms` vs `30.3 ms`; `7s` fp16 `51.2 ms` vs `60.9 ms`), but it
+  still fails waveform parity (`3s` corr `0.980656`, SNR `13.10 dB`; `7s` corr
+  `0.979271`, SNR `13.06 dB`). fp32 conversion does not fix it (`3s` corr only
+  `0.981718`). Treat this as a Core ML semantic/parity recovery target, not a
+  production replacement.
 - **HAR input-tail trimming is too small:** `scripts/probe_generator_har_input_trim.py`
   keeps the bucketed `x_pre` shape and current Swift HAR source, but exports a
   temporary `GeneratorFromHar` with a shorter static `har` axis. The aggressive

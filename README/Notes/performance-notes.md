@@ -812,6 +812,11 @@ so the F0-source quality loss is source drift, not the STFT convention alone.
 body/tail split. This tests a compact exact-source boundary without changing
 shipping packages.
 
+`scripts/probe_har_source_fused.py` tests the same compact exact-source
+boundary but keeps STFT, generator body, and iSTFT tail fused into one Core ML
+graph. This avoids the body/tail split drift, and is the better speed shape, but
+it still fails parity after Core ML conversion.
+
 Local generated command examples:
 
 ```bash
@@ -825,18 +830,27 @@ uv run --no-sync python scripts/probe_har_source_noise_split.py \
   --decoder-pre-package coreml/kokoro_decoder_pre_7s.mlpackage \
   --fused-package coreml/kokoro_decoder_har_post_7s.mlpackage \
   --label 7s --warmup 2 --iterations 10
+
+uv run --no-sync python scripts/probe_har_source_fused.py \
+  outputs/generator_isolation/dumps/7s \
+  --fused-package coreml/kokoro_decoder_har_post_7s.mlpackage \
+  --label 7s --warmup 2 --iterations 10
 ```
 
 | Probe | Baseline median | Candidate median | Candidate vs dump | Decision |
 | --- | ---: | ---: | --- | --- |
 | `har_source` split, 3s padded | 35.2 ms | 36.5 ms | corr 0.980600, SNR 13.09 dB | reject: slower before source-generation cost and not parity |
 | `har_source` split, 7s padded | 67.4 ms | 62.8 ms | corr 0.979393, SNR 13.07 dB | reject/low priority: small speed before source-generation cost and not parity |
+| fused `har_source`, 3s fp16 | 30.3 ms | 26.4 ms | corr 0.980656, SNR 13.10 dB | speed-positive, blocked on Core ML parity |
+| fused `har_source`, 3s fp32 | 30.3 ms | 27.1 ms | corr 0.981718, SNR 13.19 dB | fp32 does not recover parity |
+| fused `har_source`, 7s fp16 | 60.9 ms | 51.2 ms | corr 0.979271, SNR 13.06 dB | speed-positive, blocked on Core ML parity |
 
 Interpretation: exact dumped source improves quality over the F0-source path,
-but the Core ML STFT/noise-conv split still fails strict parity and has too
-little speed margin once Swift source generation is counted. This is not the
-winning route unless a later package variant recovers parity and keeps the 7s+
-speed margin after source-generation timing is included.
+but the Core ML STFT/noise-conv path still fails strict parity. The staged
+source split has too little speed margin once Swift source generation is
+counted. The fused source graph has enough package-level speed upside to remain
+a research target, but only if a Core ML semantic/parity fix recovers waveform
+quality; fp32 precision alone does not.
 
 #### HAR input-trim probe
 
