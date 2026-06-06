@@ -946,6 +946,16 @@ uv run --no-sync python scripts/probe_har_source_fused.py \
   --precision fp32 \
   --pad-har-to 28801 \
   --warmup 2 --iterations 10
+
+uv run --no-sync python scripts/probe_har_source_fused.py \
+  outputs/generator_isolation/dumps/3s \
+  --fused-package coreml/kokoro_decoder_har_post_3s.mlpackage \
+  --label 3s_atan_manual_fp32_nyquist_padded \
+  --phase-mode atan_manual \
+  --precision fp32 \
+  --nyquist-input \
+  --pad-har-to 28801 \
+  --warmup 2 --iterations 5
 ```
 
 | Probe | Baseline median | Candidate median | Candidate vs dump | Decision |
@@ -958,15 +968,21 @@ uv run --no-sync python scripts/probe_har_source_fused.py \
 | fused `har_source`, 3s `atan_manual` phase | 31.1 ms | 27.2 ms | corr 0.987372, SNR 16.19 dB | better, still not parity |
 | fused `har_source`, 3s `atan_manual` fp32 | 31.4 ms | 27.1 ms | corr 0.987820, SNR 16.58 dB | Core ML matches PyTorch; PyTorch source boundary still not parity |
 | fused `har_source`, 3s `atan_manual` fp32 + HAR pad 28801 | 26.9 ms | 27.2 ms | corr 0.998808, SNR 26.44 dB | padding restores most quality but loses speed and still not strict parity |
+| fused `har_source`, 3s `atan_manual` fp32 + Nyquist input | 28.0 ms | 25.1 ms | corr 0.988451, SNR 16.74 dB | fast, but natural geometry still not parity |
+| fused `har_source`, 3s `atan_manual` fp32 + Nyquist input + HAR pad 28801 | 28.7 ms | 29.3 ms | corr 0.999991, SNR 47.75 dB | quality-safe but slower |
 | fused `har_source`, 7s fp16 | 60.9 ms | 51.2 ms | corr 0.979271, SNR 13.06 dB | speed-positive, blocked on Core ML parity |
+| fused `har_source`, 7s `atan_manual` fp32 + Nyquist input + HAR pad 67201 | 57.6 ms | 60.2 ms | corr 0.999993, SNR 49.15 dB | quality-safe but slower |
 
 Interpretation: exact dumped source improves quality over the F0-source path,
 but the Core ML/STFT source-boundary path still fails strict parity. The staged
 source split has too little speed margin once Swift source generation is
-counted. The fused source graph has enough package-level speed upside to remain
-a research target, but two separate blockers are now proven: native Core ML
-`atan2` conversion is broken, and even a Core ML-correct fp32 manual phase graph
-does not reproduce the current Swift HAR waveform closely enough.
+counted. Feeding the dumped Swift Nyquist phase as a tiny extra input closes the
+raw phase convention gap only when the recomputed HAR is padded back to the
+shipping geometry; those padded 3s/7s packages pass the strict waveform gate but
+are slower than the existing fused generator. The fused source graph therefore
+has no current production path: native Core ML `atan2` conversion is broken,
+natural geometry is fast but quality-negative, and padded quality-safe geometry
+loses the speed edge.
 
 The STFT-only semantic probe gives the exact bisection:
 

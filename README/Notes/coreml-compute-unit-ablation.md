@@ -439,6 +439,17 @@ sudo powermetrics -i 1000 --samplers ane
   mean, `+pi`, and `-pi` substitutes all fail strict waveform parity. At compact
   natural HAR length, even exact dumped HAR remains around corr `0.986-0.988`,
   proving a separate natural-vs-padded geometry loss.
+- **Nyquist-input compact HAR-source closes quality only when it loses speed:**
+  `scripts/probe_har_source_fused.py --nyquist-input` feeds the dumped Swift
+  Nyquist phase as a tiny extra input and splices it into the recomputed HAR
+  phase before the generator. Local 3s natural geometry is faster (`25.09 ms`
+  candidate vs `27.98 ms` baseline) but fails quality (`corr 0.988451`, SNR
+  `16.74 dB`). Padding the recomputed HAR back to the shipping geometry closes
+  parity but loses the speed edge: 3s padded is `29.25 ms` vs `28.69 ms` with
+  corr `0.999991`, SNR `47.75 dB`; 7s padded is `60.23 ms` vs `57.61 ms` with
+  corr `0.999993`, SNR `49.15 dB`. This proves the dumped Nyquist phase fixes
+  the raw phase convention only after preserving the padded shipping geometry;
+  the quality-safe compact source path is not a production speedup.
 - **Generator compute-unit switch is not the M2 Air fix:** Swift generator-input
   isolation on local M2 Studio 3s with five warmups and twenty measured calls
   gives CPU+GPU `28.289 ms`, `.all` `28.071 ms`, CPU-only `99.673 ms`, and

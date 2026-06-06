@@ -29,7 +29,13 @@ from probe_generator_exact_geometry import _compute_units, _load_kmodel, _metric
 from probe_generator_split import _duration_label_from_dump, _precision_arg, _remove_existing_package  # noqa: E402
 
 
-def _make_har_source_fused_module(generator: Any, phase_mode: str, pad_har_to: int | None):
+def _make_har_source_fused_module(
+    generator: Any,
+    phase_mode: str,
+    pad_har_to: int | None,
+    *,
+    nyquist_input: bool,
+):
     import torch
     import torch.nn as nn
     import torch.nn.functional as F
@@ -122,10 +128,17 @@ def _make_har_source_fused_module(generator: Any, phase_mode: str, pad_har_to: i
             )
             self.forward_stft = _CoreMLForwardSTFT(fwd_stft)
 
-        def forward(self, x_pre: Any, ref_s: Any, har_source: Any):
+        def forward(self, x_pre: Any, ref_s: Any, har_source: Any, nyquist_phase: Any | None = None):
             s = ref_s[:, :128]
             gen = self.gen
             har_spec, har_phase = self.forward_stft.transform(har_source)
+            if nyquist_input:
+                if nyquist_phase is None:
+                    raise RuntimeError("nyquist_input=True requires nyquist_phase")
+                har_phase = torch.cat(
+                    [har_phase[:, :10, :], nyquist_phase, har_phase[:, 11:, :]],
+                    dim=1,
+                )
             har = torch.cat([har_spec, har_phase], dim=1)
             if pad_har_to is not None:
                 current = har.size(2)
@@ -178,6 +191,8 @@ def run(args: argparse.Namespace) -> dict[str, Any]:
 
     manifest, tensors = load_tensor_dump(args.tensor_dump)
     required = ["x_pre_padded", "ref_s", "har_padded", "har_source", "waveform"]
+    if args.nyquist_input:
+        required.append("har_phase")
     missing = [name for name in required if name not in tensors]
     if missing:
         raise SystemExit(f"tensor dump missing required tensors: {missing}")
@@ -193,28 +208,42 @@ def run(args: argparse.Namespace) -> dict[str, Any]:
     ref_s = tensors["ref_s"].astype(np.float32)
     har_source = tensors["har_source"].astype(np.float32)
     har = tensors["har_padded"].astype(np.float32)
+    nyquist_phase = tensors["har_phase"][:, 10:11, :].astype(np.float32) if args.nyquist_input else None
 
     if not args.skip_export:
-        module = _make_har_source_fused_module(gen, args.phase_mode, args.pad_har_to)
+        module = _make_har_source_fused_module(
+            gen,
+            args.phase_mode,
+            args.pad_har_to,
+            nyquist_input=args.nyquist_input,
+        )
         removed_dropouts = remove_dropout(module)
+        trace_inputs = [
+            torch.zeros(tuple(x_pre.shape), dtype=torch.float32),
+            torch.zeros(tuple(ref_s.shape), dtype=torch.float32),
+            torch.zeros(tuple(har_source.shape), dtype=torch.float32),
+        ]
+        convert_inputs = [
+            ct.TensorType(name="x_pre", shape=tuple(x_pre.shape), dtype=np.float32),
+            ct.TensorType(name="ref_s", shape=tuple(ref_s.shape), dtype=np.float32),
+            ct.TensorType(name="har_source", shape=tuple(har_source.shape), dtype=np.float32),
+        ]
+        if args.nyquist_input:
+            assert nyquist_phase is not None
+            trace_inputs.append(torch.zeros(tuple(nyquist_phase.shape), dtype=torch.float32))
+            convert_inputs.append(
+                ct.TensorType(name="nyquist_phase", shape=tuple(nyquist_phase.shape), dtype=np.float32)
+            )
         with torch.no_grad():
             traced = torch.jit.trace(
                 module,
-                (
-                    torch.zeros(tuple(x_pre.shape), dtype=torch.float32),
-                    torch.zeros(tuple(ref_s.shape), dtype=torch.float32),
-                    torch.zeros(tuple(har_source.shape), dtype=torch.float32),
-                ),
+                tuple(trace_inputs),
                 strict=False,
                 check_trace=False,
             )
         model = ct.convert(
             traced,
-            inputs=[
-                ct.TensorType(name="x_pre", shape=tuple(x_pre.shape), dtype=np.float32),
-                ct.TensorType(name="ref_s", shape=tuple(ref_s.shape), dtype=np.float32),
-                ct.TensorType(name="har_source", shape=tuple(har_source.shape), dtype=np.float32),
-            ],
+            inputs=convert_inputs,
             outputs=[ct.TensorType(name="waveform")],
             convert_to="mlprogram",
             minimum_deployment_target=ct.target.macOS13,
@@ -232,11 +261,16 @@ def run(args: argparse.Namespace) -> dict[str, Any]:
     fused = ct.models.MLModel(str(args.fused_package), compute_units=_compute_units(ct, args.fused_compute_units))
     candidate = ct.models.MLModel(str(package), compute_units=_compute_units(ct, args.compute_units))
 
+    candidate_feed = {"x_pre": x_pre, "ref_s": ref_s, "har_source": har_source}
+    if args.nyquist_input:
+        assert nyquist_phase is not None
+        candidate_feed["nyquist_phase"] = nyquist_phase
+
     baseline_first, baseline_first_ms = _predict(fused, {"x_pre": x_pre, "ref_s": ref_s, "har": har})
-    candidate_first, candidate_first_ms = _predict(candidate, {"x_pre": x_pre, "ref_s": ref_s, "har_source": har_source})
+    candidate_first, candidate_first_ms = _predict(candidate, candidate_feed)
     for _ in range(max(0, args.warmup)):
         _predict(fused, {"x_pre": x_pre, "ref_s": ref_s, "har": har})
-        _predict(candidate, {"x_pre": x_pre, "ref_s": ref_s, "har_source": har_source})
+        _predict(candidate, candidate_feed)
 
     baseline_times: list[float] = []
     candidate_times: list[float] = []
@@ -244,7 +278,7 @@ def run(args: argparse.Namespace) -> dict[str, Any]:
     last_candidate = candidate_first
     for _ in range(max(1, args.iterations)):
         last_baseline, baseline_ms = _predict(fused, {"x_pre": x_pre, "ref_s": ref_s, "har": har})
-        last_candidate, candidate_ms = _predict(candidate, {"x_pre": x_pre, "ref_s": ref_s, "har_source": har_source})
+        last_candidate, candidate_ms = _predict(candidate, candidate_feed)
         baseline_times.append(baseline_ms)
         candidate_times.append(candidate_ms)
 
@@ -261,6 +295,7 @@ def run(args: argparse.Namespace) -> dict[str, Any]:
         "precision": args.precision,
         "phase_mode": args.phase_mode,
         "pad_har_to": args.pad_har_to,
+        "nyquist_input": bool(args.nyquist_input),
         "compute_units": args.compute_units,
         "fused_compute_units": args.fused_compute_units,
         "first_predict_ms": {
@@ -301,6 +336,11 @@ def main() -> None:
     parser.add_argument("--precision", default="fp16", choices=["fp16", "fp32"])
     parser.add_argument("--phase-mode", default="atan2", choices=["atan2", "acos", "atan_manual", "atan_swift"])
     parser.add_argument("--pad-har-to", type=int, default=None)
+    parser.add_argument(
+        "--nyquist-input",
+        action="store_true",
+        help="Feed dumped Swift Nyquist phase as a tiny extra input and splice it into recomputed HAR phase.",
+    )
     parser.add_argument("--compute-units", default="all")
     parser.add_argument("--fused-compute-units", default="all")
     parser.add_argument("--warmup", type=int, default=2)
