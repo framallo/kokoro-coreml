@@ -42,3 +42,29 @@ Decision:
 - `7s/10s/15s` were collected during active host load and are failure evidence
   for the timing environment, not candidate performance.
 - Do not update `competitive_frontier.md` from these smoke rows.
+
+## 2026-06-06 HnSF Per-Harmonic Merge Smoke
+
+Candidate:
+
+- Replaced the frame-based HnSF path's full noisy harmonic matrix +
+  `vDSP_mmul` merge with per-harmonic mask/noise/weight accumulation.
+- Goal was to reduce host-side memory traffic on lower-end Macs.
+- The edit preserved harmonic-source test parity at `2e-6`.
+
+Smoke result:
+
+| Machine | Bucket | Candidate warmed median | Current rewrite row | Status |
+| --- | --- | ---: | ---: | --- |
+| `m2-studio` | `3s` | `53.5 ms` | `49.7 ms` | rejected |
+
+Raw artifact:
+
+- `outputs/external_bakeoff/results_config_f_reference_m2-studio_hnsf_merge_smoke.json`
+
+Decision:
+
+- Rejected. The candidate regressed the fast local row, so it is not worth
+  promoting to lower-end Macs.
+- Keep the existing `vDSP_mmul` merge path; the BLAS kernel beats the lower
+  scratch-memory version for this contract.
