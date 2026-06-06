@@ -390,10 +390,11 @@ sudo powermetrics -i 1000 --samplers ane
   faster than the current `GeneratorFromHar` package on local warmed inference
   (`3s` fp16 `26.4 ms` vs `30.3 ms`; `7s` fp16 `51.2 ms` vs `60.9 ms`), but it
   still fails waveform parity (`3s` corr `0.980656`, SNR `13.10 dB`; `7s` corr
-  `0.979271`, SNR `13.06 dB`). fp32 conversion does not fix it (`3s` corr only
-  `0.981718`), and CPU-only Core ML execution still fails (`3s` corr
-  `0.979581`, SNR `12.61 dB`). Treat this as a converted-graph semantic/parity
-  recovery target, not an ANE scheduling issue or production replacement.
+  `0.979271`, SNR `13.06 dB`). fp32 conversion of the native-`atan2` graph does
+  not fix it (`3s` corr only `0.981718`), and CPU-only Core ML execution still
+  fails (`3s` corr `0.979581`, SNR `12.61 dB`). Treat this as a source/STFT
+  contract recovery target, not an ANE scheduling issue or production
+  replacement.
 - **Converted `atan2` is the first bad op in fused HAR-source:** `scripts/probe_coreml_stft_semantics.py`
   exports only `har_source -> magnitude, phase, real, imag`. Core ML matches
   PyTorch/Swift for `real`, `imag`, and `magnitude` (all effectively corr
@@ -401,9 +402,12 @@ sudo powermetrics -i 1000 --samplers ane
   on `cpu_only` (corr `0.818405`, SNR `4.67 dB`). `acos` and manual-quadrant
   `atan` formulas improve the fused waveform to corr `~0.987`, but still fail
   strict parity because raw `+pi/-pi` branch choices are ordinary feature values
-  to the downstream convs. Future work should avoid raw phase discontinuities or
-  implement a Core ML-safe phase convention before revisiting the fused source
-  speed path.
+  to the downstream convs. The follow-up `scripts/probe_har_source_fused_debug.py`
+  proves fp32 manual `atan` is Core ML-safe (Core ML vs PyTorch waveform corr
+  `1.000000`, SNR `72.24 dB`) but the PyTorch/Core ML source-boundary waveform
+  is still only corr `0.987820` vs the Swift dump. Future work should avoid raw
+  phase discontinuities or reproduce the exact Swift HAR contract before
+  revisiting the fused source speed path.
 - **HAR input-tail trimming is too small:** `scripts/probe_generator_har_input_trim.py`
   keeps the bucketed `x_pre` shape and current Swift HAR source, but exports a
   temporary `GeneratorFromHar` with a shorter static `har` axis. The aggressive

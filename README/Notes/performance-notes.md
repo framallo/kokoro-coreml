@@ -802,10 +802,12 @@ Core ML export. The downsample approximation is not the quality culprit:
 `avg_pool` and linear interpolation are effectively tied at the source boundary
 (`3s` corr `0.93978`, `7s` corr `0.96731`). Recomputing STFT from the exact
 dumped Swift source gives exact magnitude but phase differs at the `+-pi`
-representation boundary; modulo `2*pi`, the phase error is tiny. A PyTorch
-waveform sensitivity check confirms that recomputed STFT from the dumped source
-still gives high waveform parity (`3s` corr `0.99881`, `7s` corr `0.99846`),
-so the F0-source quality loss is source drift, not the STFT convention alone.
+representation boundary; modulo `2*pi`, the phase error is tiny. Later
+debug-graph bisection supersedes the early waveform sensitivity check: once the
+same fused source graph is traced and inspected with intermediate outputs, the
+PyTorch `har_source -> waveform` path itself is only `3s` corr `0.987820` versus
+the Swift dump. So the compact source boundary has a real source/STFT convention
+gap even before Core ML scheduling enters.
 
 `scripts/probe_har_source_noise_split.py` exports a temporary
 `har_source + style -> x_source_*` package, then reuses the decoder-vocoder
@@ -815,13 +817,16 @@ shipping packages.
 `scripts/probe_har_source_fused.py` tests the same compact exact-source
 boundary but keeps STFT, generator body, and iSTFT tail fused into one Core ML
 graph. This avoids the body/tail split drift, and is the better speed shape, but
-it still fails parity after Core ML conversion.
+it still fails parity.
 
 `scripts/probe_coreml_stft_semantics.py` isolates the converted forward-STFT
-subgraph. It proves the first semantic failure inside the fused source graph:
-Core ML preserves the STFT `real`, `imag`, and `magnitude` tensors, but the
-converted `torch.atan2(imag, real)` phase is wrong even with
-`compute_units=cpu_only`.
+subgraph. It proves one concrete conversion bug: Core ML preserves the STFT
+`real`, `imag`, and `magnitude` tensors, but converted
+`torch.atan2(imag, real)` phase is wrong even with `compute_units=cpu_only`.
+`scripts/probe_har_source_fused_debug.py` then moves the bisection forward: with
+fp32 manual-atan phase, Core ML matches PyTorch through `har`, `x_source_*`,
+`pre_tail`, and `waveform`, but that PyTorch path still fails parity against the
+Swift dump.
 
 Local generated command examples:
 
@@ -841,6 +846,13 @@ uv run --no-sync python scripts/probe_har_source_fused.py \
   outputs/generator_isolation/dumps/7s \
   --fused-package coreml/kokoro_decoder_har_post_7s.mlpackage \
   --label 7s --warmup 2 --iterations 10
+
+uv run --no-sync python scripts/probe_har_source_fused_debug.py \
+  outputs/generator_isolation/dumps/3s \
+  --label 3s_atan_manual_fp32 \
+  --phase-mode atan_manual \
+  --precision fp32 \
+  --compute-units cpu_only
 ```
 
 | Probe | Baseline median | Candidate median | Candidate vs dump | Decision |
@@ -851,17 +863,16 @@ uv run --no-sync python scripts/probe_har_source_fused.py \
 | fused `har_source`, 3s fp32 | 30.3 ms | 27.1 ms | corr 0.981718, SNR 13.19 dB | fp32 does not recover parity |
 | fused `har_source`, 3s `acos` phase | 29.5 ms | 25.5 ms | corr 0.987344, SNR 16.18 dB | better, still not parity |
 | fused `har_source`, 3s `atan_manual` phase | 31.1 ms | 27.2 ms | corr 0.987372, SNR 16.19 dB | better, still not parity |
+| fused `har_source`, 3s `atan_manual` fp32 | 31.4 ms | 27.1 ms | corr 0.987820, SNR 16.58 dB | Core ML matches PyTorch; PyTorch source boundary still not parity |
 | fused `har_source`, 7s fp16 | 60.9 ms | 51.2 ms | corr 0.979271, SNR 13.06 dB | speed-positive, blocked on Core ML parity |
 
 Interpretation: exact dumped source improves quality over the F0-source path,
-but the Core ML STFT/noise-conv path still fails strict parity. The staged
+but the Core ML/STFT source-boundary path still fails strict parity. The staged
 source split has too little speed margin once Swift source generation is
 counted. The fused source graph has enough package-level speed upside to remain
-a research target, but only if a Core ML semantic/parity fix recovers waveform
-quality; fp32 precision alone does not. Running the same 3s fused fp16 package
-with `compute_units=cpu_only` still fails at roughly the same level (corr
-`0.979581`, SNR `12.61 dB`), so the failure is in converted graph semantics, not
-ANE scheduling.
+a research target, but two separate blockers are now proven: native Core ML
+`atan2` conversion is broken, and even a Core ML-correct fp32 manual phase graph
+does not reproduce the current Swift HAR waveform closely enough.
 
 The STFT-only semantic probe gives the exact bisection:
 
@@ -872,15 +883,26 @@ The STFT-only semantic probe gives the exact bisection:
 | `magnitude` | corr 1.000000, SNR 63.74 dB | good |
 | `atan2` phase | corr 0.818405 vs PyTorch, SNR 4.67 dB | broken conversion |
 | `acos` phase | wrapped mean abs 0.01285 rad | better modulo wrap, raw parity still bad |
-| `atan_manual` phase | wrapped mean abs 0.00369 rad | better modulo wrap, raw parity still bad |
+| `atan_manual` phase fp16 | wrapped mean abs 0.00369 rad | better modulo wrap, raw parity still bad |
+| `atan_manual` phase fp32 | corr 1.000000 vs PyTorch, SNR 152.00 dB | Core ML-safe replacement for `atan2` |
+
+The fused-debug probe then shows where the remaining error lives:
+
+| Fused debug, 3s `atan_manual` fp32 CPU-only | Core ML vs PyTorch | PyTorch/Core ML vs Swift dump |
+| --- | --- | --- |
+| `har` | corr 1.000000, SNR 152.03 dB | not the remaining Core ML drift |
+| `x_source_0` | corr 1.000000, SNR 87.04 dB | not the remaining Core ML drift |
+| `x_source_1` | corr 1.000000, SNR 79.55 dB | not the remaining Core ML drift |
+| `pre_tail` | corr 1.000000, SNR 86.21 dB | not the remaining Core ML drift |
+| `waveform` | corr 1.000000, SNR 72.24 dB | PyTorch/Core ML both corr 0.987820 vs Swift dump |
 
 Observed failure mode: converted `atan2` is quadrant-unsafe. For example, when
 `imag == 0` and `real < 0`, the Core ML phase can be `0` instead of `pi`. Manual
-`atan`/`acos` formulas reduce the angular error modulo `2*pi`, but waveform
-parity remains below threshold because the generator consumes raw phase as a
-feature channel; `+pi` and `-pi` are not equivalent to the convolution stack.
-The next useful path is a Core ML-safe phase representation or a graph rewrite
-that removes raw phase discontinuities before the first noise convolution.
+`atan` in fp32 fixes that conversion bug. However, waveform parity remains below
+threshold because the compact source-boundary graph is not the same numerical
+contract as the current Swift HAR dump. The next useful path is a source/STFT
+contract rewrite that either feeds the exact Swift HAR convention or removes raw
+phase discontinuities before the first noise convolution.
 
 #### HAR input-trim probe
 
