@@ -100,6 +100,17 @@
       "strict": true
     },
     {
+      "best_signal": "local 3s +4.54% vs shipped fused, but only +0.17% versus production upsample rewrite at N=30",
+      "decision": "reject as noise-sized over the simpler production rewrite",
+      "evidence": "outputs/generator_style_specialization/3s_style_native_in_ups_as_conv_ios17/report_cpu_gpu_vs_rewrite_n30.json",
+      "family": "Style-specialized generator plus upsample rewrite",
+      "next_gate": "do not promote unless multi-bucket local evidence beats production rewrite by a material margin",
+      "production_ready": false,
+      "quality": "strict: corr 0.999993, SNR 49.09 dB, max abs 0.002197",
+      "scope": "single-package fixed-voice GeneratorFromHar with native-IN and zero-insert upsample rewrite",
+      "strict": true
+    },
+    {
       "best_signal": "Irvine 3s +10.9 to +18.7 ms depending branch",
       "decision": "not paper-strict; only useful with source recovery or no-ASR listening acceptance",
       "evidence": "outputs/f0_source_listening/cos_resblock_speed_branch/README.md",
@@ -144,11 +155,11 @@
   ],
   "strict_budget": "outputs/external_bakeoff/strict_win_budget_after_rewrite.json",
   "summary": {
-    "candidate_count": 12,
+    "candidate_count": 13,
     "iphone_launch_blocker": "device_locked",
     "non_strict_candidates": 3,
     "production_ready_strict_candidates": 1,
     "profile_rows_remaining_after_rewrite": 4,
-    "strict_rejected_or_too_small": 8
+    "strict_rejected_or_too_small": 9
   }
 }

@@ -4571,14 +4571,29 @@ production rewrite on `3s` and noise-tied on `10s`; it regresses `7s/15s/30s`.
 Result:
 `outputs/external_bakeoff/results_config_f_reference_m2-studio-local_full_surface_ups_as_conv.json`.
 
+Style specialization was also combined with the strict HAR-post upsample
+rewrite. `scripts/probe_generator_style_specialization.py` now accepts
+`--rewrite-ups-conv-transpose` and `--comparison-package` so the fixed-voice
+package can be compared directly against the three-input production rewrite
+package. Local M2 Studio `3s` CPU+GPU remains strict but is only noise-positive
+against the simpler production rewrite: shipped fused `26.294 ms`, production
+rewrite `25.143 ms`, style-specialized native-IN upsample rewrite `25.101 ms`,
+or `+0.17%` versus production rewrite at N=30. Metrics versus shipped fused:
+corr `0.999993`, SNR `49.09 dB`, max abs `0.002197`; metrics versus production
+rewrite: corr `0.999994`, SNR `49.66 dB`, max abs `0.002197`. Decision: reject
+as a production candidate unless future multi-bucket evidence shows a material
+margin over the simpler rewrite. Report:
+`outputs/generator_style_specialization/3s_style_native_in_ups_as_conv_ios17/report_cpu_gpu_vs_rewrite_n30.json`.
+
 `scripts/external_bakeoff/summarize_candidate_frontier_matrix.py` now records
 the current optimization frontier at
 `outputs/external_bakeoff/candidate_frontier_matrix.md`. The matrix separates
-the single production-ready strict win (HAR-post upsample rewrite), eight
+the single production-ready strict win (HAR-post upsample rewrite), nine
 strict but rejected or too-small families, and three non-strict or
 quality-changing families. The ledger explicitly includes HAR trim, CT8/CT9
-toolchain-only rebuilds, RangeDim/flexible inputs, and linear quantization so
-those measured dead ends are not rediscovered as open hypotheses. It also
+toolchain-only rebuilds, RangeDim/flexible inputs, linear quantization, and the
+style-specialized upsample rewrite combination so those measured dead ends are
+not rediscovered as open hypotheses. It also
 carries the current iPhone Config F launch blocker from
 `outputs/external_bakeoff/config_f_ios_manual_install_latest.json`, so the
 next pass has one machine-readable place to check what is worth rerunning. As

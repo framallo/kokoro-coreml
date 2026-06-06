@@ -1770,9 +1770,9 @@ def test_candidate_frontier_matrix_records_successes_failures_and_blockers(tmp_p
     families = {row["family"] for row in payload["candidates"]}
 
     assert payload["summary"] == {
-        "candidate_count": 12,
+        "candidate_count": 13,
         "production_ready_strict_candidates": 1,
-        "strict_rejected_or_too_small": 8,
+        "strict_rejected_or_too_small": 9,
         "non_strict_candidates": 3,
         "profile_rows_remaining_after_rewrite": 4,
         "iphone_launch_blocker": "device_locked",
@@ -1781,8 +1781,9 @@ def test_candidate_frontier_matrix_records_successes_failures_and_blockers(tmp_p
     assert "RangeDim/flexible input generator" in families
     assert "Linear weight quantization" in families
     assert "CT8/CT9/iOS17 toolchain-only rebuild" in families
+    assert "Style-specialized generator plus upsample rewrite" in families
     assert "Fast F0/source simplification" in families
-    assert "Candidates recorded: `12`" in markdown
+    assert "Candidates recorded: `13`" in markdown
     assert "Run scripts/external_bakeoff/check_remote_host_quiet.py" in markdown
 
 

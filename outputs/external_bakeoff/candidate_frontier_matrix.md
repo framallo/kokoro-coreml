@@ -6,9 +6,9 @@ candidates from non-strict or quality-changing branches.
 
 ## Summary
 
-- Candidates recorded: `12`.
+- Candidates recorded: `13`.
 - Production-ready strict candidates: `1`.
-- Strict rejected or too-small candidates: `8`.
+- Strict rejected or too-small candidates: `9`.
 - Non-strict or quality-changing candidates: `3`.
 - Irvine profile rows remaining after rewrite projection: `4`.
 - iPhone Config F launch blocker: `device_locked`.
@@ -26,6 +26,7 @@ candidates from non-strict or quality-changing branches.
 | HAR-source fused strict path | source/STFT/HAR fused path | Irvine 3s CPU+GPU -22.9 ms; CPU+NE -163.8 ms | `yes` | `no` | reject; preserving strict source contract loses the speed edge | new representation only; do not promote padded strict path |
 | Native-IN/broadcast/cos/fp16 fused surface without upsample rewrite | single-package GeneratorFromHar | local 3s roughly +0.08-0.26%; .all/CPU+NE remains harmful | `yes` | `no` | reject as too small; graph-surface parity alone is not enough | do not repeat without a new layout, fusion, or partitioning mechanism |
 | Style-specialized fused generator | single-package GeneratorFromHar with fixed af_heart projections | Irvine 3s -3.0 ms; M2 Air 3s -2.2 ms; local native-IN variant only +0.07 ms | `yes` | `no` | reject; freezing style is not a speed path | none unless combined with a material new operator rewrite |
+| Style-specialized generator plus upsample rewrite | single-package fixed-voice GeneratorFromHar with native-IN and zero-insert upsample rewrite | local 3s +4.54% vs shipped fused, but only +0.17% versus production upsample rewrite at N=30 | `yes` | `no` | reject as noise-sized over the simpler production rewrite | do not promote unless multi-bucket local evidence beats production rewrite by a material margin |
 | Fast F0/source simplification | laishere-like source/body branch | Irvine 3s +10.9 to +18.7 ms depending branch | `no` | `no` | not paper-strict; only useful with source recovery or no-ASR listening acceptance | human listening decisions or source/STFT representation repair |
 | Linear weight quantization | single-package final-waveform GeneratorFromHar compression | int8 CPU-only +4.27% but CPU+GPU crashes; int4 iOS18 is slower | `no` | `no` | reject for final-waveform generator; compression is not the missing speed path | only revisit on discarded-output intermediate stages with separate final-quality tail |
 | RangeDim/flexible input generator | single-package GeneratorFromHar with bounded dynamic time axes | local 3s 343-1561 ms candidate latency versus 31-50 ms fused baseline | `no` | `no` | reject; dynamic broadcast/shape propagation is both slower and not strict | do not use RangeDim for the fused generator hot path; keep fixed buckets |
@@ -41,6 +42,7 @@ candidates from non-strict or quality-changing branches.
 - HAR-source fused strict path: `outputs/nyquist_phase_contribution/summary.md`.
 - Native-IN/broadcast/cos/fp16 fused surface without upsample rewrite: `README/Notes/performance-notes.md`.
 - Style-specialized fused generator: `README/Notes/performance-notes.md`.
+- Style-specialized generator plus upsample rewrite: `outputs/generator_style_specialization/3s_style_native_in_ups_as_conv_ios17/report_cpu_gpu_vs_rewrite_n30.json`.
 - Fast F0/source simplification: `outputs/f0_source_listening/cos_resblock_speed_branch/README.md`.
 - Linear weight quantization: `README/Notes/performance-notes.md`.
 - RangeDim/flexible input generator: `README/Notes/performance-notes.md`.
