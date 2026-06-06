@@ -180,16 +180,17 @@ and ingest the JSON from the clipboard/output. This bypass path means Config F
 iPhone benchmarking is no longer blocked on Xcode project build, but warmed
 Config F iPhone timings are still absent until the installed runner executes.
 
-Fresh launch check on 2026-06-06 at 02:24 local time: CoreDevice still lists
+Fresh launch check on 2026-06-06 at 02:37 local time: CoreDevice still lists
 `Matt's iPhone` as `available (paired)`, Developer Mode is enabled, and the
-tunnel is connected. Launching the already installed
-`com.kokoro.externalbakeoff.ConfigFIOSRunnerManual` app still fails before app
-startup with `FBSOpenApplicationServiceErrorDomain ... RequestDenied ... Locked`
-and `Unable to launch ... because the device was not, or could not be,
-unlocked`. `xcrun devicectl device info lockState --device
-00008101-001134561A0A001E` reports `passcodeRequired: true` and
-`unlockedSinceBoot: true`. The phone is accessible to the machine, but the
-runner cannot execute until the physical device is unlocked.
+tunnel is connected. The manual bypass rebuilt and reinstalled
+`com.kokoro.externalbakeoff.ConfigFIOSRunnerManual` successfully on the phone,
+again producing an `882M` app bundle. Launch still fails before app startup
+with `FBSOpenApplicationServiceErrorDomain ... RequestDenied ... Locked` and
+`Unable to launch ... because the device was not, or could not be, unlocked`.
+`xcrun devicectl device info lockState --device 00008101-001134561A0A001E`
+reports `passcodeRequired: true` and `unlockedSinceBoot: true`. The phone is
+accessible to the machine, but the runner cannot execute until the physical
+device is unlocked.
 
 Whisper, ASR, VAD, playback, and echo-demo dependencies are not part of this
 bakeoff boundary. The iOS runner is intentionally Kokoro TTS only.
