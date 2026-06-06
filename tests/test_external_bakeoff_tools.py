@@ -1,9 +1,12 @@
+import argparse
 import csv
 import hashlib
 import json
+import subprocess
 from pathlib import Path
 
 from scripts.create_f0_source_listening_pack import _natural_asr_enabled
+from scripts.external_bakeoff import check_remote_host_quiet
 from scripts.external_bakeoff.create_listening_review import _write_decisions_csv
 from scripts.external_bakeoff.ingest_ios_runner_result import _ingest_records
 from scripts.external_bakeoff.run_laishere_kokoro_coreml import (
@@ -20,6 +23,10 @@ from scripts.external_bakeoff.summarize_competitive_frontier import (
     load_records as load_frontier_records,
     render_markdown as render_frontier_markdown,
     summarize_frontier,
+)
+from scripts.external_bakeoff.summarize_candidate_frontier_matrix import (
+    build_payload as build_candidate_frontier_matrix,
+    render_markdown as render_candidate_frontier_matrix_markdown,
 )
 from scripts.external_bakeoff.summarize_frontier_freshness import (
     render_markdown as render_frontier_freshness_markdown,
@@ -1720,3 +1727,108 @@ def test_completion_verifier_accepts_manual_config_f_ios_install(tmp_path):
     assert preflight and preflight["ok"]
     assert preflight["bundle_id"] == "com.kokoro.externalbakeoff.ConfigFIOSRunnerManual"
     assert preflight_errors == []
+
+
+def test_candidate_frontier_matrix_records_successes_failures_and_blockers(tmp_path):
+    strict_budget = tmp_path / "strict_budget.json"
+    ios_install = tmp_path / "ios_install.json"
+    strict_budget.write_text(json.dumps({"summary": {"profile_rows_remaining": 4}}))
+    ios_install.write_text(json.dumps({"launch_blocker": "device_locked"}))
+
+    payload = build_candidate_frontier_matrix(
+        argparse.Namespace(strict_budget=strict_budget, ios_install=ios_install)
+    )
+    markdown = render_candidate_frontier_matrix_markdown(payload)
+    families = {row["family"] for row in payload["candidates"]}
+
+    assert payload["summary"] == {
+        "candidate_count": 12,
+        "production_ready_strict_candidates": 1,
+        "strict_rejected_or_too_small": 8,
+        "non_strict_candidates": 3,
+        "profile_rows_remaining_after_rewrite": 4,
+        "iphone_launch_blocker": "device_locked",
+    }
+    assert "HAR-post upsample ConvT rewrite" in families
+    assert "RangeDim/flexible input generator" in families
+    assert "Linear weight quantization" in families
+    assert "CT8/CT9/iOS17 toolchain-only rebuild" in families
+    assert "Fast F0/source simplification" in families
+    assert "Candidates recorded: `12`" in markdown
+    assert "Run scripts/external_bakeoff/check_remote_host_quiet.py" in markdown
+
+
+def test_remote_host_quiet_parser_and_status(monkeypatch):
+    stdout = "\n".join(
+        [
+            " 7:16  up 6 days, 16:16, 1 user, load averages: 2.54 2.64 2.78",
+            "83.0 /System/Library/PrivateFrameworks/MediaAnalysis.framework/Versions/A/mediaanalysisd",
+            "28.6 /System/Library/Frameworks/CoreServices.framework/Frameworks/Metadata.framework/Versions/A/Support/mds_stores",
+            " 4.1 /Applications/Botnet.app/Contents/MacOS/Brave Browser",
+        ]
+    )
+
+    def fake_run_ssh(target: str, command: str, timeout_s: int):
+        assert target == "mattmireles@example.local"
+        assert "uptime" in command
+        assert timeout_s == 5
+        return subprocess.CompletedProcess(args=["ssh"], returncode=0, stdout=stdout, stderr="")
+
+    monkeypatch.setattr(check_remote_host_quiet, "_run_ssh", fake_run_ssh)
+
+    payload = check_remote_host_quiet.build_payload(
+        argparse.Namespace(
+            host=["test-mac=mattmireles@example.local"],
+            max_load_1=1.0,
+            max_noisy_cpu_pct=10.0,
+            timeout=5,
+        )
+    )
+    markdown = check_remote_host_quiet.render_markdown(payload)
+
+    assert payload["publishable_timing_allowed"] is False
+    row = payload["rows"][0]
+    assert row["quiet"] is False
+    assert row["load"] == {
+        "one_minute": 2.54,
+        "five_minutes": 2.64,
+        "fifteen_minutes": 2.78,
+    }
+    assert row["blockers"] == [
+        "load1 2.54 exceeds 1.00",
+        "/System/Library/PrivateFrameworks/MediaAnalysis.framework/Versions/A/mediaanalysisd at 83.0% CPU",
+        "/System/Library/Frameworks/CoreServices.framework/Frameworks/Metadata.framework/Versions/A/Support/mds_stores at 28.6% CPU",
+    ]
+    assert row["processes"][0]["noisy"] is True
+    assert "`test-mac` | `no` | 2.54/2.64/2.78" in markdown
+
+
+def test_remote_host_quiet_allows_publishable_timing_when_thresholds_pass(monkeypatch):
+    stdout = "\n".join(
+        [
+            " 9:01  up 1 day, 1 user, load averages: 0.42 0.50 0.60",
+            " 3.0 /usr/libexec/runningboardd",
+            " 0.5 /System/Library/PrivateFrameworks/MediaAnalysis.framework/Versions/A/mediaanalysisd",
+        ]
+    )
+
+    monkeypatch.setattr(
+        check_remote_host_quiet,
+        "_run_ssh",
+        lambda *_args, **_kwargs: subprocess.CompletedProcess(
+            args=["ssh"], returncode=0, stdout=stdout, stderr=""
+        ),
+    )
+
+    payload = check_remote_host_quiet.build_payload(
+        argparse.Namespace(
+            host=["quiet-mac=mattmireles@example.local"],
+            max_load_1=1.0,
+            max_noisy_cpu_pct=10.0,
+            timeout=5,
+        )
+    )
+
+    assert payload["publishable_timing_allowed"] is True
+    assert payload["rows"][0]["quiet"] is True
+    assert payload["rows"][0]["blockers"] == []
