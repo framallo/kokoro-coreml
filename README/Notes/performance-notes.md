@@ -4574,9 +4574,12 @@ Result:
 `scripts/external_bakeoff/summarize_candidate_frontier_matrix.py` now records
 the current optimization frontier at
 `outputs/external_bakeoff/candidate_frontier_matrix.md`. The matrix separates
-the single production-ready strict win (HAR-post upsample rewrite), six strict
-but rejected or too-small families, and the one fast quality-fail F0/source
-family. It also carries the current iPhone Config F launch blocker from
+the single production-ready strict win (HAR-post upsample rewrite), eight
+strict but rejected or too-small families, and three non-strict or
+quality-changing families. The ledger explicitly includes HAR trim, CT8/CT9
+toolchain-only rebuilds, RangeDim/flexible inputs, and linear quantization so
+those measured dead ends are not rediscovered as open hypotheses. It also
+carries the current iPhone Config F launch blocker from
 `outputs/external_bakeoff/config_f_ios_manual_install_latest.json`, so the
 next pass has one machine-readable place to check what is worth rerunning. As
 of the latest local check on 2026-06-06 at 07:06, the iPhone remains visible
