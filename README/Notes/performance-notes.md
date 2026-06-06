@@ -544,6 +544,7 @@ Local M2 Studio 3s, CPU+GPU, N=10 median after three discarded warmups:
 | corrected broadcast AdaIN | 8 | 2015 | `tile` 96 -> 0 | 30.92 ms | 30.93 ms | -0.03% | corr 0.999997, SNR 53.17 dB | reject |
 | native InstanceNorm AdaIN | 8 | 1731 | `reduce_mean` 88 -> 0, `instance_norm` 0 -> 44 | 31.00 ms | 30.93 ms | +0.24% | corr 0.999994, SNR 49.84 dB | reject |
 | native InstanceNorm + broadcast + cos | 8 | 1635 | no `tile`, native `instance_norm`, cos Snake | 30.08 ms | 30.68 ms | -2.02% | corr 0.999994, SNR 49.71 dB | reject |
+| native InstanceNorm + broadcast + cos + pal8 | 8 | 1635 | adds 101 `constexpr_lut_to_dense` ops; package `38M` -> `19M` | 29.64 ms | 31.31 ms | -5.65% | corr 0.999879, SNR 36.54 dB, max abs 0.01007 | reject; slower and misses max-abs gate |
 
 The strongest visible graph cleanup is the combined native InstanceNorm +
 broadcast + cos candidate: it drops the 3s fused graph from `2207` to `1635`
@@ -561,9 +562,20 @@ This closes the visible laishere graph-surface hypothesis for the current
 fused generator boundary. We can reproduce its obvious source-level ingredients
 inside our fused package, but they do not make Mac prediction faster. The
 remaining M1 loss is therefore likely below the visible MIL histogram: Core ML
-compute-plan/kernel selection, palettized weight decompression behavior, or a
+compute-plan/kernel selection, compiler/runtime/toolchain differences, or a
 larger pipeline boundary difference rather than a simple AdaIN/Snake source
 rewrite.
+
+The palettized fused-generator row is the direct check against laishere's
+`KokoroVocoder` metadata surface. `xcrun coremlcompiler metadata` reports
+laishere's vocoder as mixed FP16/FP32 plus 8-bit palettized weights with
+`101` `constexpr_lut_to_dense` ops; the local pal8 candidate reproduces that
+LUT count and halves package size. It does not reproduce a speedup. The
+candidate is slower and slightly fails the existing sample gate because its
+palettized output is the final waveform. That differs from laishere's public
+split: its palettized vocoder emits an intermediate audio anchor that is
+discarded, while a separate tail emits the listener-facing waveform. Do not
+ship or rank palettized fused-generator packages without a fresh quality gate.
 
 #### Style-specialized generator probe
 

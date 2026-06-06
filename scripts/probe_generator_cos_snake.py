@@ -52,6 +52,20 @@ def _deployment_target(ct: Any, name: str) -> Any:
         raise ValueError(f"unsupported deployment target {name!r}") from exc
 
 
+def _maybe_palettize(mlmodel: Any, enabled: bool) -> Any:
+    """Optionally apply 8-bit k-means weight palettization."""
+
+    if not enabled:
+        return mlmodel
+
+    import coremltools.optimize.coreml as cto
+
+    pal_config = cto.OptimizationConfig(
+        global_config=cto.OpPalettizerConfig(mode="kmeans", nbits=8)
+    )
+    return cto.palettize_weights(mlmodel, pal_config)
+
+
 def _patch_broadcast_adain() -> None:
     """Patch AdaIN1d to rely on broadcast instead of explicit expand/tile."""
 
@@ -124,6 +138,7 @@ def _export_package(
     broadcast_adain: bool,
     deployment_target: str,
     native_instance_norm_adain: bool,
+    palettize: bool,
 ) -> dict[str, Any]:
     import coremltools as ct
     import torch
@@ -171,6 +186,7 @@ def _export_package(
         compute_precision=_precision_arg(ct, precision),
         compute_units=ct.ComputeUnit.ALL,
     )
+    mlmodel = _maybe_palettize(mlmodel, palettize)
     package.parent.mkdir(parents=True, exist_ok=True)
     _remove_existing_package(package)
     mlmodel.save(str(package))
@@ -181,6 +197,7 @@ def _export_package(
         "broadcast_adain": bool(broadcast_adain),
         "native_instance_norm_adain": bool(native_instance_norm_adain),
         "deployment_target": deployment_target,
+        "palettize": bool(palettize),
         "removed_dropouts": removed_dropouts,
         "traced_samples": traced_samples,
         "x_pre_shape": list(x_pre_shape),
@@ -283,6 +300,8 @@ def run(args: argparse.Namespace) -> dict[str, Any]:
         label = f"{label}_broadcast_adain"
     if args.native_instance_norm_adain:
         label = f"{label}_native_in"
+    if args.palettize:
+        label = f"{label}_pal8"
     if args.deployment_target.lower() != "macos13":
         label = f"{label}_{args.deployment_target.lower()}"
     work_dir = args.output_dir / label
@@ -305,6 +324,7 @@ def run(args: argparse.Namespace) -> dict[str, Any]:
             args.broadcast_adain,
             args.deployment_target,
             args.native_instance_norm_adain,
+            args.palettize,
         )
 
     benchmark = _benchmark(args, tensors, cos_package)
@@ -326,6 +346,7 @@ def run(args: argparse.Namespace) -> dict[str, Any]:
         "broadcast_adain": bool(args.broadcast_adain),
         "native_instance_norm_adain": bool(args.native_instance_norm_adain),
         "deployment_target": args.deployment_target,
+        "palettize": bool(args.palettize),
         "export": export_report,
         "benchmark": benchmark,
         "thresholds": {
@@ -375,6 +396,11 @@ def main() -> None:
         default="macos13",
         choices=("macos13", "macos14", "macos15", "ios17", "ios18"),
         help="Minimum deployment target for the candidate package.",
+    )
+    parser.add_argument(
+        "--palettize",
+        action="store_true",
+        help="Apply 8-bit k-means weight palettization to the candidate package.",
     )
     parser.add_argument(
         "--precision",

@@ -243,6 +243,17 @@ sudo powermetrics -i 1000 --samplers ane
   `120.65 ms`, and Irvine M1 `167.83 ms` vs `167.60 ms`. Parity passed
   (`corr >= 0.999994`, `SNR >= 49.7 dB`). This rejects the simple hypothesis
   that laishere wins because of visible MIL op cleanup alone.
+- **Palettized fused generator rejected:** the same probe can now apply 8-bit
+  k-means Core ML palettization. The strongest visible-surface candidate
+  (native InstanceNorm + broadcast AdaIN + cos Snake + pal8) reproduced
+  laishere's visible LUT surface (`101` `constexpr_lut_to_dense` ops) and cut
+  the 3s package from `38M` to `19M`, but local M2 Studio predict-only latency
+  worsened from `29.64 ms` fused to `31.31 ms` and the row missed the existing
+  max-abs gate (`0.01007` vs threshold `0.01`). This rejects "palettize the
+  fused final-waveform package" as the explanation for laishere's M1 lead.
+  Laishere's palettized vocoder output is discarded before its separate tail,
+  so its quantization error does not map directly onto our fused final
+  waveform output.
 - **Style-specialized generator rejected:** `scripts/probe_generator_style_specialization.py`
   bakes the dump's `ref_s` into the generator and replaces all `AdaIN1d`
   projections with fixed gamma/beta constants. The 3s MIL graph shrank from
