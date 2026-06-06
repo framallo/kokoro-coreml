@@ -4529,6 +4529,25 @@ Spotcheck WAVs versus `vector_noise_batch` remain strict-like: corr
 Do not promote this to the paper-facing frontier until Irvine M1 warmed timing
 confirms the same direction on the lower-end loss platform.
 
+`scripts/external_bakeoff/summarize_rewrite_candidate_impact.py` turns the
+rewrite evidence into a frontier-impact table at
+`outputs/external_bakeoff/rewrite_candidate_impact.md`. The projection applies
+only the measured package-level generator speedup to each machine's current
+Config F generator stage. This candidate likely closes the stale/tie M2 Air
+profile rows, but it closes `0` Irvine rows by itself:
+
+| Irvine bucket | Projected save | Projected gap after rewrite |
+| --- | ---: | ---: |
+| 3s | 7.2 ms | 31.4 ms |
+| 7s | 12.1 ms | 36.4 ms |
+| 10s | 17.4 ms | 23.2 ms |
+| 15s | 21.4 ms | 3.0 ms |
+
+Decision: keep and retime the rewrite on quiet lower-end hardware, but do not
+treat it as sufficient for the absolute-fastest claim. Irvine still needs either
+another strict source/body improvement or a stronger single-package graph
+change.
+
 ---
 
 ## Bakeoff v5: Corrected benchmark (3s-30s) on M2 Ultra

@@ -151,7 +151,9 @@ Research targets:
   opt-in `--rewrite-ups-conv-transpose` flag, and the all-bucket production
   package smoke improves warmed local M2 Studio CPU+GPU medians by `+4.28%`
   `3s`, `+3.15%` `7s`, `+3.17%` `10s`, `+2.60%` `15s`, and `+2.20%`
-  `30s` against the shipped packages.
+  `30s` against the shipped packages. Projection says this is not enough alone
+  for Irvine M1, but it likely combines well with any independent source/body
+  or upstream/runtime win.
 - Can the graph be rewritten so M1 chooses useful NE partitions without
   crossing CPU/NE/GPU boundaries repeatedly?
 - Can layout be changed to reduce ANE padding or memory movement while keeping

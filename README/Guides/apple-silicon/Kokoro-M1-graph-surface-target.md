@@ -389,6 +389,13 @@ improves warmed M2 Studio medians by `1.97%` `3s`, `1.79%` `7s`, `1.62%`
 `10s`, `1.22%` `15s`, and `2.58%` `30s` versus the current best local
 `vector_noise_batch` result. Treat that as local implementation proof, not a
 paper frontier update, until Irvine M1 repeats it under quiet warmed conditions.
+The projection artifact at `outputs/external_bakeoff/rewrite_candidate_impact.md`
+shows why this cannot be the final answer alone: applying the measured
+package-level generator speedup to current Irvine stage medians saves only
+`7.2 ms`, `12.1 ms`, `17.4 ms`, and `21.4 ms` on `3s/7s/10s/15s`, leaving
+projected gaps of `31.4 ms`, `36.4 ms`, `23.2 ms`, and `3.0 ms` against
+warmed laishere. The rewrite is a keeper, but it must combine with another
+strict source/body gain to prove absolute fastest on Irvine M1.
 
 ## Deep Research Request
 
