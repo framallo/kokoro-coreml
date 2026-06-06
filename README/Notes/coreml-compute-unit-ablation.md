@@ -359,6 +359,15 @@ sudo powermetrics -i 1000 --samplers ane
   so the issue is inherent source-path drift rather than Core ML conversion
   drift. Next work must recover or validate audio quality before any runtime
   integration.
+- **HAR input-tail trimming is too small:** `scripts/probe_generator_har_input_trim.py`
+  keeps the bucketed `x_pre` shape and current Swift HAR source, but exports a
+  temporary `GeneratorFromHar` with a shorter static `har` axis. The aggressive
+  local 3s trim to `har_time=27601` was only `1.07%` faster and failed strict
+  parity (corr `0.999827`, SNR `35.05 dB`, max `0.02661`). The first strict
+  quality-safe trim, `har_time=28561`, was slower on M2 Studio (`30.41 ms` vs
+  `30.07 ms`) and only `0.43%` faster on Irvine M1 (`167.64 ms` vs
+  `168.36 ms`). This rejects "slightly shorter HAR padding" as the missing
+  laishere/fastest-everywhere ingredient.
 
 **2026-05-17**
 

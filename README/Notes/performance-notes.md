@@ -747,6 +747,34 @@ match the current Swift HnSF/HAR source closely enough, or prove through
 listening review that the different source is acceptable. Until then, this is a
 research target rather than a production replacement.
 
+#### HAR input-trim probe
+
+`scripts/probe_generator_har_input_trim.py` tests a lower-risk variant of the
+exact-shape idea: keep the bucketed `x_pre` shape and current Swift HAR source,
+but export `GeneratorFromHar` with a shorter static `har` axis than the shipping
+`3s` package's `[1,22,28801]` input. This checks whether the zero-padded HAR tail
+can be removed without changing the source formulation.
+
+PyTorch sweep result: trimming to `har_time=27601` crosses `35 dB` SNR but still
+has a `0.027` max absolute waveform delta versus the full-HAR baseline.
+`har_time=28561` is the first strict local point with max error below `0.01`
+(`corr 0.999993`, SNR `49.25 dB`, max `0.00519` in PyTorch), but it only removes
+240 of 28,801 HAR frames.
+
+Core ML predict results:
+
+| Machine | HAR time | Baseline median | Candidate median | Speedup | Parity vs baseline | Decision |
+| --- | ---: | ---: | ---: | ---: | --- | --- |
+| m2-studio | 27601 | 30.22 ms | 29.90 ms | +1.07% | corr 0.999827, SNR 35.05 dB, max 0.02661 | reject; strict parity fail |
+| m2-studio | 28561 | 30.07 ms | 30.41 ms | -1.15% | corr 0.999983, SNR 45.13 dB, max 0.00737 | reject; quality-safe but slower |
+| irvine-m1 | 28561 | 168.36 ms | 167.64 ms | +0.43% | corr 0.999984, SNR 45.28 dB, max 0.00684 | reject; too small to close laishere gap |
+
+This closes the "just trim the HAR tail" path. It can recover less than one
+millisecond on M1 at strict parity, while the remaining laishere 3s gap is about
+`63 ms` at full-pipeline Config F and about `24 ms` at the generator-equivalent
+boundary. The speed target still requires a real source/vocoder formulation
+change, not a slightly shorter padded HAR input.
+
 #### HnSF vDSP optimization
 
 Current `main` vectorizes the Swift HnSF STFT path with cached 20-point DFT
