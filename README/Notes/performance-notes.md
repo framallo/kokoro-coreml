@@ -207,7 +207,7 @@ Mac14,14, 64 GiB, macOS 26.5 / 25F71.
 
 | Impl | 3s | 7s | 10s | 15s | 30s | Caveats |
 | --- | ---: | ---: | ---: | ---: | ---: | --- |
-| Config F | 55.1 ms / 0.020 | 103.8 ms / 0.015 | 135.2 ms / 0.014 | 202.6 ms / 0.015 | 409.1 ms / 0.015 | staged + exact duration + vDSP HnSF + direct HAR padding + vectorized HnSF noise; current batch rerun |
+| Config F | 51.1 ms / 0.018 | 98.8 ms / 0.015 | 127.9 ms / 0.013 | 189.1 ms / 0.014 | 389.4 ms / 0.014 | staged + exact duration + vDSP HnSF + direct HAR padding + vectorized HnSF noise/mask; current batch rerun |
 | MLX | error | 223.9 ms / 0.033 | 288.8 ms / 0.030 | 376.3 ms / 0.027 | 762.7 ms / 0.028 | 3s broadcast-shape failure |
 | Soniqo | 71.7 ms / 0.027 | 69.3 ms / 0.014 | 71.0 ms / 0.014 | 68.1 ms / 0.014 | 69.5 ms / 0.014 | Long buckets emit 5.0s public artifact |
 | laishere | 212.3 ms / 0.077 | 403.3 ms / 0.059 | 626.3 ms / 0.065 | 429.8 ms / 0.031 | 925.1 ms / 0.034 | Excludes G2P/feed prep |
@@ -243,7 +243,7 @@ ranking above.
 
 | Machine | Impl | 3s | 7s | 10s | 15s | 30s |
 | --- | --- | ---: | ---: | ---: | ---: | ---: |
-| m2-studio | Config F | 125.5 ms | 309.5 ms | 570.9 ms | 647.3 ms | 1389.1 ms |
+| m2-studio | Config F | 50.9 ms | 97.7 ms | 128.7 ms | 190.7 ms | 383.8 ms |
 | m2-studio | MLX | error | 195.9 ms | 4737.1 ms | 438.1 ms | 930.2 ms |
 | m2-studio | Soniqo | 615.2 ms | 433.0 ms | 398.0 ms | 411.7 ms | 414.3 ms |
 | m2-studio | laishere | 237.0 ms | 359.0 ms | 839.7 ms | 676.1 ms | 1955.1 ms |
@@ -260,7 +260,7 @@ ranking above.
 
 | Machine | Impl | 3s | 7s | 10s | 15s | 30s |
 | --- | --- | ---: | ---: | ---: | ---: | ---: |
-| m2-studio | Config F | 55.1 ms | 103.8 ms | 135.2 ms | 202.6 ms | 409.1 ms |
+| m2-studio | Config F | 51.1 ms | 98.8 ms | 127.9 ms | 189.1 ms | 389.4 ms |
 | m2-studio | MLX | error | 223.9 ms | 288.8 ms | 376.3 ms | 762.7 ms |
 | m2-studio | Soniqo | 71.7 ms | 69.3 ms | 71.0 ms | 68.1 ms | 69.5 ms |
 | m2-studio | laishere | 212.3 ms | 403.3 ms | 626.3 ms | 429.8 ms | 925.1 ms |
@@ -277,7 +277,7 @@ ranking above.
 
 | Machine | Impl | 3s | 7s | 10s | 15s | 30s |
 | --- | --- | ---: | ---: | ---: | ---: | ---: |
-| m2-studio | Config F | 0.020 | 0.015 | 0.014 | 0.015 | 0.015 |
+| m2-studio | Config F | 0.018 | 0.015 | 0.013 | 0.014 | 0.014 |
 | m2-studio | MLX | error | 0.033 | 0.030 | 0.027 | 0.028 |
 | m2-studio | Soniqo | 0.027 | 0.014 | 0.014 | 0.014 | 0.014 |
 | m2-studio | laishere | 0.077 | 0.059 | 0.065 | 0.031 | 0.034 |
@@ -315,9 +315,9 @@ faster. Values below `1.0x` mean the comparator was faster.
 
 | Machine | Comparator | 3s | 7s | 10s | 15s | 30s |
 | --- | --- | ---: | ---: | ---: | ---: | ---: |
-| m2-studio | MLX / Config F | n/a | 2.16x | 2.14x | 1.86x | 1.86x |
-| m2-studio | Soniqo / Config F | 1.30x | 0.67x | 0.53x | 0.34x | 0.17x |
-| m2-studio | laishere / Config F | 3.86x | 3.89x | 4.63x | 2.12x | 2.26x |
+| m2-studio | MLX / Config F | n/a | 2.27x | 2.26x | 1.99x | 1.96x |
+| m2-studio | Soniqo / Config F | 1.40x | 0.70x | 0.56x | 0.36x | 0.18x |
+| m2-studio | laishere / Config F | 4.15x | 4.08x | 4.90x | 2.27x | 2.38x |
 | m2-air | MLX / Config F | n/a | 2.07x | 1.79x | 2.19x | 1.85x |
 | m2-air | Soniqo / Config F | 7.41x | 3.43x | 2.41x | 1.62x | 0.80x |
 | m2-air | laishere / Config F | 0.96x | 0.96x | 0.97x | 0.95x | 1.05x |
@@ -367,9 +367,9 @@ Current ratio table, competitor median divided by Config F median; values above
 
 | Machine | Comparator | 3s | 7s | 10s | 15s | 30s |
 | --- | --- | ---: | ---: | ---: | ---: | ---: |
-| m2-studio | MLX | n/a | 2.16x | 2.14x | 1.86x | 1.86x |
-| m2-studio | laishere | 3.86x | 3.88x | 4.63x | 2.12x | 2.26x |
-| m2-studio | Soniqo | 1.30x | 0.67x | 0.53x | 0.34x | 0.17x |
+| m2-studio | MLX | n/a | 2.27x | 2.26x | 1.99x | 1.96x |
+| m2-studio | laishere | 4.15x | 4.08x | 4.90x | 2.27x | 2.38x |
+| m2-studio | Soniqo | 1.40x | 0.70x | 0.56x | 0.36x | 0.18x |
 | m2-air | MLX | n/a | 2.07x | 1.79x | 2.19x | 1.85x |
 | m2-air | laishere | 0.96x | 0.96x | 0.97x | 0.95x | 1.05x |
 | m2-air | Soniqo | 7.41x | 3.43x | 2.41x | 1.62x | 0.80x |
@@ -534,11 +534,11 @@ Swift HnSF step is the second largest long-bucket cost on all machines.
 
 | Machine | Input | Duration | F0Ntrain | DecoderPre | Generator | Swift HnSF |
 | --- | --- | ---: | ---: | ---: | ---: | ---: |
-| m2-studio | 3s | 10.1 ms | 4.9 ms | 3.5 ms | 28.6 ms | 7.6 ms |
-| m2-studio | 7s | 13.8 ms | 7.7 ms | 5.5 ms | 58.7 ms | 18.2 ms |
-| m2-studio | 10s | 15.7 ms | 7.7 ms | 7.7 ms | 78.7 ms | 24.7 ms |
-| m2-studio | 15s | 21.8 ms | 10.7 ms | 16.2 ms | 113.4 ms | 37.9 ms |
-| m2-studio | 30s | 37.7 ms | 18.0 ms | 50.7 ms | 218.5 ms | 82.5 ms |
+| m2-studio | 3s | 9.5 ms | 4.6 ms | 2.7 ms | 27.0 ms | 7.0 ms |
+| m2-studio | 7s | 13.6 ms | 7.5 ms | 4.6 ms | 54.5 ms | 17.6 ms |
+| m2-studio | 10s | 14.9 ms | 7.6 ms | 6.3 ms | 73.6 ms | 22.7 ms |
+| m2-studio | 15s | 21.2 ms | 10.5 ms | 13.9 ms | 106.6 ms | 35.0 ms |
+| m2-studio | 30s | 36.0 ms | 17.6 ms | 48.8 ms | 207.5 ms | 72.8 ms |
 | m2-air | 3s | 11.4 ms | 5.0 ms | 2.9 ms | 120.6 ms | 7.7 ms |
 | m2-air | 7s | 18.5 ms | 8.9 ms | 5.0 ms | 278.3 ms | 17.6 ms |
 | m2-air | 10s | 23.7 ms | 11.2 ms | 7.1 ms | 396.0 ms | 25.8 ms |
@@ -584,9 +584,16 @@ dominated by the generator predict call.
 
 | Machine | 3s HnSF | 7s HnSF | 10s HnSF | 15s HnSF | 30s HnSF |
 | --- | ---: | ---: | ---: | ---: | ---: |
-| m2-studio | 7.6 ms | 18.2 ms | 24.7 ms | 37.9 ms | 82.5 ms |
+| m2-studio | 7.0 ms | 17.6 ms | 22.7 ms | 35.0 ms | 72.8 ms |
 | m2-air | 7.7 ms | 17.6 ms | 25.8 ms | 39.8 ms | 78.8 ms |
 | irvine-m1 | 21.2 ms | 35.5 ms | 41.6 ms | 62.6 ms | 94.8 ms |
+
+2026-06-06 follow-up: the voiced/unvoiced mask and Gaussian-noise mix inside
+`sineGen` was also vectorized with `vDSP_vmul`/`vDSP_vadd`. A refreshed local
+M2 Studio official batch kept the exact same output SHA-256 for every bucket and
+moved HnSF medians to `7.0/17.6/22.7/35.0/72.8 ms` for `3s/7s/10s/15s/30s`.
+M2 Air and Irvine rows were not repromoted in this refresh because both hosts
+were running Spotlight/mediaanalysis load during the live check.
 
 #### Direct HAR padding fast path
 

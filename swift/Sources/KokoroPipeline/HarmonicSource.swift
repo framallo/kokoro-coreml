@@ -235,9 +235,13 @@ public func sineGen(
     // noise_amp = uv * noise_std + (1 - uv) * sine_amp / 3
 
     // Pre-compute voiced/unvoiced mask
+    let unvoicedNoiseAmp = sineAmp / 3.0
     var uvMask = [Float](repeating: 0, count: L)
+    var noiseAmp = [Float](repeating: 0, count: L)
     for t in 0..<L {
-        uvMask[t] = f0Upsampled[t] > threshold ? 1.0 : 0.0
+        let uv: Float = f0Upsampled[t] > threshold ? 1.0 : 0.0
+        uvMask[t] = uv
+        noiseAmp[t] = uv * noiseStd + (1.0 - uv) * unvoicedNoiseAmp
     }
 
     // Pre-generate all Gaussian noise at once (fast, vectorized approach)
@@ -247,14 +251,26 @@ public func sineGen(
     generateGaussianNoise(into: &gaussianNoise, count: totalNoise, seed: seed)
 
     // Apply voiced/unvoiced mask + noise to each harmonic
-    let unvoicedNoiseAmp = sineAmp / 3.0
-    for h in 0..<dim {
-        let sineOffset = h * L
-        let noiseOffset = h * L
-        for t in 0..<L {
-            let uv = uvMask[t]
-            let noiseAmp = uv * noiseStd + (1.0 - uv) * unvoicedNoiseAmp
-            sineWaves[sineOffset + t] = sineWaves[sineOffset + t] * uv + noiseAmp * gaussianNoise[noiseOffset + t]
+    var maskedSine = [Float](repeating: 0, count: L)
+    var scaledNoise = [Float](repeating: 0, count: L)
+    sineWaves.withUnsafeMutableBufferPointer { sinePtr in
+        gaussianNoise.withUnsafeBufferPointer { noisePtr in
+            uvMask.withUnsafeBufferPointer { uvPtr in
+                noiseAmp.withUnsafeBufferPointer { ampPtr in
+                    maskedSine.withUnsafeMutableBufferPointer { maskedPtr in
+                        scaledNoise.withUnsafeMutableBufferPointer { scaledPtr in
+                            for h in 0..<dim {
+                                let offset = h * L
+                                let sineBase = sinePtr.baseAddress!.advanced(by: offset)
+                                let noiseBase = noisePtr.baseAddress!.advanced(by: offset)
+                                vDSP_vmul(sineBase, 1, uvPtr.baseAddress!, 1, maskedPtr.baseAddress!, 1, vDSP_Length(L))
+                                vDSP_vmul(noiseBase, 1, ampPtr.baseAddress!, 1, scaledPtr.baseAddress!, 1, vDSP_Length(L))
+                                vDSP_vadd(maskedPtr.baseAddress!, 1, scaledPtr.baseAddress!, 1, sineBase, 1, vDSP_Length(L))
+                            }
+                        }
+                    }
+                }
+            }
         }
     }
 
