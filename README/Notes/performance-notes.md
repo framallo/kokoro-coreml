@@ -390,9 +390,12 @@ fed by cropped bucket tensors.
 `scripts/probe_generator_split.py`,
 `scripts/probe_generator_noise_split.py`, and
 `scripts/probe_generator_dual_anchor_split.py` test whether laishere-style
-package boundaries help the current static HAR-post generator. The generated
-packages and reports are ignored under `outputs/generator_split/`,
-`outputs/generator_noise_split/`, and `outputs/generator_dual_anchor_split/`.
+package boundaries help the current static HAR-post generator.
+`scripts/probe_generator_stage_split.py` then splits the body by generator
+upsample stage to locate the remaining bottleneck. The generated packages and
+reports are ignored under `outputs/generator_split/`,
+`outputs/generator_noise_split/`, `outputs/generator_dual_anchor_split/`, and
+`outputs/generator_stage_split/`.
 
 Local M2 Studio. Unless noted, values are N=10 medians after three discarded
 warmups. The audio-anchor CPU+ANE and palettized CPU+ANE rows used N=3 after
@@ -406,6 +409,12 @@ they are rejection probes only.
 | HAR noise split | 3s | noise CPU+GPU, body CPU+GPU | 28.9 ms | 32.5 ms | noise 13.1 ms, body 19.5 ms | exact sample match | reject |
 | HAR noise split | 7s | noise CPU+GPU, body CPU+GPU | 57.6 ms | 63.4 ms | noise 25.8 ms, body 37.7 ms | exact sample match | reject |
 | HAR noise split | 3s | noise CPU+GPU/ALL, body CPU+ANE | 29-30 ms | 249-260 ms | body 237-248 ms | corr 0.999906, SNR 37.65 dB | reject |
+| per-stage split | 3s | noise/stage0/stage1 CPU+GPU | 28.6 ms | 33.0 ms | noise 12.6 ms, stage0 9.0 ms, stage1+tail 11.3 ms | corr 0.999997, SNR 52.39 dB | reject as a production split; keep as profiler |
+| per-stage split | 7s | noise/stage0/stage1 CPU+GPU | 58.5 ms | 66.5 ms | noise 26.6 ms, stage0 17.7 ms, stage1+tail 22.4 ms | corr 0.999997, SNR 53.55 dB | reject as a production split; keep as profiler |
+| per-stage split | 3s | stage0 CPU+ANE, others CPU+GPU | 28.5 ms | 61.9 ms | noise 12.6 ms, stage0 37.8 ms, stage1+tail 11.4 ms | corr 0.999981, SNR 44.66 dB | reject |
+| per-stage split | 3s | stage1+tail CPU+ANE, others CPU+GPU | 28.2 ms | 114.5 ms | noise 12.5 ms, stage0 9.1 ms, stage1+tail 93.1 ms | corr 0.999918, SNR 38.29 dB | reject |
+| per-stage split | 3s | noise CPU+ANE, stages CPU+GPU | 27.9 ms | 87.2 ms | noise 67.0 ms, stage0 9.7 ms, stage1+tail 11.0 ms | corr 0.999920, SNR 38.42 dB, max abs 0.0134 | reject |
+| per-stage split | 3s | noise/stage0/stage1 ALL | 28.4 ms | 32.6 ms | noise 12.4 ms, stage0 8.9 ms, stage1+tail 11.1 ms | corr 0.999997, SNR 52.39 dB | reject |
 | dual-output mean anchor | 3s | noise CPU+GPU, vocoder CPU+GPU, fp32 tail CPU+GPU | 28.9 ms | 33.0 ms | noise 11.7 ms, vocoder 19.7 ms, tail 1.4 ms | corr 0.999994, SNR 49.54 dB | reject |
 | dual-output mean anchor + cos Snake | 3s | noise CPU+GPU, vocoder CPU+GPU, fp32 tail CPU+GPU | 28.1 ms | 32.0 ms | noise 11.4 ms, vocoder 19.5 ms, tail 1.3 ms | corr 0.999994, SNR 49.54 dB | reject |
 | dual-output mean anchor + cos Snake | 3s | noise ALL, vocoder CPU+ANE, fp32 tail ALL | 29.3 ms | 249.8 ms | noise 11.7 ms, vocoder 236.7 ms, tail 1.8 ms | corr 0.999916, SNR 38.11 dB | reject |
@@ -431,6 +440,16 @@ and CPU+GPU remains slower than the fused package because extra package
 dispatch plus noise/tail stages outweigh the smaller vocoder body. The next
 viable performance work is therefore an operator-surface rewrite or a larger
 end-to-end graph reshaping, not more generator package-boundary experiments.
+
+The per-stage split proves there is no hidden ANE-friendly island inside the
+current generator body. Explicit CPU+ANE makes every stage slower: noise grows
+from `12.6 ms` to `67.0 ms`, stage0 grows from `9.0 ms` to `37.8 ms`, and
+stage1+tail grows from `11.3 ms` to `93.1 ms` on the local M2 Studio `3s` dump.
+The 3s MIL operation distribution is also broad, not a single isolated tail:
+fused generator `2207` ops, noise `562`, stage0 `807`, stage1+tail `856`. The
+next production candidate must remove work or change operator lowering within
+all three generator regions; merely moving a substage to ANE is not supported
+by the data.
 
 #### Fused cos-Snake probe
 

@@ -238,6 +238,19 @@ sudo powermetrics -i 1000 --samplers ane
   while `7s` moved from `57.2 ms` to `57.7 ms` (-`0.74%`). Cos-Snake may still
   be useful inside a larger operator rewrite, but by itself it is not a
   measured win.
+- **Per-stage generator split rejected as a production split and useful as a
+  profiler:** `scripts/probe_generator_stage_split.py` splits the current
+  static HAR-post generator into noise, first upsample/resblock stage, and
+  second upsample/resblock stage plus tail. CPU+GPU parity passed, but the split
+  is slower than fused because of extra package dispatch: `3s` fused `28.6 ms`
+  vs split `33.0 ms`; `7s` fused `58.5 ms` vs split `66.5 ms`. The 3s stage
+  medians are noise `12.6 ms`, stage0 `9.0 ms`, and stage1+tail `11.3 ms`.
+  CPU+ANE is not viable for any substage: noise `67.0 ms`, stage0 `37.8 ms`,
+  and stage1+tail `93.1 ms` when each is isolated with the other stages on
+  CPU+GPU. The 3s MIL operation distribution is broad: fused `2207` ops, noise
+  `562`, stage0 `807`, stage1+tail `856`. There is no hidden ANE island inside
+  the current generator; the next real optimization must remove/rewrite work
+  across the generator regions instead of only repartitioning them.
 
 **2026-05-17**
 
