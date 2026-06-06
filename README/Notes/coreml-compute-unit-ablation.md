@@ -160,6 +160,32 @@ sudo powermetrics -i 1000 --samplers ane
 
 ### Investigation Log
 
+**2026-06-05**
+
+- **Generator-isolation harness:** `kokoro-bench --generator-input-dump` now
+  accepts `--warmup` and `--iterations`, so the generator can be timed against
+  a dumped Swift tensor boundary (`x_pre_padded`, `ref_s`, `har_padded`) without
+  rerunning duration, F0, decoder-pre, HnSF, trimming, or JSON orchestration.
+- **Generator compute-unit result:** CPU+GPU remains the fastest policy for the
+  GPU-preferred `GeneratorFromHar` graph on the losing machines. N=10 medians
+  after three discarded warmups:
+
+  | Machine | Input | `cpuAndGPU` | `.all` | `cpuAndNeuralEngine` | `cpuOnly` |
+  | --- | --- | ---: | ---: | ---: | ---: |
+  | m2-studio | 3s | 27.2 ms | 27.0 ms | 1535.5 ms | 100.9 ms |
+  | m2-studio | 7s | 59.5 ms | 60.3 ms | not rerun | not rerun |
+  | m2-air | 3s | 120.1 ms | 155.4 ms | not rerun | not rerun |
+  | m2-air | 7s | 277.6 ms | 426.2 ms | not rerun | not rerun |
+  | irvine-m1 | 3s | 168.9 ms | 172.8 ms | not rerun | not rerun |
+  | irvine-m1 | 7s | 384.7 ms | 394.2 ms | not rerun | not rerun |
+
+- **Decision:** Do not spend more time trying to make the existing generator
+  package faster by changing `MLComputeUnits`. The path to beating laishere on
+  M2 Air/M1 short and medium rows is generator graph work: exact geometry
+  packages, splitting the graph into noise/vocoder/tail stages, or rewriting
+  the ANE-hostile operator surface (`conv_transpose`, long harmonic temporal
+  axes, and Snake activations lowered to `sin`).
+
 **2026-05-17**
 
 - **Powermetrics result:** Config F/reference single-stream was not ANE-bound

@@ -11,7 +11,8 @@
 /// **Generator isolation mode** (feed previously dumped x_pre/ref_s/har):
 ///
 ///     kokoro-bench --models-dir DIR --inputs-dir DIR --hnsf-weights FILE \
-///                  --generator-input-dump DIR [--output metrics.json]
+///                  --generator-input-dump DIR [--warmup 3] [--iterations 10] \
+///                  [--output metrics.json]
 ///
 /// **Batch mode** (persistent subprocess — models compiled once):
 ///
@@ -42,6 +43,16 @@ func computeUnitLabel(_ computeUnits: MLComputeUnits) -> String {
     @unknown default:
         return "unknown"
     }
+}
+
+/// Median of a non-empty timing sample set.
+func median(_ values: [Double]) -> Double {
+    let sorted = values.sorted()
+    let middle = sorted.count / 2
+    if sorted.count % 2 == 0 {
+        return (sorted[middle - 1] + sorted[middle]) / 2.0
+    }
+    return sorted[middle]
 }
 
 // MARK: - JSON Input
@@ -456,8 +467,11 @@ func runSingleShot(modelsDir: String, inputsDir: String, hnsfWeightsPath: String
 
 func runGeneratorInputDump(modelsDir: String, tensorInputDumpPath: String,
                            outputPath: String?, tensorDumpPath: String?,
+                           warmupCount: Int, iterations: Int,
                            computeUnits: MLComputeUnits = .all,
                            stagedComputeUnits: Bool = false) throws {
+    let measuredIterations = max(1, iterations)
+    let discardedWarmups = max(0, warmupCount)
     let reader = try TensorDumpReader(directory: URL(fileURLWithPath: tensorInputDumpPath))
     let bucketSec = reader.metadata["bucket_seconds"] as? Int ?? 3
     let trimLen = reader.metadata["trim_len"] as? Int
@@ -475,13 +489,29 @@ func runGeneratorInputDump(modelsDir: String, tensorInputDumpPath: String,
     let refSArray = try makeFloatArray(shape: refS.shape, values: refS.values)
     let harArray = try makeFloatArray(shape: har.shape, values: har.values)
 
-    let t0 = CFAbsoluteTimeGetCurrent()
-    let output = try genModel.prediction(from: try MLDictionaryFeatureProvider(dictionary: [
+    let inputProvider = try MLDictionaryFeatureProvider(dictionary: [
         "x_pre": MLFeatureValue(multiArray: xPreArray),
         "ref_s": MLFeatureValue(multiArray: refSArray),
         "har": MLFeatureValue(multiArray: harArray),
-    ]))
-    let t1 = CFAbsoluteTimeGetCurrent()
+    ])
+
+    for _ in 0..<discardedWarmups {
+        _ = try genModel.prediction(from: inputProvider)
+    }
+
+    var predictTimes: [Double] = []
+    predictTimes.reserveCapacity(measuredIterations)
+    var output: MLFeatureProvider?
+    for _ in 0..<measuredIterations {
+        let t0 = CFAbsoluteTimeGetCurrent()
+        output = try genModel.prediction(from: inputProvider)
+        let t1 = CFAbsoluteTimeGetCurrent()
+        predictTimes.append(t1 - t0)
+    }
+
+    guard let output else {
+        throw PipelineError.modelNotLoaded("generator output")
+    }
     let waveformKey = output.featureNames.contains("waveform") ? "waveform" : output.featureNames.first!
     let waveformArray = output.featureValue(for: waveformKey)!.multiArrayValue!
     let outputTrimLen = min(waveformArray.count, trimLen ?? waveformArray.count)
@@ -503,6 +533,8 @@ func runGeneratorInputDump(modelsDir: String, tensorInputDumpPath: String,
             "bucket_seconds": bucketSec,
             "trim_len": outputTrimLen,
             "prediction_key": waveformKey,
+            "warmup_count": discardedWarmups,
+            "iterations": measuredIterations,
         ])
     }
 
@@ -513,7 +545,10 @@ func runGeneratorInputDump(modelsDir: String, tensorInputDumpPath: String,
         "bucket_used": "\(bucketSec)s",
         "source_tensor_dump": tensorInputDumpPath,
         "observed_audio_duration_s": round((Double(outputTrimLen) / 24000.0) * 1e6) / 1e6,
-        "t_coreml_predict_s": round((t1 - t0) * 1e6) / 1e6,
+        "warmup_count": discardedWarmups,
+        "iterations": measuredIterations,
+        "warm_coreml_predict_times_s": predictTimes.map { round($0 * 1e6) / 1e6 },
+        "t_coreml_predict_s": round(median(predictTimes) * 1e6) / 1e6,
     ]
     let jsonString = String(
         data: try JSONSerialization.data(withJSONObject: result, options: [.sortedKeys]),
@@ -620,6 +655,7 @@ func main() throws {
     var tensorDumpPath: String?
     var generatorInputDumpPath: String?
     var warmupCount = 1
+    var iterations = 1
     var seed: UInt64 = 42
     var batchMode = false
     var computeUnitsStr = "all"
@@ -637,6 +673,8 @@ func main() throws {
             i += 1; inputKey = args[i]
         case "--warmup":
             i += 1; warmupCount = Int(args[i]) ?? 1
+        case "--iterations":
+            i += 1; iterations = Int(args[i]) ?? 1
         case "--seed":
             i += 1; seed = UInt64(args[i]) ?? 42
         case "--output":
@@ -699,6 +737,8 @@ func main() throws {
             tensorInputDumpPath: generatorInputDumpPath,
             outputPath: outputPath,
             tensorDumpPath: tensorDumpPath,
+            warmupCount: warmupCount,
+            iterations: iterations,
             computeUnits: computeUnits,
             stagedComputeUnits: stagedComputeUnits
         )

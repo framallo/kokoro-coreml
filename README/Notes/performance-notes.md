@@ -321,6 +321,46 @@ N=10 warm median moved from `1511.5 ms` in the vDSP-only snapshot to
 consistent with the generator model prediction itself still dominating the
 wall clock.
 
+#### Generator isolation evidence
+
+`kokoro-bench --generator-input-dump` now supports repeated warm generator
+predictions against a previously dumped Swift tensor boundary:
+
+```bash
+swift/.build/release/kokoro-bench \
+  --models-dir coreml \
+  --inputs-dir outputs/swift_bench_inputs \
+  --hnsf-weights outputs/swift_bench_inputs/hnsf_weights.json \
+  --generator-input-dump outputs/generator_isolation/dumps/7s \
+  --compute-units cpuAndGPU \
+  --warmup 3 \
+  --iterations 10 \
+  --output outputs/generator_isolation/results/generator_7s_cpuAndGPU.json
+```
+
+The result files are ignored under `outputs/generator_isolation/`; they are
+stage-isolation evidence, not paper table rows. Each value below is the N=10
+median after three discarded warmups, using the exact `x_pre_padded`, `ref_s`,
+and `har_padded` tensors emitted by the current Swift pipeline.
+
+| Machine | Input | `cpuAndGPU` | `.all` | `cpuAndNeuralEngine` | `cpuOnly` |
+| --- | --- | ---: | ---: | ---: | ---: |
+| m2-studio | 3s | 27.2 ms | 27.0 ms | 1535.5 ms | 100.9 ms |
+| m2-studio | 7s | 59.5 ms | 60.3 ms | not rerun | not rerun |
+| m2-air | 3s | 120.1 ms | 155.4 ms | not rerun | not rerun |
+| m2-air | 7s | 277.6 ms | 426.2 ms | not rerun | not rerun |
+| irvine-m1 | 3s | 168.9 ms | 172.8 ms | not rerun | not rerun |
+| irvine-m1 | 7s | 384.7 ms | 394.2 ms | not rerun | not rerun |
+
+This isolates the remaining performance problem to the generator graph, not
+to upstream Swift orchestration or to an incorrect compute-unit policy. On the
+two machines where Config F still loses to laishere's chain-only short/medium
+rows, `.all` is slower than explicit `cpuAndGPU`; on M2 Studio, `.all` merely
+ties `cpuAndGPU`. Forcing CPU+ANE is catastrophic even at 3s. The next
+performance work must reduce or restructure generator graph work: exact
+geometry packages, a laishere-style noise/vocoder/tail split, or an operator
+rewrite that removes the GPU-preferred generator surface.
+
 #### HnSF vDSP optimization
 
 Current `main` vectorizes the Swift HnSF STFT path with cached 20-point DFT
