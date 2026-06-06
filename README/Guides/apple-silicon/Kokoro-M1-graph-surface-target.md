@@ -227,6 +227,51 @@ ANE-preferred on M1. The next useful target is whatever changes Core ML's
 placement decision: tensor layout, operation dialect, package boundary,
 conversion target/toolchain, or a narrower laishere-style vocoder contract.
 
+## Latest Cos-Snake Placement Check
+
+The previous fp16/native-broadcast probes used `--no-cos-snake`, leaving
+`50` `sin` ops and `48` `pow` ops. A combined cos-Snake, native
+`instance_norm`, broadcast AdaIN, fp16-input package was tested to isolate
+whether those ops were blocking ANE placement:
+
+```bash
+uv run --no-sync python scripts/probe_generator_cos_snake.py \
+  --native-instance-norm-adain \
+  --broadcast-adain \
+  --input-dtype fp16 \
+  --deployment-target ios17 \
+  --label 3s_cos_native_broadcast_fp16_inputs \
+  --report-name report_ios17_cos_native_broadcast_fp16_inputs_cpu_gpu.json \
+  --warmup 3 \
+  --iterations 10
+```
+
+Result:
+
+- strict pass: corr `0.999994092360851` vs fused trimmed, SNR `49.71 dB`,
+  max abs `0.00226212`;
+- warmed local M2 Studio CPU+GPU: fused `26.416 ms`, candidate `26.348 ms`,
+  speedup `0.26%`;
+- graph surface: `1629` ops, `51` conv, `4` conv-transpose,
+  `44` native `instance_norm`, `0` reductions, `0` tiles, `2` sin, `49` cos,
+  `0` pow, `0` LUT ops;
+- CPU+NE placement: `725` CPU-preferred ops, `0` NE-preferred ops,
+  `904` unknown, `0` NE cost weight;
+- CPU+GPU placement: `726` GPU-preferred ops, `903` unknown, GPU cost weight
+  `1.0`.
+
+Reports:
+
+- `outputs/generator_cos_snake/3s_cos_native_broadcast_fp16_inputs_broadcast_adain_native_in_fp16_inputs_ios17/report_ios17_cos_native_broadcast_fp16_inputs_cpu_gpu.json`
+- `outputs/graph_surface/fused_cos_native_broadcast_fp16_3s.json`
+- `outputs/graph_surface/compute_plan_generator_cos_native_broadcast_fp16_3s_cpu_ne.json`
+- `outputs/graph_surface/compute_plan_generator_cos_native_broadcast_fp16_3s_cpu_gpu.json`
+
+Decision: reject as standalone. Removing the original `sin`/`pow` footprint
+does not unlock ANE placement for the fused HAR-post package. The remaining M1
+loss is still a placement/layout/boundary problem, not a single visible op-class
+problem.
+
 ## Deep Research Request
 
 A useful external deep-research guide would be narrower than "Core ML

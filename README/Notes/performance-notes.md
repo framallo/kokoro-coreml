@@ -4430,6 +4430,23 @@ remaining Irvine M1 loss. Reports:
 and
 `outputs/graph_surface/compute_plan_generator_native_broadcast_fp16_3s_cpu_gpu.json`.
 
+Combining cos-Snake with native InstanceNorm AdaIN, broadcast AdaIN, and fp16
+inputs also fails as an ANE-placement unlock. Local M2 Studio `3s` CPU+GPU is
+strict and slightly faster: fused `26.416 ms`, candidate `26.348 ms`
+(`+0.26%`), corr `0.999994`, SNR `49.71 dB`, max abs `0.00226212`. The graph
+surface removes the previous no-cos `sin`/`pow` footprint (`2` sin, `49` cos,
+`0` pow), keeps reductions/tiles at zero, and has `1629` ops. But
+`MLComputePlan` under CPU+NE still reports `725` CPU-preferred ops, `0`
+NE-preferred ops, `904` unknown ops, and `0` NE cost weight. Under CPU+GPU the
+same package is GPU-preferred for weighted work (`726` GPU-preferred ops, GPU
+cost weight `1.0`). Therefore the remaining M1 loss is not solved by removing
+`sin`/`pow`; it remains a placement/layout/package-boundary problem. Reports:
+`outputs/generator_cos_snake/3s_cos_native_broadcast_fp16_inputs_broadcast_adain_native_in_fp16_inputs_ios17/report_ios17_cos_native_broadcast_fp16_inputs_cpu_gpu.json`,
+`outputs/graph_surface/fused_cos_native_broadcast_fp16_3s.json`,
+`outputs/graph_surface/compute_plan_generator_cos_native_broadcast_fp16_3s_cpu_ne.json`,
+and
+`outputs/graph_surface/compute_plan_generator_cos_native_broadcast_fp16_3s_cpu_gpu.json`.
+
 ---
 
 ## Bakeoff v5: Corrected benchmark (3s-30s) on M2 Ultra

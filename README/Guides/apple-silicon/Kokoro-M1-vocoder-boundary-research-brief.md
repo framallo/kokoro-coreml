@@ -249,6 +249,10 @@ Do not prioritize these unless new evidence changes the premises:
   `0` Neural-Engine-preferred ops and `0` NE cost weight under CPU+NE. Laishere's
   `1534`-op vocoder gets `597` NE-preferred ops and about `0.56` NE cost
   weight. The missing win is placement/layout/boundary, not just surface count.
+- Cos-Snake as a placement unlock. The combined cos-Snake + native-IN +
+  broadcast-AdaIN + fp16-input package removes the original `sin`/`pow`
+  footprint and is strict with a small local CPU+GPU win, but CPU+NE still gives
+  it `0` Neural-Engine-preferred ops and `0` NE cost weight.
 - More broad generator noise/stage splits. The extra Core ML call boundary is
   currently more expensive than the saved graph work.
 
