@@ -29,7 +29,7 @@ from probe_generator_exact_geometry import _compute_units, _load_kmodel, _metric
 from probe_generator_split import _duration_label_from_dump, _precision_arg, _remove_existing_package  # noqa: E402
 
 
-def _make_har_source_fused_module(generator: Any):
+def _make_har_source_fused_module(generator: Any, phase_mode: str):
     import torch
     import torch.nn as nn
     import torch.nn.functional as F
@@ -70,7 +70,45 @@ def _make_har_source_fused_module(generator: Any):
             real = self.conv_real(x)
             imag = self.conv_imag(x)
             magnitude = torch.sqrt(real**2 + imag**2 + 1e-14)
-            phase = torch.atan2(imag, real)
+            if phase_mode == "atan2":
+                phase = torch.atan2(imag, real)
+            elif phase_mode == "acos":
+                denom = torch.clamp(magnitude, min=1e-12)
+                cos_phase = torch.clamp(real / denom, min=-1.0, max=1.0)
+                abs_phase = torch.acos(cos_phase)
+                sign = torch.where(imag < 0.0, -torch.ones_like(imag), torch.ones_like(imag))
+                phase = abs_phase * sign
+            elif phase_mode in {"atan_manual", "atan_swift"}:
+                eps = torch.full_like(real, 1e-12)
+                safe_real = torch.where(
+                    torch.abs(real) < eps,
+                    torch.where(real < 0.0, -eps, eps),
+                    real,
+                )
+                base = torch.atan(imag / safe_real)
+                phase = torch.where(
+                    real < 0.0,
+                    torch.where(imag >= 0.0, base + torch.pi, base - torch.pi),
+                    base,
+                )
+                phase = torch.where(
+                    torch.abs(real) < eps,
+                    torch.where(
+                        imag > 0.0,
+                        torch.full_like(imag, torch.pi / 2.0),
+                        torch.where(imag < 0.0, torch.full_like(imag, -torch.pi / 2.0), torch.zeros_like(imag)),
+                    ),
+                    phase,
+                )
+                if phase_mode == "atan_swift":
+                    boundary = (real < 0.0) & (torch.abs(imag) < 1e-4)
+                    phase = torch.where(
+                        boundary,
+                        torch.where(imag >= 0.0, torch.full_like(imag, -torch.pi), torch.full_like(imag, torch.pi)),
+                        phase,
+                    )
+            else:
+                raise RuntimeError(f"unsupported phase_mode: {phase_mode}")
             return magnitude, phase
 
     class _HarSourceFusedGenerator(nn.Module):
@@ -151,7 +189,7 @@ def run(args: argparse.Namespace) -> dict[str, Any]:
     har = tensors["har_padded"].astype(np.float32)
 
     if not args.skip_export:
-        module = _make_har_source_fused_module(gen)
+        module = _make_har_source_fused_module(gen, args.phase_mode)
         removed_dropouts = remove_dropout(module)
         with torch.no_grad():
             traced = torch.jit.trace(
@@ -215,6 +253,7 @@ def run(args: argparse.Namespace) -> dict[str, Any]:
         "removed_dropouts": removed_dropouts,
         "manifest_metadata": manifest.get("metadata", {}),
         "precision": args.precision,
+        "phase_mode": args.phase_mode,
         "compute_units": args.compute_units,
         "fused_compute_units": args.fused_compute_units,
         "first_predict_ms": {
@@ -253,6 +292,7 @@ def main() -> None:
     parser.add_argument("--report-name", default="report_har_source_fused.json")
     parser.add_argument("--fused-package", type=Path, default=Path("coreml/kokoro_decoder_har_post_3s.mlpackage"))
     parser.add_argument("--precision", default="fp16", choices=["fp16", "fp32"])
+    parser.add_argument("--phase-mode", default="atan2", choices=["atan2", "acos", "atan_manual", "atan_swift"])
     parser.add_argument("--compute-units", default="all")
     parser.add_argument("--fused-compute-units", default="all")
     parser.add_argument("--warmup", type=int, default=2)
