@@ -1252,7 +1252,21 @@ def test_lower_end_mac_win_gate_tracks_pending_warmed_listening_wins(tmp_path):
                     "config_f_warm_median_ms": 148.0,
                     "best_warm_median_ms": 142.0,
                     "best_impl_label": "laishere",
-                }
+                },
+                {
+                    "machine_id": "irvine-m1",
+                    "input_key": "3s",
+                    "config_f_warm_median_ms": 233.6,
+                    "best_warm_median_ms": 176.3,
+                    "best_impl_label": "laishere",
+                },
+                {
+                    "machine_id": "irvine-m1",
+                    "input_key": "7s",
+                    "config_f_warm_median_ms": 492.7,
+                    "best_warm_median_ms": 394.6,
+                    "best_impl_label": "laishere",
+                },
             ]
         }
     }
@@ -1262,6 +1276,7 @@ def test_lower_end_mac_win_gate_tracks_pending_warmed_listening_wins(tmp_path):
                 "machine_id": "m2-air",
                 "input_key": "3s",
                 "frontier_loss_looks_stale_or_tie": True,
+                "profile_laishere_ms": 150.0,
             }
         ]
     }
@@ -1315,15 +1330,19 @@ def test_lower_end_mac_win_gate_tracks_pending_warmed_listening_wins(tmp_path):
         m2_reports=[m2_report],
     )
 
-    assert summary["pending_listening_win_count"] == 2
-    assert summary["blocked_row_count"] == 1
+    assert summary["pending_paper_listening_win_count"] == 1
+    assert summary["pending_profile_listening_win_count"] == 2
+    assert summary["paper_blocked_row_count"] == 2
     assert summary["m2_air_rows"][0]["projected_full_ms"] == 136.0
-    assert summary["m2_air_rows"][0]["would_win_if_accepted"] is True
+    assert summary["m2_air_rows"][0]["would_win_paper_if_accepted"] is True
+    assert summary["irvine_rows"][1]["would_win_profile_if_accepted"] is True
+    assert summary["irvine_rows"][1]["would_win_paper_if_accepted"] is False
     assert summary["irvine_rows"][0]["gate"] == "implementation-gap"
 
     markdown = render_lower_end_mac_win_gate_markdown(summary)
     assert "Warmed inference only" in markdown
-    assert "Pending listening wins: `2`." in markdown
+    assert "Pending paper-frontier listening wins: `1`." in markdown
+    assert "Pending profile-only listening wins: `2`." in markdown
     assert "`7s`" in markdown
 
 

@@ -101,7 +101,10 @@ def _m2_candidate_rows(
         baseline_stack_ms = float(med["baseline_total"])
         candidate_stack_ms = float(med["candidate_total"])
         config_ms = float(cell["config_f_warm_median_ms"])
-        best_ms = float(cell["best_warm_median_ms"])
+        paper_best_ms = float(cell["best_warm_median_ms"])
+        profile_best_ms = fresh.get("profile_laishere_ms")
+        if profile_best_ms is not None:
+            profile_best_ms = float(profile_best_ms)
         projected_full_ms = config_ms - baseline_stack_ms + candidate_stack_ms
         label = _fmt_label_from_report(path, report)
         rows.append(
@@ -112,13 +115,19 @@ def _m2_candidate_rows(
                 "gate": "human-listening",
                 "human_decision": decisions.get(label, ""),
                 "current_config_f_ms": config_ms,
-                "competitor_ms": best_ms,
-                "competitor": cell.get("best_impl_label"),
+                "paper_competitor_ms": paper_best_ms,
+                "paper_competitor": cell.get("best_impl_label"),
+                "profile_competitor_ms": profile_best_ms,
+                "profile_competitor": "laishere" if profile_best_ms is not None else None,
                 "baseline_stack_ms": baseline_stack_ms,
                 "candidate_stack_ms": candidate_stack_ms,
                 "projected_full_ms": projected_full_ms,
-                "projected_margin_ms": best_ms - projected_full_ms,
-                "would_win_if_accepted": projected_full_ms < best_ms,
+                "paper_margin_ms": paper_best_ms - projected_full_ms,
+                "profile_margin_ms": None if profile_best_ms is None else profile_best_ms - projected_full_ms,
+                "would_win_paper_if_accepted": projected_full_ms < paper_best_ms,
+                "would_win_profile_if_accepted": (
+                    False if profile_best_ms is None else projected_full_ms < profile_best_ms
+                ),
                 "corr": _metric(report, "correlation"),
                 "snr_db": _metric(report, "snr_db"),
                 "frontier_loss_looks_stale_or_tie": bool(fresh.get("frontier_loss_looks_stale_or_tie")),
@@ -129,7 +138,7 @@ def _m2_candidate_rows(
 
 
 def _irvine_candidate_rows(
-    irvine_targets: dict[str, Any], decisions: dict[str, str]
+    frontier: dict[str, Any], irvine_targets: dict[str, Any], decisions: dict[str, str]
 ) -> list[dict[str, Any]]:
     rows: list[dict[str, Any]] = []
     for row in irvine_targets.get("rows") or []:
@@ -138,19 +147,34 @@ def _irvine_candidate_rows(
         label = signal.get("label")
         if not label:
             continue
+        cell = _frontier_cell(frontier, "irvine-m1", str(row.get("input_key")))
+        paper_best_ms = float(cell["best_warm_median_ms"])
+        projected_full_ms = profile.get("projected_config_f_ms")
+        profile_margin_ms = profile.get("profile_margin_ms")
+        paper_margin_ms = None if projected_full_ms is None else paper_best_ms - float(projected_full_ms)
         rows.append(
             {
                 "machine_id": "irvine-m1",
                 "input_key": row.get("input_key"),
                 "candidate": label,
-                "gate": "human-listening" if profile.get("would_beat_warmed_laishere_profile") else "implementation-gap",
+                "gate": (
+                    "human-listening"
+                    if paper_margin_ms is not None and paper_margin_ms > 0
+                    else "paper-frontier-gap"
+                    if profile.get("would_beat_warmed_laishere_profile")
+                    else "implementation-gap"
+                ),
                 "human_decision": decisions.get(str(label), ""),
                 "current_config_f_ms": row.get("config_f_ms"),
-                "competitor_ms": row.get("laishere_ms"),
-                "competitor": "laishere",
-                "projected_full_ms": profile.get("projected_config_f_ms"),
-                "projected_margin_ms": profile.get("profile_margin_ms"),
-                "would_win_if_accepted": bool(profile.get("would_beat_warmed_laishere_profile")),
+                "paper_competitor_ms": paper_best_ms,
+                "paper_competitor": cell.get("best_impl_label"),
+                "profile_competitor_ms": row.get("laishere_ms"),
+                "profile_competitor": "laishere",
+                "projected_full_ms": projected_full_ms,
+                "paper_margin_ms": paper_margin_ms,
+                "profile_margin_ms": profile_margin_ms,
+                "would_win_paper_if_accepted": bool(paper_margin_ms is not None and paper_margin_ms > 0),
+                "would_win_profile_if_accepted": bool(profile.get("would_beat_warmed_laishere_profile")),
                 "corr": signal.get("corr"),
                 "snr_db": signal.get("snr_db"),
                 "source_body_gap_ms": row.get("source_body_gap_ms"),
@@ -172,34 +196,43 @@ def build_summary(
     """Build the lower-end Mac win-gate summary."""
 
     m2_rows = _m2_candidate_rows(frontier, freshness, m2_reports, m2_decisions)
-    irvine_rows = _irvine_candidate_rows(irvine_targets, irvine_decisions)
+    irvine_rows = _irvine_candidate_rows(frontier, irvine_targets, irvine_decisions)
     all_rows = m2_rows + irvine_rows
-    pending_wins = [
+    pending_paper_wins = [
         row
         for row in all_rows
-        if row["would_win_if_accepted"] and row.get("human_decision") not in {"pass", "caveat"}
+        if row["would_win_paper_if_accepted"] and row.get("human_decision") not in {"pass", "caveat"}
     ]
-    accepted_wins = [
-        row for row in all_rows if row["would_win_if_accepted"] and row.get("human_decision") in {"pass", "caveat"}
+    accepted_paper_wins = [
+        row
+        for row in all_rows
+        if row["would_win_paper_if_accepted"] and row.get("human_decision") in {"pass", "caveat"}
     ]
-    blocked_rows = [row for row in all_rows if not row["would_win_if_accepted"]]
+    pending_profile_wins = [
+        row
+        for row in all_rows
+        if row["would_win_profile_if_accepted"] and row.get("human_decision") not in {"pass", "caveat"}
+    ]
+    paper_blocked_rows = [row for row in all_rows if not row["would_win_paper_if_accepted"]]
     return {
         "scope": ["m2-air", "irvine-m1"],
         "warmed_only": True,
         "m2_air_candidate_count": len(m2_rows),
         "irvine_candidate_count": len(irvine_rows),
-        "pending_listening_win_count": len(pending_wins),
-        "accepted_win_count": len(accepted_wins),
-        "blocked_row_count": len(blocked_rows),
+        "pending_paper_listening_win_count": len(pending_paper_wins),
+        "accepted_paper_win_count": len(accepted_paper_wins),
+        "pending_profile_listening_win_count": len(pending_profile_wins),
+        "paper_blocked_row_count": len(paper_blocked_rows),
         "m2_air_rows": m2_rows,
         "irvine_rows": irvine_rows,
-        "pending_listening_wins": pending_wins,
-        "blocked_rows": blocked_rows,
+        "pending_paper_listening_wins": pending_paper_wins,
+        "pending_profile_listening_wins": pending_profile_wins,
+        "paper_blocked_rows": paper_blocked_rows,
         "decision": (
-            "Lower-end Mac wins are available through warmed source/body candidates, "
-            "but they are not paper-claimable until human listening accepts the rows. "
-            "Irvine 3s still needs a new implementation change; the best saved "
-            "source/body candidate does not beat laishere there."
+            "M2 Air 3s has paper-frontier wins gated only by human listening. "
+            "Irvine source/body candidates can beat several newer warmed profile "
+            "rows, but none beats the stricter paper-facing frontier yet. Irvine "
+            "still needs a combined implementation win, not just listening acceptance."
         ),
     }
 
@@ -214,15 +247,19 @@ def _fmt_num(value: Any, digits: int = 3) -> str:
 
 def _render_rows(rows: list[dict[str, Any]]) -> list[str]:
     lines = [
-        "| Machine | Bucket | Candidate | Gate | Human | Current Config F | Competitor | Projected | Margin | Quality |",
+        "| Machine | Bucket | Candidate | Gate | Human | Current Config F | Projected | Paper margin | Profile margin | Quality |",
         "| --- | --- | --- | --- | --- | ---: | ---: | ---: | ---: | --- |",
     ]
     for row in rows:
         quality = f"corr {_fmt_num(row.get('corr'), 3)}, SNR {_fmt_num(row.get('snr_db'), 2)} dB"
-        margin = row.get("projected_margin_ms")
-        margin_text = _fmt_ms(margin)
-        if margin is not None and float(margin) > 0:
-            margin_text = f"+{margin_text}"
+        paper_margin = row.get("paper_margin_ms")
+        paper_margin_text = _fmt_ms(paper_margin)
+        if paper_margin is not None and float(paper_margin) > 0:
+            paper_margin_text = f"+{paper_margin_text}"
+        profile_margin = row.get("profile_margin_ms")
+        profile_margin_text = _fmt_ms(profile_margin)
+        if profile_margin is not None and float(profile_margin) > 0:
+            profile_margin_text = f"+{profile_margin_text}"
         lines.append(
             "| "
             + " | ".join(
@@ -233,9 +270,9 @@ def _render_rows(rows: list[dict[str, Any]]) -> list[str]:
                     str(row["gate"]),
                     row.get("human_decision") or "blank",
                     _fmt_ms(row.get("current_config_f_ms")),
-                    f"{row.get('competitor')}: {_fmt_ms(row.get('competitor_ms'))}",
                     _fmt_ms(row.get("projected_full_ms")),
-                    margin_text,
+                    f"{paper_margin_text} vs {row.get('paper_competitor')}: {_fmt_ms(row.get('paper_competitor_ms'))}",
+                    f"{profile_margin_text} vs {row.get('profile_competitor') or '-'}: {_fmt_ms(row.get('profile_competitor_ms'))}",
                     quality,
                 ]
             )
@@ -252,9 +289,10 @@ def render_markdown(summary: dict[str, Any]) -> str:
         "`irvine-m1` gates needed before claiming we beat the external Apple",
         "Silicon implementations on lower-end Macs.",
         "",
-        f"Pending listening wins: `{summary['pending_listening_win_count']}`.",
-        f"Accepted wins: `{summary['accepted_win_count']}`.",
-        f"Blocked rows: `{summary['blocked_row_count']}`.",
+        f"Pending paper-frontier listening wins: `{summary['pending_paper_listening_win_count']}`.",
+        f"Accepted paper-frontier wins: `{summary['accepted_paper_win_count']}`.",
+        f"Pending profile-only listening wins: `{summary['pending_profile_listening_win_count']}`.",
+        f"Paper-frontier blocked rows: `{summary['paper_blocked_row_count']}`.",
         "",
         "## Candidate Gates",
         "",
@@ -270,8 +308,8 @@ def render_markdown(summary: dict[str, Any]) -> str:
             "## Immediate Work",
             "",
             "- Get no-ASR human listening decisions for the M2 Air `3s` candidates.",
-            "- Get no-ASR human listening decisions for Irvine `7s`, `10s`, and `15s` source/body candidates.",
-            "- Keep Irvine `3s` as an implementation target; current saved candidates do not beat laishere.",
+            "- Get no-ASR human listening decisions for Irvine `7s`, `10s`, and `15s` source/body candidates, but treat them as profile-only until the paper frontier is beaten.",
+            "- Keep Irvine `3s`, `7s`, `10s`, and `15s` as implementation targets for the stricter paper-facing frontier.",
             "- After acceptance, rerun warmed publishable lower-end rows on quiet hosts and refresh `competitive_frontier`.",
         ]
     )
@@ -306,8 +344,8 @@ def main() -> int:
         json.dumps(
             {
                 "output": str(args.output),
-                "pending_listening_win_count": summary["pending_listening_win_count"],
-                "blocked_row_count": summary["blocked_row_count"],
+                "pending_paper_listening_win_count": summary["pending_paper_listening_win_count"],
+                "paper_blocked_row_count": summary["paper_blocked_row_count"],
             },
             indent=2,
             sort_keys=True,
