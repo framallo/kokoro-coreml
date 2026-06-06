@@ -76,6 +76,10 @@ from scripts.summarize_f0_source_variants import (
     render_markdown as render_f0_source_variant_markdown,
     summarize_source_variants,
 )
+from scripts.summarize_nyquist_phase_contribution import (
+    render_markdown as render_nyquist_phase_markdown,
+    summarize_reports as summarize_nyquist_phase_reports,
+)
 from scripts.summarize_frontier_gap_candidates import (
     infer_bucket as infer_gap_candidate_bucket,
     infer_machine as infer_gap_candidate_machine,
@@ -1461,6 +1465,49 @@ def test_f0_source_variant_summary_separates_source_from_har_stft():
     markdown = render_f0_source_variant_markdown(summary)
     assert "Source equation solved: `true`" in markdown
     assert "Recomputed HAR/STFT solved: `false`" in markdown
+
+
+def test_nyquist_phase_summary_keeps_long_bucket_mismatch_visible(tmp_path):
+    def write_report(name, input_key, pad_har_to, corr, snr):
+        path = tmp_path / name
+        path.write_text(
+            json.dumps(
+                {
+                    "manifest_metadata": {"input_key": input_key, "bucket_seconds": int(input_key[:-1])},
+                    "pad_har_to": pad_har_to,
+                    "feature_metrics": {
+                        "recomputed_nyquist_phase_vs_dumped": {
+                            "wrapped_max_abs_error": 0.1,
+                            "two_pi_branch_errors": 12,
+                        }
+                    },
+                    "waveform_metrics_vs_dump": {
+                        "dumped_har": {"correlation": corr, "snr_db": snr},
+                        "recomputed_manual": {"correlation": corr - 0.001, "snr_db": snr - 1.0},
+                        "recomputed_manual_dumped_nyquist": {"correlation": corr, "snr_db": snr},
+                        "dumped_har_zero_nyquist": {"correlation": corr - 0.01, "snr_db": snr - 2.0},
+                    },
+                }
+            )
+            + "\n"
+        )
+        return path
+
+    paths = [
+        write_report("report_3s_padded.json", "3s", 28801, 0.999991, 47.7),
+        write_report("report_10s_padded.json", "10s", 96001, 0.978, 14.1),
+    ]
+
+    summary = summarize_nyquist_phase_reports(paths)
+
+    assert summary["row_count"] == 2
+    assert summary["strict_waveform_gate_pass_count"] == 1
+    assert summary["strict_waveform_gate_pass_rows"][0]["input_key"] == "3s"
+    assert "reference/geometry mismatch beyond Nyquist" in summary["interpretation"]
+
+    markdown = render_nyquist_phase_markdown(summary)
+    assert "Strict waveform gate pass rows: `1`" in markdown
+    assert "`10s`" in markdown
 
 
 def test_generator_cos_snake_trim_or_pad_last_dim():

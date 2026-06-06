@@ -4172,6 +4172,17 @@ phase-wrap/representation mismatch. So future quality-recovery work should not
 spend more time on the sine source equation alone; the missing strict contract
 is the Swift HAR/STFT representation or a quality-accepted replacement for it.
 
+The Nyquist sensitivity refresh extends that conclusion across buckets:
+`outputs/nyquist_phase_contribution/summary.md` now covers natural and padded
+geometry for `3s/7s/10s/15s/30s`. Dumped Nyquist phase repairs the padded
+`3s` and `7s` source-boundary rows (`47.76 dB` and `49.13 dB`, strict-pass),
+but natural geometry still fails (`16.74 dB` and `16.00 dB`). The longer
+`10s/15s/30s` direct PyTorch probe does not reproduce strict waveform parity
+even with dumped HAR (`14.10/15.27/15.09 dB` padded), so the long-bucket
+source-boundary probe has a reference/geometry mismatch beyond Nyquist. Do not
+promote Nyquist splicing as a production fix; use it only as evidence that the
+raw phase convention is one blocker inside a larger geometry contract.
+
 Keeping exact Swift HAR and only splitting the laishere-style noise/body/tail
 is not a win locally. The exact-HAR cos/residual split passes quality, but is
 slower: 3s `36.76 ms` vs `32.07 ms`, and 7s `67.72 ms` vs `60.88 ms`. The
