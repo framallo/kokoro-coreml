@@ -3374,9 +3374,12 @@ our current seeded Double-accumulator Swift HnSF contract.
 
 Keeping exact Swift HAR and only splitting the laishere-style noise/body/tail
 is not a win locally. The exact-HAR cos/residual split passes quality, but is
-slower: 3s `36.76 ms` vs `32.07 ms`, and 7s `67.72 ms` vs `60.88 ms`. That path
-is rejected for production unless a lower-end remote device contradicts the
-local result.
+slower: 3s `36.76 ms` vs `32.07 ms`, and 7s `67.72 ms` vs `60.88 ms`. The
+earlier cross-machine decoder+vocoder boundary probe already covers the same
+quality-safe split family on lower-end Macs and also rejects it: M2 Air `3s`
+CPU+GPU was `138.8 ms` vs `123.7 ms`, and Irvine M1 `3s` CPU+GPU was `199.3 ms`
+vs `174.6 ms`. That closes the remote-contradiction caveat for the
+strict-equivalent split path.
 
 ---
 
