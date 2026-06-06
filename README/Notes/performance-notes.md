@@ -207,7 +207,7 @@ Mac14,14, 64 GiB, macOS 26.5 / 25F71.
 
 | Impl | 3s | 7s | 10s | 15s | 30s | Caveats |
 | --- | ---: | ---: | ---: | ---: | ---: | --- |
-| Config F | 51.1 ms / 0.018 | 98.8 ms / 0.015 | 127.9 ms / 0.013 | 189.1 ms / 0.014 | 389.4 ms / 0.014 | staged + exact duration + vDSP HnSF + direct HAR padding + vectorized HnSF noise/mask; current batch rerun |
+| Config F | 50.6 ms / 0.018 | 96.1 ms / 0.014 | 126.2 ms / 0.013 | 185.6 ms / 0.013 | 379.3 ms / 0.014 | staged + exact duration + vDSP HnSF + direct HAR padding + vectorized HnSF noise/mask + frame-source phase; current batch rerun |
 | MLX | error | 223.9 ms / 0.033 | 288.8 ms / 0.030 | 376.3 ms / 0.027 | 762.7 ms / 0.028 | 3s broadcast-shape failure |
 | Soniqo | 71.7 ms / 0.027 | 69.3 ms / 0.014 | 71.0 ms / 0.014 | 68.1 ms / 0.014 | 69.5 ms / 0.014 | Long buckets emit 5.0s public artifact |
 | laishere | 212.3 ms / 0.077 | 403.3 ms / 0.059 | 626.3 ms / 0.065 | 429.8 ms / 0.031 | 925.1 ms / 0.034 | Excludes G2P/feed prep |
@@ -243,7 +243,7 @@ ranking above.
 
 | Machine | Impl | 3s | 7s | 10s | 15s | 30s |
 | --- | --- | ---: | ---: | ---: | ---: | ---: |
-| m2-studio | Config F | 50.9 ms | 97.7 ms | 128.7 ms | 190.7 ms | 383.8 ms |
+| m2-studio | Config F | 51.8 ms | 94.7 ms | 127.0 ms | 182.6 ms | 380.0 ms |
 | m2-studio | MLX | error | 195.9 ms | 4737.1 ms | 438.1 ms | 930.2 ms |
 | m2-studio | Soniqo | 615.2 ms | 433.0 ms | 398.0 ms | 411.7 ms | 414.3 ms |
 | m2-studio | laishere | 237.0 ms | 359.0 ms | 839.7 ms | 676.1 ms | 1955.1 ms |
@@ -260,7 +260,7 @@ ranking above.
 
 | Machine | Impl | 3s | 7s | 10s | 15s | 30s |
 | --- | --- | ---: | ---: | ---: | ---: | ---: |
-| m2-studio | Config F | 51.1 ms | 98.8 ms | 127.9 ms | 189.1 ms | 389.4 ms |
+| m2-studio | Config F | 50.6 ms | 96.1 ms | 126.2 ms | 185.6 ms | 379.3 ms |
 | m2-studio | MLX | error | 223.9 ms | 288.8 ms | 376.3 ms | 762.7 ms |
 | m2-studio | Soniqo | 71.7 ms | 69.3 ms | 71.0 ms | 68.1 ms | 69.5 ms |
 | m2-studio | laishere | 212.3 ms | 403.3 ms | 626.3 ms | 429.8 ms | 925.1 ms |
@@ -277,7 +277,7 @@ ranking above.
 
 | Machine | Impl | 3s | 7s | 10s | 15s | 30s |
 | --- | --- | ---: | ---: | ---: | ---: | ---: |
-| m2-studio | Config F | 0.018 | 0.015 | 0.013 | 0.014 | 0.014 |
+| m2-studio | Config F | 0.018 | 0.014 | 0.013 | 0.013 | 0.014 |
 | m2-studio | MLX | error | 0.033 | 0.030 | 0.027 | 0.028 |
 | m2-studio | Soniqo | 0.027 | 0.014 | 0.014 | 0.014 | 0.014 |
 | m2-studio | laishere | 0.077 | 0.059 | 0.065 | 0.031 | 0.034 |
@@ -315,9 +315,9 @@ faster. Values below `1.0x` mean the comparator was faster.
 
 | Machine | Comparator | 3s | 7s | 10s | 15s | 30s |
 | --- | --- | ---: | ---: | ---: | ---: | ---: |
-| m2-studio | MLX / Config F | n/a | 2.27x | 2.26x | 1.99x | 1.96x |
-| m2-studio | Soniqo / Config F | 1.40x | 0.70x | 0.56x | 0.36x | 0.18x |
-| m2-studio | laishere / Config F | 4.15x | 4.08x | 4.90x | 2.27x | 2.38x |
+| m2-studio | MLX / Config F | n/a | 2.33x | 2.29x | 2.03x | 2.01x |
+| m2-studio | Soniqo / Config F | 1.42x | 0.72x | 0.56x | 0.37x | 0.18x |
+| m2-studio | laishere / Config F | 4.20x | 4.20x | 4.96x | 2.32x | 2.44x |
 | m2-air | MLX / Config F | n/a | 2.07x | 1.79x | 2.19x | 1.85x |
 | m2-air | Soniqo / Config F | 7.41x | 3.43x | 2.41x | 1.62x | 0.80x |
 | m2-air | laishere / Config F | 0.96x | 0.96x | 0.97x | 0.95x | 1.05x |
@@ -367,9 +367,9 @@ Current ratio table, competitor median divided by Config F median; values above
 
 | Machine | Comparator | 3s | 7s | 10s | 15s | 30s |
 | --- | --- | ---: | ---: | ---: | ---: | ---: |
-| m2-studio | MLX | n/a | 2.27x | 2.26x | 1.99x | 1.96x |
-| m2-studio | laishere | 4.15x | 4.08x | 4.90x | 2.27x | 2.38x |
-| m2-studio | Soniqo | 1.40x | 0.70x | 0.56x | 0.36x | 0.18x |
+| m2-studio | MLX | n/a | 2.33x | 2.29x | 2.03x | 2.01x |
+| m2-studio | laishere | 4.20x | 4.20x | 4.96x | 2.32x | 2.44x |
+| m2-studio | Soniqo | 1.42x | 0.72x | 0.56x | 0.37x | 0.18x |
 | m2-air | MLX | n/a | 2.07x | 1.79x | 2.19x | 1.85x |
 | m2-air | laishere | 0.96x | 0.96x | 0.97x | 0.95x | 1.05x |
 | m2-air | Soniqo | 7.41x | 3.43x | 2.41x | 1.62x | 0.80x |
@@ -534,11 +534,11 @@ Swift HnSF step is the second largest long-bucket cost on all machines.
 
 | Machine | Input | Duration | F0Ntrain | DecoderPre | Generator | Swift HnSF |
 | --- | --- | ---: | ---: | ---: | ---: | ---: |
-| m2-studio | 3s | 9.5 ms | 4.6 ms | 2.7 ms | 27.0 ms | 7.0 ms |
-| m2-studio | 7s | 13.6 ms | 7.5 ms | 4.6 ms | 54.5 ms | 17.6 ms |
-| m2-studio | 10s | 14.9 ms | 7.6 ms | 6.3 ms | 73.6 ms | 22.7 ms |
-| m2-studio | 15s | 21.2 ms | 10.5 ms | 13.9 ms | 106.6 ms | 35.0 ms |
-| m2-studio | 30s | 36.0 ms | 17.6 ms | 48.8 ms | 207.5 ms | 72.8 ms |
+| m2-studio | 3s | 9.4 ms | 4.4 ms | 3.2 ms | 26.9 ms | 6.2 ms |
+| m2-studio | 7s | 13.7 ms | 6.6 ms | 5.4 ms | 54.5 ms | 14.7 ms |
+| m2-studio | 10s | 16.3 ms | 7.7 ms | 7.5 ms | 73.5 ms | 20.4 ms |
+| m2-studio | 15s | 19.8 ms | 10.6 ms | 15.6 ms | 106.6 ms | 30.7 ms |
+| m2-studio | 30s | 36.0 ms | 17.3 ms | 50.8 ms | 207.5 ms | 64.4 ms |
 | m2-air | 3s | 11.4 ms | 5.0 ms | 2.9 ms | 120.6 ms | 7.7 ms |
 | m2-air | 7s | 18.5 ms | 8.9 ms | 5.0 ms | 278.3 ms | 17.6 ms |
 | m2-air | 10s | 23.7 ms | 11.2 ms | 7.1 ms | 396.0 ms | 25.8 ms |
@@ -584,7 +584,7 @@ dominated by the generator predict call.
 
 | Machine | 3s HnSF | 7s HnSF | 10s HnSF | 15s HnSF | 30s HnSF |
 | --- | ---: | ---: | ---: | ---: | ---: |
-| m2-studio | 7.0 ms | 17.6 ms | 22.7 ms | 35.0 ms | 72.8 ms |
+| m2-studio | 6.2 ms | 14.7 ms | 20.4 ms | 30.7 ms | 64.4 ms |
 | m2-air | 7.7 ms | 17.6 ms | 25.8 ms | 39.8 ms | 78.8 ms |
 | irvine-m1 | 21.2 ms | 35.5 ms | 41.6 ms | 62.6 ms | 94.8 ms |
 
@@ -601,6 +601,17 @@ local M2 Studio probe. `3s` moved from `51.136 ms` wall / `7.018 ms` HnSF to
 `52.941 ms` wall / `7.304 ms` HnSF; `30s` moved from `389.353 ms` wall /
 `72.821 ms` HnSF to `390.939 ms` wall / `73.009 ms` HnSF. Keep the scalar repeat
 loop unless a future compiler/hardware check proves otherwise.
+
+Successful structural simplification: `buildHarComponents` now uses
+`sineGenFromF0Frames`, which skips the redundant phase-path
+`f0Upsample -> align_corners=false downsample` pair. Because F0 is
+nearest-upsampled by exactly `300`, the downsampled phase increment at frame
+`i` is the original frame value multiplied by the harmonic/sample-rate factor.
+The old `sineGen(f0Upsample(...))` path remains available for tests; the new
+unit test checks mixed voiced/unvoiced source samples against it. A refreshed
+local M2 Studio batch preserved the same output SHA-256 for every bucket and
+moved HnSF medians to `6.2/14.7/20.4/30.7/64.4 ms` for
+`3s/7s/10s/15s/30s`.
 
 #### Direct HAR padding fast path
 
