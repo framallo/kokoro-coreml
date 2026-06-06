@@ -391,8 +391,9 @@ sudo powermetrics -i 1000 --samplers ane
   (`3s` fp16 `26.4 ms` vs `30.3 ms`; `7s` fp16 `51.2 ms` vs `60.9 ms`), but it
   still fails waveform parity (`3s` corr `0.980656`, SNR `13.10 dB`; `7s` corr
   `0.979271`, SNR `13.06 dB`). fp32 conversion does not fix it (`3s` corr only
-  `0.981718`). Treat this as a Core ML semantic/parity recovery target, not a
-  production replacement.
+  `0.981718`), and CPU-only Core ML execution still fails (`3s` corr
+  `0.979581`, SNR `12.61 dB`). Treat this as a converted-graph semantic/parity
+  recovery target, not an ANE scheduling issue or production replacement.
 - **HAR input-tail trimming is too small:** `scripts/probe_generator_har_input_trim.py`
   keeps the bucketed `x_pre` shape and current Swift HAR source, but exports a
   temporary `GeneratorFromHar` with a shorter static `har` axis. The aggressive

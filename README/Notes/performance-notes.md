@@ -850,7 +850,10 @@ but the Core ML STFT/noise-conv path still fails strict parity. The staged
 source split has too little speed margin once Swift source generation is
 counted. The fused source graph has enough package-level speed upside to remain
 a research target, but only if a Core ML semantic/parity fix recovers waveform
-quality; fp32 precision alone does not.
+quality; fp32 precision alone does not. Running the same 3s fused fp16 package
+with `compute_units=cpu_only` still fails at roughly the same level (corr
+`0.979581`, SNR `12.61 dB`), so the failure is in converted graph semantics, not
+ANE scheduling.
 
 #### HAR input-trim probe
 
