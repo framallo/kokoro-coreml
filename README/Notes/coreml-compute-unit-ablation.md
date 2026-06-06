@@ -463,6 +463,20 @@ sudo powermetrics -i 1000 --samplers ane
   `30.07 ms`) and only `0.43%` faster on Irvine M1 (`167.64 ms` vs
   `168.36 ms`). This rejects "slightly shorter HAR padding" as the missing
   laishere/fastest-everywhere ingredient.
+- **Laishere-style fp16 vocoder inputs are not sufficient:** The source audit
+  found that laishere's `KokoroVocoder` declares fp16 body inputs and applies
+  int8 palettization, while our earlier `scripts/probe_f0_noise_exact_shape.py`
+  and `scripts/probe_decoder_vocoder_split.py` declared the same body boundary
+  as fp32. Added `--body-input-dtype` and tested the closer F0-source split on
+  local 3s. fp16 body inputs made the candidate catastrophically slower:
+  baseline `34.37 ms`, candidate `223.14 ms`, with `213.99 ms` inside the body
+  and failed parity (corr `0.931413`, SNR `9.17 dB`). Adding body palettization
+  still failed: baseline `32.69 ms`, candidate `223.07 ms`, body `214.56 ms`,
+  corr `0.930939`, SNR `9.14 dB`. Graph surface confirms the palettized body
+  shrank `97.8 MB -> 49.2 MB` and added `101` LUT ops, but did not change the
+  runtime failure. Do not attribute laishere's M1/M2 Air advantage to the
+  vocoder interface dtype or generic weight palettization in our static 3s
+  export.
 
 **2026-05-17**
 

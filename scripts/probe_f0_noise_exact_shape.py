@@ -62,6 +62,16 @@ def _toolchain_report() -> dict[str, str | None]:
     }
 
 
+def _np_dtype(name: str) -> type[np.floating[Any]]:
+    """Return the NumPy floating dtype requested by a probe CLI option."""
+
+    if name in ("fp16", "float16"):
+        return np.float16
+    if name in ("fp32", "float32"):
+        return np.float32
+    raise ValueError(f"Unsupported dtype: {name}")
+
+
 def _patch_resblock_rsqrt() -> None:
     """Patch decoder AdaIN residual blocks to match laishere's scale form."""
 
@@ -311,14 +321,15 @@ def _export_packages(
     anchor_shape = tuple(int(v) for v in anchor.shape)
     pre_tail_shape = tuple(int(v) for v in pre_tail.shape)
 
+    body_input_dtype = _np_dtype(args.body_input_dtype)
     body_inputs = [
-        ct.TensorType(name="asr", shape=asr_shape, dtype=np.float32),
-        ct.TensorType(name="F0_curve", shape=f0_shape, dtype=np.float32),
-        ct.TensorType(name="N_pred", shape=n_shape, dtype=np.float32),
-        ct.TensorType(name="style_timbre", shape=style_shape, dtype=np.float32),
+        ct.TensorType(name="asr", shape=asr_shape, dtype=body_input_dtype),
+        ct.TensorType(name="F0_curve", shape=f0_shape, dtype=body_input_dtype),
+        ct.TensorType(name="N_pred", shape=n_shape, dtype=body_input_dtype),
+        ct.TensorType(name="style_timbre", shape=style_shape, dtype=body_input_dtype),
     ]
     for idx, shape in enumerate(source_shapes):
-        body_inputs.append(ct.TensorType(name=f"x_source_{idx}", shape=shape, dtype=np.float32))
+        body_inputs.append(ct.TensorType(name=f"x_source_{idx}", shape=shape, dtype=body_input_dtype))
     body_model = ct.convert(
         traced_body,
         inputs=body_inputs,
@@ -375,6 +386,7 @@ def _export_packages(
         "palettize_body": bool(args.palettize_body),
         "noise_precision": args.noise_precision,
         "body_precision": args.body_precision,
+        "body_input_dtype": args.body_input_dtype,
         "tail_precision": args.tail_precision,
         "asr_shape": list(asr_shape),
         "f0_shape": list(f0_shape),
@@ -441,20 +453,26 @@ def _baseline_predict(decoder_pre: Any, fused: Any, inputs: dict[str, np.ndarray
     return waveform, {"decoder_pre_ms": dec_ms, "generator_ms": gen_ms, "total_ms": dec_ms + gen_ms}
 
 
-def _candidate_predict(noise: Any, body: Any, tail: Any, inputs: dict[str, np.ndarray]) -> tuple[np.ndarray, dict[str, float]]:
+def _candidate_predict(
+    noise: Any,
+    body: Any,
+    tail: Any,
+    inputs: dict[str, np.ndarray],
+    body_input_dtype: type[np.floating[Any]],
+) -> tuple[np.ndarray, dict[str, float]]:
     noise_out, noise_ms = _predict(
         noise,
         {"F0_curve": inputs["f0"], "style_timbre": inputs["style_timbre"]},
     )
     body_feed = {
-        "asr": inputs["asr"],
-        "F0_curve": inputs["f0"],
-        "N_pred": inputs["n_input"],
-        "style_timbre": inputs["style_timbre"],
+        "asr": inputs["asr"].astype(body_input_dtype),
+        "F0_curve": inputs["f0"].astype(body_input_dtype),
+        "N_pred": inputs["n_input"].astype(body_input_dtype),
+        "style_timbre": inputs["style_timbre"].astype(body_input_dtype),
     }
     for idx in range(len(noise_out)):
         key = f"x_source_{idx}"
-        body_feed[key] = noise_out[key].astype(np.float32)
+        body_feed[key] = noise_out[key].astype(body_input_dtype)
     body_out, body_ms = _predict(body, body_feed)
     pre_tail = body_out["pre_tail"].astype(np.float32)
     tail_out, tail_ms = _predict(tail, {"pre_tail": pre_tail})
@@ -471,13 +489,14 @@ def _benchmark(
 ) -> dict[str, Any]:
     inputs = _select_inputs(tensors, args.natural_asr)
     decoder_pre, fused, noise, body, tail = _load_models(args, noise_package, body_package, tail_package)
+    body_input_dtype = _np_dtype(args.body_input_dtype)
 
     baseline_first, baseline_first_times = _baseline_predict(decoder_pre, fused, inputs)
-    candidate_first, candidate_first_times = _candidate_predict(noise, body, tail, inputs)
+    candidate_first, candidate_first_times = _candidate_predict(noise, body, tail, inputs, body_input_dtype)
 
     for _ in range(max(0, args.warmup)):
         _baseline_predict(decoder_pre, fused, inputs)
-        _candidate_predict(noise, body, tail, inputs)
+        _candidate_predict(noise, body, tail, inputs, body_input_dtype)
 
     baseline_decoder_times: list[float] = []
     baseline_generator_times: list[float] = []
@@ -490,7 +509,7 @@ def _benchmark(
     last_candidate = candidate_first
     for _ in range(max(1, args.iterations)):
         last_baseline, baseline_times = _baseline_predict(decoder_pre, fused, inputs)
-        last_candidate, candidate_times = _candidate_predict(noise, body, tail, inputs)
+        last_candidate, candidate_times = _candidate_predict(noise, body, tail, inputs, body_input_dtype)
         baseline_decoder_times.append(baseline_times["decoder_pre_ms"])
         baseline_generator_times.append(baseline_times["generator_ms"])
         baseline_total_times.append(baseline_times["total_ms"])
@@ -662,6 +681,7 @@ def main() -> None:
     parser.add_argument("--palettize-body", action="store_true")
     parser.add_argument("--noise-precision", default="fp32", choices=("fp16", "float16", "fp32", "float32"))
     parser.add_argument("--body-precision", default="fp16", choices=("fp16", "float16", "fp32", "float32"))
+    parser.add_argument("--body-input-dtype", default="fp32", choices=("fp16", "float16", "fp32", "float32"))
     parser.add_argument("--tail-precision", default="fp32", choices=("fp16", "float16", "fp32", "float32"))
     parser.add_argument("--decoder-pre-compute-units", default="cpuAndNeuralEngine")
     parser.add_argument("--fused-compute-units", default="cpuAndGPU")

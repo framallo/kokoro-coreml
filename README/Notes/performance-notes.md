@@ -3151,6 +3151,32 @@ Bakeoff plan Phase 7: `README/Plans/kokoro-bakeoff-v2.md`
 
 ---
 
+## External bakeoff follow-up: laishere fp16 vocoder interface probe
+
+**First collected:** 2026-06-06
+**Status:** Rejected as optimization path
+
+Source audit showed laishere's `KokoroVocoder` uses fp16 Core ML inputs,
+`CPU_AND_NE`, and int8-palettized weights, while our first-party split probes
+had declared the same body boundary as fp32. `scripts/probe_f0_noise_exact_shape.py`
+and `scripts/probe_decoder_vocoder_split.py` now expose `--body-input-dtype` so
+that interface contract can be reproduced explicitly.
+
+On local M2 Studio 3s, the F0-source split with fp16 body inputs is not a win:
+
+| Variant | Baseline total | Candidate total | Candidate noise | Candidate body | Candidate tail | Corr | SNR |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| fp16 body inputs | 34.37 ms | 223.14 ms | 7.28 ms | 213.99 ms | 1.97 ms | 0.931413 | 9.17 dB |
+| fp16 body inputs + body palettization | 32.69 ms | 223.07 ms | 6.66 ms | 214.56 ms | 1.74 ms | 0.930939 | 9.14 dB |
+
+Both variants fail the strict quality gate and are far slower than the current
+warm generator path. Package inspection shows the palettized body shrank from
+`97.8 MB` to `49.2 MB` and gained `101` LUT ops, but runtime stayed pinned at
+~`214 ms` for the body. This closes the "we missed laishere's fp16/palette
+vocoder contract" hypothesis for the current static 3s export.
+
+---
+
 ## Bakeoff v5: Corrected benchmark (3s-30s) on M2 Ultra
 
 **First collected:** 2026-04-15
