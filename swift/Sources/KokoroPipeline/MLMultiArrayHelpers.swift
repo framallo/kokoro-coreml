@@ -351,8 +351,23 @@ private func alignValuesToFrames(
 /// Uses subscript access (not raw pointer arithmetic) to handle MLMultiArray
 /// strides correctly. CoreML model outputs may have non-trivial strides.
 public func zeroPad3D(source: MLMultiArray, channels: Int, targetTime: Int) throws -> MLMultiArray {
+    let sourceShape = source.shape.map { $0.intValue }
+    if sourceShape.count >= 3,
+       sourceShape[0] == 1,
+       sourceShape[1] == channels,
+       sourceShape[2] == targetTime {
+        return source
+    }
+    guard sourceShape.count >= 3, sourceShape[0] == 1, sourceShape[1] == channels else {
+        throw PipelineValidationError.invalidArrayShape(
+            operation: "zeroPad3D",
+            expected: "(1, \(channels), time)",
+            actual: sourceShape
+        )
+    }
+
     let result = try makeZeroArray3D(channels: channels, time: targetTime)
-    let srcTime = source.shape[2].intValue
+    let srcTime = sourceShape[2]
     let copyTime = min(srcTime, targetTime)
 
     // Check if source has standard contiguous strides (batch=C*T, channel=T, time=1)
@@ -377,6 +392,44 @@ public func zeroPad3D(source: MLMultiArray, channels: Int, targetTime: Int) thro
             }
         }
     }
+    return result
+}
+
+/// Zero-pad flat channel-major values to a 3D ``MLMultiArray`` of shape
+/// `(1, channels, targetTime)`.
+///
+/// This is the direct path for Swift-built tensors such as `har`, where the
+/// source is already a flat `(channels, sourceTime)` buffer. It avoids creating
+/// a temporary source ``MLMultiArray`` only to copy the same channel rows again.
+public func zeroPad3D(
+    sourceValues: [Float],
+    channels: Int,
+    sourceTime: Int,
+    targetTime: Int
+) throws -> MLMultiArray {
+    let expectedCount = channels * sourceTime
+    guard channels > 0, sourceTime >= 0, targetTime >= 0, sourceValues.count == expectedCount else {
+        throw PipelineValidationError.invalidArrayShape(
+            operation: "zeroPad3D",
+            expected: "(1, \(channels), \(sourceTime)) flat channel-major count \(expectedCount)",
+            actual: [sourceValues.count]
+        )
+    }
+
+    let result = try makeZeroArray3D(channels: channels, time: targetTime)
+    let copyTime = max(0, min(sourceTime, targetTime))
+    guard copyTime > 0 else { return result }
+
+    let dstPtr = result.dataPointer.assumingMemoryBound(to: Float.self)
+    sourceValues.withUnsafeBufferPointer { srcBuf in
+        guard let srcBase = srcBuf.baseAddress else { return }
+        for c in 0..<channels {
+            let srcOffset = c * sourceTime
+            let dstOffset = c * targetTime
+            memcpy(dstPtr + dstOffset, srcBase + srcOffset, copyTime * MemoryLayout<Float>.size)
+        }
+    }
+
     return result
 }
 

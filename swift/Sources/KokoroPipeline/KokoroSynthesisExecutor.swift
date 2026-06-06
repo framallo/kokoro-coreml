@@ -315,8 +315,6 @@ public func executeKokoroSynthesis(
     // Stage 8: GeneratorFromHar Core ML.
     let t14 = CFAbsoluteTimeGetCurrent()
     let genModel = try modelProvider.generatorModel(bucketSec: bucketSec)
-    let harArray = try makeZeroArray3D(channels: HarmonicConstants.harChannels, time: harFrames)
-    copyInto(array: harArray, from: harFlat)
     let genRefS = try makeZeroArray2D(dim: PipelineConstants.voiceEmbeddingDim)
     copyInto(array: genRefS, from: request.refS)
 
@@ -329,8 +327,9 @@ public func executeKokoroSynthesis(
         targetTime: xPreExpectedTime
     )
     let harPadded = try zeroPad3D(
-        source: harArray,
+        sourceValues: harFlat,
         channels: HarmonicConstants.harChannels,
+        sourceTime: harFrames,
         targetTime: harExpectedTime
     )
 
