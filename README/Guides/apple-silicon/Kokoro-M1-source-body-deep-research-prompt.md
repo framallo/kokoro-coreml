@@ -63,8 +63,11 @@ Authoritative frontier and target files:
 
 The apparent MLX win was a comparison bug: cold compile/cache behavior,
 padding, `.all` behavior, and HAR overhead were mixed into non-equivalent
-timings. Under warmed inference, Config F beats or ties MLX on validated Mac
-cells. The remaining strict competitor is laishere on Irvine M1.
+timings. Under corrected warmed full-duration inference, MLX has `0` Mac wins
+against Config F, Config F beats MLX on `12` Mac rows, and MLX has `3` Mac
+`3s` broadcast-shape failures. The detailed explanation is now generated at
+`outputs/external_bakeoff/mlx_speed_explanation.md`. The remaining strict
+competitor is laishere on Irvine M1, not MLX.
 
 The current strict CPU+NE body split is the main warning sign. It already gets
 laishere-like Neural Engine preferred-op counts, but it is slower. Therefore
@@ -139,6 +142,24 @@ Acceptance:
 The speed-positive candidates are quality-failing F0/source simplifications.
 They are useful only if quality can be recovered without losing the speed
 signal, or if human listening explicitly accepts the exact generated WAVs.
+
+Latest lower-end evidence:
+
+- M2 Air `3s_natural_asr_cos_rsqrt`: candidate stack `106.7 ms` versus baseline
+  stack `123.9 ms`, projected full `~128.5 ms`, waveform corr `0.813986`,
+  SNR `5.08 dB`.
+- M2 Air
+  `3s_padded_native_in_ios17_nopal_cos_rsqrt_cos_rsqrt_native_in`: candidate
+  stack `113.4 ms` versus baseline stack `123.5 ms`, projected full
+  `~135.6 ms`, waveform corr `0.931815`, SNR `9.19 dB`.
+- Both would beat the M2 Air paper-facing laishere `3s` row (`142.0 ms`) if
+  accepted, but both are non-strict and require human listening.
+- Dedicated no-ASR review pack:
+  `outputs/f0_source_listening/m2_air_3s_source_body/README.md`.
+- Decision CSV:
+  `outputs/f0_source_listening/m2_air_3s_source_body/f0_source_listening_decisions.csv`
+  is intentionally blank until a human listens. Do not treat these as accepted
+  production rows before that CSV validates.
 
 Acceptance:
 

@@ -29,6 +29,19 @@ The stricter paper frontier target still needs more. Use
 `outputs/external_bakeoff/strict_win_budget_after_rewrite.md` as the current
 numeric authority.
 
+Do not spend this research pass explaining or optimizing against MLX. The
+current generated evidence says MLX is not faster than corrected warmed Config F
+on any full-duration Mac row:
+
+- `outputs/external_bakeoff/mlx_speed_explanation.md`
+- corrected warmed MLX wins: `0`
+- corrected warmed Config F wins over MLX: `12`
+- MLX Mac `3s` rows: deterministic broadcast-shape failures
+
+If MLX appears faster in another table, first check whether that table uses raw
+Config F rows that include Core ML compile/cache behavior or stale artifacts.
+The real lower-end strict target is laishere.
+
 ## Core Observation
 
 Visible graph cleanup is not enough.
