@@ -836,6 +836,32 @@ conservative against laishere's narrower benchmark boundary.
 | 15s | 1014.9 ms | 823.1 ms | 191.9 ms | 990.6 ms | 779.9 ms | 215.3 ms |
 | 30s | 1959.4 ms | 1631.6 ms | 327.8 ms | 2292.3 ms | 1799.7 ms | 501.4 ms |
 
+`scripts/external_bakeoff/summarize_stage_gap_decomposition.py` now regenerates
+this comparison for every current frontier loss cell and writes
+`outputs/external_bakeoff/stage_gap_decomposition.{md,json}`. It uses warmed
+Config F `raw_warm_results` stage medians and laishere warmed stage-profile
+medians, not cold or compile-contaminated rows:
+
+```bash
+uv run --no-sync python scripts/external_bakeoff/summarize_stage_gap_decomposition.py \
+  --frontier-json outputs/external_bakeoff/competitive_frontier.json \
+  --output outputs/external_bakeoff/stage_gap_decomposition.md \
+  --json-output outputs/external_bakeoff/stage_gap_decomposition.json
+```
+
+Current generated stage-gap summary:
+
+| Machine | Bucket | Total gap | Source/body gap | Other gap | Interpretation |
+| --- | --- | ---: | ---: | ---: | --- |
+| irvine-m1 | 3s | `+38.5 ms` | `+22.0 ms` | `+12.9 ms` | Both source/body and upstream matter. |
+| irvine-m1 | 7s | `+48.4 ms` | `+43.3 ms` | `+3.6 ms` | Almost all remaining loss is source/body. |
+| irvine-m1 | 10s | `+40.6 ms` | `+56.0 ms` | `-9.8 ms` | Config F non-generator is already faster; source/body dominates. |
+| irvine-m1 | 15s | `+24.3 ms` | `+40.9 ms` | `-23.6 ms` | Config F upstream advantage hides part of the source/body loss. |
+| m2-air | 3s | `-5.0 ms` | `-3.1 ms` | `-3.0 ms` | Stage-profile rerun favors Config F despite the frontier table's older/laishere-fast cell. |
+| m2-air | 7s | `-4.0 ms` | `-0.7 ms` | `-5.3 ms` | Practical tie; not a meaningful graph loss. |
+| m2-air | 10s | `-1.3 ms` | `+3.2 ms` | `-8.6 ms` | Practical tie; small source/body deficit offset elsewhere. |
+| m2-air | 15s | `+2.0 ms` | `+7.6 ms` | `-7.6 ms` | Measurement-scale tie. |
+
 This answers the "how is laishere/MLX faster?" question more narrowly. MLX is
 not faster after warmed Config F correction. Laishere is not faster on M2 Studio
 and is effectively tied on M2 Air when the stage-profile boundary is rerun. The

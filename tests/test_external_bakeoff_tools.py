@@ -16,6 +16,12 @@ from scripts.external_bakeoff.summarize_competitive_frontier import (
     render_markdown as render_frontier_markdown,
     summarize_frontier,
 )
+from scripts.external_bakeoff.summarize_stage_gap_decomposition import (
+    render_markdown as render_stage_gap_markdown,
+    summarize_config_record,
+    summarize_laishere_record,
+    summarize_stage_gaps,
+)
 from scripts.external_bakeoff.validate_listening_decisions import validate_rows
 from scripts.external_bakeoff.verify_external_bakeoff_completion import (
     _check_iphone,
@@ -604,6 +610,156 @@ def test_frontier_gap_candidate_estimates_exact_machine_closure():
     markdown = render_frontier_gap_candidates_markdown(summary)
     assert "Strict-pass candidates that would close a loss: `1`." in markdown
     assert "`10s_padded_cos_resblock_phase_acos_cos_rsqrt` -> 625.0 ms (short)" in markdown
+
+
+def test_stage_gap_decomposition_uses_warmed_stage_medians(tmp_path):
+    config_record = {
+        "input_key": "3s",
+        "warm_wall_times_s": [0.100, 0.120, 0.110],
+        "provenance": {
+            "raw_warm_results": [
+                {
+                    "wall_time_s": 0.100,
+                    "t_duration_coreml_s": 0.010,
+                    "t_f0ntrain_coreml_s": 0.020,
+                    "t_decoder_pre_coreml_s": 0.003,
+                    "t_coreml_predict_s": 0.050,
+                    "t_hnsf_swift_s": 0.006,
+                    "t_matrix_ops_s": 0.001,
+                    "t_padding_s": 0.001,
+                    "t_trim_s": 0.001,
+                    "t_alignment_s": 0.0,
+                },
+                {
+                    "wall_time_s": 0.120,
+                    "t_duration_coreml_s": 0.012,
+                    "t_f0ntrain_coreml_s": 0.022,
+                    "t_decoder_pre_coreml_s": 0.004,
+                    "t_coreml_predict_s": 0.060,
+                    "t_hnsf_swift_s": 0.007,
+                    "t_matrix_ops_s": 0.001,
+                    "t_padding_s": 0.001,
+                    "t_trim_s": 0.001,
+                    "t_alignment_s": 0.0,
+                },
+                {
+                    "wall_time_s": 0.110,
+                    "t_duration_coreml_s": 0.011,
+                    "t_f0ntrain_coreml_s": 0.021,
+                    "t_decoder_pre_coreml_s": 0.005,
+                    "t_coreml_predict_s": 0.055,
+                    "t_hnsf_swift_s": 0.008,
+                    "t_matrix_ops_s": 0.001,
+                    "t_padding_s": 0.001,
+                    "t_trim_s": 0.001,
+                    "t_alignment_s": 0.0,
+                },
+            ]
+        },
+    }
+    config = summarize_config_record(config_record)
+    assert config["total_s"] == 0.110
+    assert config["generator_s"] == 0.055
+    assert round(config["non_generator_s"], 3) == 0.055
+    assert round(config["host_other_s"], 3) == 0.009
+
+    laishere = summarize_laishere_record(
+        {
+            "prepare_wall_time_s": 0.004,
+            "warm_median_s": {
+                "total_s": 0.090,
+                "albert_s": 0.010,
+                "post_albert_s": 0.011,
+                "alignment_s": 0.001,
+                "prosody_s": 0.002,
+                "noise_s": 0.020,
+                "vocoder_s": 0.040,
+                "tail_s": 0.003,
+                "python_overhead_s": 0.0,
+            },
+        }
+    )
+    assert laishere["noise_vocoder_tail_s"] == 0.063
+    assert laishere["other_plus_prepare_s"] == 0.028
+
+
+def test_stage_gap_decomposition_renders_loss_rows(tmp_path):
+    frontier = {
+        "summary": {
+            "config_f_losses": [
+                {
+                    "machine_id": "irvine-m1",
+                    "input_key": "3s",
+                    "best_impl_label": "laishere",
+                    "best_warm_median_ms": 90.0,
+                    "config_f_warm_median_ms": 110.0,
+                }
+            ]
+        }
+    }
+    config_payload = {
+        "records": [
+            {
+                "input_key": "3s",
+                "status": "ok",
+                "warm_wall_times_s": [0.110],
+                "provenance": {
+                    "raw_warm_results": [
+                        {
+                            "wall_time_s": 0.110,
+                            "t_duration_coreml_s": 0.011,
+                            "t_f0ntrain_coreml_s": 0.021,
+                            "t_decoder_pre_coreml_s": 0.005,
+                            "t_coreml_predict_s": 0.055,
+                            "t_hnsf_swift_s": 0.008,
+                            "t_matrix_ops_s": 0.001,
+                            "t_padding_s": 0.001,
+                            "t_trim_s": 0.001,
+                            "t_alignment_s": 0.0,
+                        }
+                    ]
+                },
+            }
+        ]
+    }
+    laishere_payload = {
+        "records": [
+            {
+                "input_key": "3s",
+                "status": "ok",
+                "prepare_wall_time_s": 0.004,
+                "warm_median_s": {
+                    "total_s": 0.090,
+                    "albert_s": 0.010,
+                    "post_albert_s": 0.011,
+                    "alignment_s": 0.001,
+                    "prosody_s": 0.002,
+                    "noise_s": 0.020,
+                    "vocoder_s": 0.040,
+                    "tail_s": 0.003,
+                },
+            }
+        ]
+    }
+    results = tmp_path / "results"
+    placement = results / "placement"
+    placement.mkdir(parents=True)
+    (results / "results_config_f_reference_irvine-m1_vector_noise_batch.json").write_text(
+        json.dumps(config_payload)
+    )
+    (placement / "results_laishere_stage_profile_irvine-m1.json").write_text(
+        json.dumps(laishere_payload)
+    )
+
+    summary = summarize_stage_gaps(frontier, results, placement)
+    row = summary["rows"][0]
+    assert round(row["total_gap_s"], 3) == 0.020
+    assert round(row["config_generator_minus_laishere_nvt_s"], 3) == -0.008
+    assert round(row["config_nongenerator_minus_laishere_other_prepare_s"], 3) == 0.027
+
+    markdown = render_stage_gap_markdown(summary)
+    assert "Loss rows analyzed: `1`." in markdown
+    assert "| irvine-m1 | 3s | 110.0 ms | 90.0 ms | 20.0 ms |" in markdown
 
 
 def test_coreml_metadata_summary_normalizes_ios_op_names():
