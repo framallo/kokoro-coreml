@@ -3952,6 +3952,30 @@ CPU+GPU was `138.8 ms` vs `123.7 ms`, and Irvine M1 `3s` CPU+GPU was `199.3 ms`
 vs `174.6 ms`. That closes the remote-contradiction caveat for the
 strict-equivalent split path.
 
+The stronger iOS17/native-InstanceNorm version of the same exact-HAR
+decoder+vocoder split also fails. `scripts/probe_decoder_vocoder_split.py` now
+accepts `--native-instance-norm-adain`, `--broadcast-adain`, and
+`--deployment-target` so the exact-HAR body can be exported with the same
+visible Core ML surface as the faster laishere vocoder. The 3s package shrank
+to the expected laishere-like graph shape (`1546` ops, `42` `ios17.instance_norm`
+ops, no manual AdaIN tiles), but warmed inference still loses:
+
+| Machine | Body units | Baseline stack | Candidate stack | Candidate body | Parity vs fused | Compute-plan note | Decision |
+| --- | --- | ---: | ---: | ---: | --- | --- | --- |
+| m2-studio | CPU+NE | 32.52 ms | 382.42 ms | 369.88 ms | corr 0.999926, SNR 38.68 dB | emits `ANECCompile() FAILED`; cost weights all zero | reject |
+| m2-studio | CPU+GPU | 30.35 ms | 34.20 ms | 22.71 ms | corr 0.999990, SNR 47.56 dB | GPU-only weighted plan | reject |
+| irvine-m1 | CPU+NE | 175.07 ms | 291.35 ms | 209.18 ms | corr 0.999910, SNR 37.82 dB | mixed `51.3%` CPU / `48.7%` NE cost | reject |
+| irvine-m1 | CPU+GPU | 175.39 ms | 204.65 ms | 121.58 ms | corr 0.999991, SNR 47.76 dB | GPU-only weighted plan | reject |
+
+This closes "make our exact split look like laishere's iOS17/native-IN package"
+as a standalone speed path. The first-party body can now reproduce the
+laishere-like op surface and, on Irvine M1, even gets a comparable mixed CPU/NE
+plan. It still loses because the exact-HAR body boundary is too broad or has
+unfavorable synchronization/work distribution relative to laishere's actual
+vocoder-centered chain. The next viable direction is a narrower strict
+equivalence boundary around the vocoder-like work, not more metadata matching
+on this full decoder+vocoder body.
+
 ---
 
 ## Bakeoff v5: Corrected benchmark (3s-30s) on M2 Ultra
