@@ -193,117 +193,118 @@
   "nyquist_bin": 10,
   "nyquist_har_channel": 21,
   "pad_har_to": null,
+  "reference_waveform_key": "waveform_raw_trimmed",
   "tensor_dump": "outputs/generator_isolation/dumps/10s",
   "waveform_metrics_vs_dump": {
     "dumped_har": {
       "candidate_samples": 240000,
-      "correlation": 0.962812362268898,
-      "cosine_similarity": 0.9671676729170294,
-      "max_abs_error": 0.2631687521934509,
-      "mean_abs_error": 0.005761616713109696,
+      "correlation": 0.9844621115290164,
+      "cosine_similarity": 0.9863050647090448,
+      "max_abs_error": 0.2546468898653984,
+      "mean_abs_error": 0.004672661088911672,
       "reference_samples": 230400,
-      "rmse": 0.015088493737625091,
+      "rmse": 0.009793456821276305,
       "samples_compared": 230400,
-      "snr_db": 11.632829367456544
+      "snr_db": 15.561047628497457
     },
     "dumped_har_mean_nyquist": {
       "candidate_samples": 240000,
-      "correlation": 0.9615587992888986,
-      "cosine_similarity": 0.9660615807530998,
+      "correlation": 0.9832728011713234,
+      "cosine_similarity": 0.985257305027484,
       "max_abs_error": 0.2676490843296051,
-      "mean_abs_error": 0.005974034739796111,
+      "mean_abs_error": 0.004894915742055321,
       "reference_samples": 230400,
-      "rmse": 0.015339117729489845,
+      "rmse": 0.01016098408148352,
       "samples_compared": 230400,
-      "snr_db": 11.489739492142059
+      "snr_db": 15.24105246654457
     },
     "dumped_har_padded": {
       "candidate_samples": 240000,
-      "correlation": 0.9786258890128077,
-      "cosine_similarity": 0.9811328078232077,
-      "max_abs_error": 0.2535383403301239,
-      "mean_abs_error": 0.0012734250590893449,
+      "correlation": 0.9999943787334382,
+      "cosine_similarity": 0.9999950472771804,
+      "max_abs_error": 0.0032089799642562866,
+      "mean_abs_error": 0.00010666136951549467,
       "reference_samples": 230400,
-      "rmse": 0.011363475690419999,
+      "rmse": 0.00018691946246698766,
       "samples_compared": 230400,
-      "snr_db": 14.095523362298346
+      "snr_db": 49.94667741705086
     },
     "dumped_har_zero_nyquist": {
       "candidate_samples": 240000,
-      "correlation": 0.9617169449260806,
-      "cosine_similarity": 0.9662200727543347,
+      "correlation": 0.9834126872224053,
+      "cosine_similarity": 0.985393829799539,
       "max_abs_error": 0.2654106169939041,
-      "mean_abs_error": 0.005897637601856771,
+      "mean_abs_error": 0.004825131333094772,
       "reference_samples": 230400,
-      "rmse": 0.015182561238462254,
+      "rmse": 0.010049603851432071,
       "samples_compared": 230400,
-      "snr_db": 11.578846276251635
+      "snr_db": 15.336789036253977
     },
     "recomputed_manual": {
       "candidate_samples": 240000,
-      "correlation": 0.9626459957438291,
-      "cosine_similarity": 0.9670410743399036,
-      "max_abs_error": 0.2578396797180176,
-      "mean_abs_error": 0.0057665946816900585,
+      "correlation": 0.9844129730073811,
+      "cosine_similarity": 0.986275612992874,
+      "max_abs_error": 0.2506631389260292,
+      "mean_abs_error": 0.004682675579580704,
       "reference_samples": 230400,
-      "rmse": 0.014978657902461447,
+      "rmse": 0.009733282942173346,
       "samples_compared": 230400,
-      "snr_db": 11.696289065777872
+      "snr_db": 15.614580920156865
     },
     "recomputed_manual_dumped_nyquist": {
       "candidate_samples": 240000,
-      "correlation": 0.962792969867824,
-      "cosine_similarity": 0.9671505427003265,
-      "max_abs_error": 0.2631695866584778,
-      "mean_abs_error": 0.005763047145466462,
+      "correlation": 0.984442855501694,
+      "cosine_similarity": 0.9862880861552447,
+      "max_abs_error": 0.2546461820602417,
+      "mean_abs_error": 0.004674092836355051,
       "reference_samples": 230400,
-      "rmse": 0.015092434262937686,
+      "rmse": 0.009799537220416082,
       "samples_compared": 230400,
-      "snr_db": 11.630561248452715
+      "snr_db": 15.555656550700308
     },
     "recomputed_manual_mean_nyquist": {
       "candidate_samples": 240000,
-      "correlation": 0.96154109164395,
-      "cosine_similarity": 0.9660459537304363,
+      "correlation": 0.9832554680644948,
+      "cosine_similarity": 0.985242032920901,
       "max_abs_error": 0.26766596734523773,
-      "mean_abs_error": 0.00597558226677218,
+      "mean_abs_error": 0.004896468074521125,
       "reference_samples": 230400,
-      "rmse": 0.015342595924652664,
+      "rmse": 0.010166222764915916,
       "samples_compared": 230400,
-      "snr_db": 11.487770161498155
+      "snr_db": 15.236575449363235
     },
     "recomputed_manual_neg_pi_nyquist": {
       "candidate_samples": 240000,
-      "correlation": 0.9605701838105892,
-      "cosine_similarity": 0.9652354540238016,
+      "correlation": 0.9821510332929512,
+      "cosine_similarity": 0.9842962229273894,
       "max_abs_error": 0.25612223520874977,
-      "mean_abs_error": 0.00643628186440374,
+      "mean_abs_error": 0.0054624252932660355,
       "reference_samples": 230400,
-      "rmse": 0.015060563661893345,
+      "rmse": 0.010737427173816,
       "samples_compared": 230400,
-      "snr_db": 11.64892258201874
+      "snr_db": 14.761763260978213
     },
     "recomputed_manual_pos_pi_nyquist": {
       "candidate_samples": 240000,
-      "correlation": 0.9593741772279534,
-      "cosine_similarity": 0.9638745323761408,
+      "correlation": 0.9811353020810518,
+      "cosine_similarity": 0.9831499034761211,
       "max_abs_error": 0.29575297236442566,
-      "mean_abs_error": 0.006741713796363726,
+      "mean_abs_error": 0.005661848051451288,
       "reference_samples": 230400,
-      "rmse": 0.016325445635393676,
+      "rmse": 0.011245824545808884,
       "samples_compared": 230400,
-      "snr_db": 10.948446205771813
+      "snr_db": 14.359941816535866
     },
     "recomputed_manual_zero_nyquist": {
       "candidate_samples": 240000,
-      "correlation": 0.9616993008683851,
-      "cosine_similarity": 0.9662045135537428,
+      "correlation": 0.9833954196300306,
+      "cosine_similarity": 0.9853786268880561,
       "max_abs_error": 0.26543310284614563,
-      "mean_abs_error": 0.005899182104776418,
+      "mean_abs_error": 0.004826680097566033,
       "reference_samples": 230400,
-      "rmse": 0.01518603019518705,
+      "rmse": 0.010054830718731471,
       "samples_compared": 230400,
-      "snr_db": 11.57686192505328
+      "snr_db": 15.332272620397578
     }
   },
   "weight_stats": [

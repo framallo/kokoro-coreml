@@ -4174,14 +4174,18 @@ is the Swift HAR/STFT representation or a quality-accepted replacement for it.
 
 The Nyquist sensitivity refresh extends that conclusion across buckets:
 `outputs/nyquist_phase_contribution/summary.md` now covers natural and padded
-geometry for `3s/7s/10s/15s/30s`. Dumped Nyquist phase repairs the padded
-`3s` and `7s` source-boundary rows (`47.76 dB` and `49.13 dB`, strict-pass),
-but natural geometry still fails (`16.74 dB` and `16.00 dB`). The longer
-`10s/15s/30s` direct PyTorch probe does not reproduce strict waveform parity
-even with dumped HAR (`14.10/15.27/15.09 dB` padded), so the long-bucket
-source-boundary probe has a reference/geometry mismatch beyond Nyquist. Do not
+geometry for `3s/7s/10s/15s/30s`. The first long-bucket refresh accidentally
+compared against the post-processed `waveform` key; the corrected probe uses
+`waveform_raw_trimmed`, which is the generator-body reference emitted from the
+same dump. With that reference, dumped Nyquist phase plus padded shipping HAR
+geometry repairs strict source-boundary parity across all five buckets (`3s`
+`50.06 dB`, `7s` `49.14 dB`, `10s` `49.87 dB`, `15s` `49.21 dB`, `30s`
+`48.42 dB`). Natural geometry still fails (`3s` `16.75 dB`, `7s` `16.00 dB`,
+`10s` `15.56 dB`, `15s` `16.13 dB`, `30s` `15.46 dB`), and the prior Core ML
+fused-source timing shows the padded strict path loses the speed edge. Do not
 promote Nyquist splicing as a production fix; use it only as evidence that the
-raw phase convention is one blocker inside a larger geometry contract.
+exact source/STFT contract is the quality blocker, while the faster compact
+boundary needs a different geometry or representation to stay strict.
 
 Keeping exact Swift HAR and only splitting the laishere-style noise/body/tail
 is not a win locally. The exact-HAR cos/residual split passes quality, but is

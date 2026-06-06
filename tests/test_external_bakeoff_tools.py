@@ -1467,7 +1467,7 @@ def test_f0_source_variant_summary_separates_source_from_har_stft():
     assert "Recomputed HAR/STFT solved: `false`" in markdown
 
 
-def test_nyquist_phase_summary_keeps_long_bucket_mismatch_visible(tmp_path):
+def test_nyquist_phase_summary_tracks_padded_strict_and_natural_failure(tmp_path):
     def write_report(name, input_key, pad_har_to, corr, snr):
         path = tmp_path / name
         path.write_text(
@@ -1494,19 +1494,26 @@ def test_nyquist_phase_summary_keeps_long_bucket_mismatch_visible(tmp_path):
         return path
 
     paths = [
+        write_report("report_3s.json", "3s", None, 0.988, 16.7),
         write_report("report_3s_padded.json", "3s", 28801, 0.999991, 47.7),
-        write_report("report_10s_padded.json", "10s", 96001, 0.978, 14.1),
+        write_report("report_10s.json", "10s", None, 0.9987, 26.2),
+        write_report("report_10s_padded.json", "10s", 96001, 0.999994, 49.8),
     ]
 
     summary = summarize_nyquist_phase_reports(paths)
 
-    assert summary["row_count"] == 2
-    assert summary["strict_waveform_gate_pass_count"] == 1
-    assert summary["strict_waveform_gate_pass_rows"][0]["input_key"] == "3s"
-    assert "reference/geometry mismatch beyond Nyquist" in summary["interpretation"]
+    assert summary["row_count"] == 4
+    assert summary["strict_waveform_gate_pass_count"] == 2
+    assert summary["strict_waveform_gate_pass_rows"] == [
+        {"input_key": "3s", "geometry": "padded", "path": str(paths[1])},
+        {"input_key": "10s", "geometry": "padded", "path": str(paths[3])},
+    ]
+    assert "padded shipping HAR geometry repairs" in summary["interpretation"]
+    assert "Natural HAR geometry still fails" in summary["interpretation"]
+    assert "removes the speed edge" in summary["interpretation"]
 
     markdown = render_nyquist_phase_markdown(summary)
-    assert "Strict waveform gate pass rows: `1`" in markdown
+    assert "Strict waveform gate pass rows: `2`" in markdown
     assert "`10s`" in markdown
 
 

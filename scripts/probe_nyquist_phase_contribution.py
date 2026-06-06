@@ -192,7 +192,7 @@ def run(args: argparse.Namespace) -> dict[str, Any]:
     import torch
 
     manifest, tensors = load_tensor_dump(args.tensor_dump)
-    required = ["har_source", "har", "har_phase", "x_pre_padded", "ref_s", "waveform"]
+    required = ["har_source", "har", "har_phase", "x_pre_padded", "ref_s"]
     missing = [name for name in required if name not in tensors]
     if missing:
         raise SystemExit(f"tensor dump missing required tensors: {missing}")
@@ -200,7 +200,10 @@ def run(args: argparse.Namespace) -> dict[str, Any]:
     generator = _load_kmodel().decoder.generator.eval()
     recomputed_har = _manual_stft_har(generator, tensors["har_source"])
     variants = _make_variants(tensors, recomputed_har, args.pad_har_to)
-    reference_waveform = tensors["waveform"].reshape(-1)
+    reference_waveform_key = "waveform_raw_trimmed" if "waveform_raw_trimmed" in tensors else "waveform"
+    if reference_waveform_key not in tensors:
+        raise SystemExit("tensor dump missing waveform_raw_trimmed or waveform")
+    reference_waveform = tensors[reference_waveform_key].reshape(-1)
 
     with torch.no_grad():
         waveform_metrics = {}
@@ -231,6 +234,7 @@ def run(args: argparse.Namespace) -> dict[str, Any]:
         "nyquist_bin": NYQUIST_BIN,
         "nyquist_har_channel": NYQUIST_HAR_CHANNEL,
         "pad_har_to": args.pad_har_to,
+        "reference_waveform_key": reference_waveform_key,
         "weight_stats": _weight_stats(generator),
         "feature_metrics": feature_metrics,
         "waveform_metrics_vs_dump": waveform_metrics,

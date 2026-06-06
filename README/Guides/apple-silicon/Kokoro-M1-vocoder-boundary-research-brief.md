@@ -175,10 +175,11 @@ Research targets:
   `swift_like_seeded` probe matches dumped `har_source` at SNR `138.15-140.33 dB`.
   The unsolved part is HAR/STFT recreation from source, which remains near SNR
   `8.11-8.23 dB` even when recomputing from the exact dumped source.
-- Treat Nyquist phase as a proven sub-blocker, not the full fix. Dumped Nyquist
-  phase repairs padded `3s/7s` source-boundary rows, but natural geometry still
-  fails and the `10s/15s/30s` direct Nyquist probe still misses strict waveform
-  parity even with dumped HAR.
+- Treat Nyquist phase as a proven sub-blocker, not the full fix. With the
+  corrected `waveform_raw_trimmed` reference, dumped Nyquist phase plus padded
+  shipping HAR geometry repairs strict source-boundary parity across
+  `3s/7s/10s/15s/30s`, but natural geometry still fails and prior Core ML timing
+  shows the padded strict path loses the speed edge.
 - If objective parity remains impossible, define a listening-review protocol
   that can support a "quality-equivalent" paper claim without Whisper/ASR.
 

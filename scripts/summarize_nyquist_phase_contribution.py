@@ -104,11 +104,12 @@ def summarize_reports(paths: list[Path]) -> dict[str, Any]:
             {"input_key": row["input_key"], "geometry": row["geometry"], "path": row["path"]} for row in strict_rows
         ],
         "interpretation": (
-            "Dumped Nyquist phase repairs the 3s/7s padded source-boundary path, "
-            "but it does not make natural geometry strict and the 10s/15s/30s direct "
-            "Nyquist probe does not reproduce strict waveform parity even with dumped "
-            "HAR. Treat long-bucket Nyquist results as evidence that the direct probe "
-            "has a reference/geometry mismatch beyond Nyquist, not as a production win."
+            "Using the raw trimmed waveform reference, dumped Nyquist phase plus "
+            "padded shipping HAR geometry repairs the source-boundary path across "
+            "3s/7s/10s/15s/30s. Natural HAR geometry still fails strict waveform "
+            "parity, and prior fused-source timing shows padded geometry removes "
+            "the speed edge, so Nyquist splicing is evidence for the blocker rather "
+            "than a production win."
         ),
     }
 
