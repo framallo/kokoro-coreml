@@ -36,6 +36,11 @@ sys.path.insert(0, str(_SCRIPT_DIR))
 sys.path.insert(0, str(_ROOT))
 
 from audio_parity_tensor_io import load_tensor_dump  # noqa: E402
+from probe_generator_cos_snake import (  # noqa: E402
+    _deployment_target,
+    _patch_broadcast_adain,
+    _patch_native_instance_norm_adain,
+)
 from probe_generator_exact_geometry import _compute_units, _load_kmodel, _metrics  # noqa: E402
 from probe_generator_split import _duration_label_from_dump, _precision_arg, _remove_existing_package  # noqa: E402
 
@@ -130,12 +135,17 @@ def _export_packages(
     noise_package: Path,
     body_package: Path,
     tensors: dict[str, np.ndarray],
-    precision: str,
+    args: argparse.Namespace,
 ) -> dict[str, Any]:
     import coremltools as ct
     import torch
 
     from export_synth.wrappers import remove_dropout
+
+    if args.native_instance_norm_adain:
+        _patch_native_instance_norm_adain(args.broadcast_adain)
+    elif args.broadcast_adain:
+        _patch_broadcast_adain()
 
     kmodel = _load_kmodel()
     gen = kmodel.decoder.generator
@@ -165,8 +175,8 @@ def _export_packages(
         ],
         outputs=noise_outputs,
         convert_to="mlprogram",
-        minimum_deployment_target=ct.target.macOS13,
-        compute_precision=_precision_arg(ct, precision),
+        minimum_deployment_target=_deployment_target(ct, args.deployment_target),
+        compute_precision=_precision_arg(ct, args.precision),
         compute_units=ct.ComputeUnit.ALL,
     )
     noise_package.parent.mkdir(parents=True, exist_ok=True)
@@ -197,15 +207,18 @@ def _export_packages(
         inputs=body_inputs,
         outputs=[ct.TensorType(name="waveform")],
         convert_to="mlprogram",
-        minimum_deployment_target=ct.target.macOS13,
-        compute_precision=_precision_arg(ct, precision),
+        minimum_deployment_target=_deployment_target(ct, args.deployment_target),
+        compute_precision=_precision_arg(ct, args.precision),
         compute_units=ct.ComputeUnit.ALL,
     )
     _remove_existing_package(body_package)
     body_model.save(str(body_package))
 
     return {
-        "precision": precision,
+        "precision": args.precision,
+        "broadcast_adain": bool(args.broadcast_adain),
+        "native_instance_norm_adain": bool(args.native_instance_norm_adain),
+        "deployment_target": args.deployment_target,
         "noise_package": str(noise_package),
         "body_package": str(body_package),
         "ref_s_shape": list(ref_s_shape),
@@ -340,10 +353,16 @@ def run(args: argparse.Namespace) -> dict[str, Any]:
         raise SystemExit(f"tensor dump missing required tensors: {missing}")
 
     label = args.label or _duration_label_from_dump(args.tensor_dump, manifest)
+    if args.native_instance_norm_adain:
+        label = f"{label}_native_in"
+    if args.broadcast_adain:
+        label = f"{label}_broadcast"
+    if args.deployment_target.lower() != "macos13":
+        label = f"{label}_{args.deployment_target.lower()}"
     work_dir = args.output_dir / label
     noise_package = work_dir / f"kokoro_generator_noise_from_har_{label}.mlpackage"
     body_package = work_dir / f"kokoro_generator_body_from_noise_{label}.mlpackage"
-    report_path = work_dir / "report.json"
+    report_path = work_dir / args.report_name
 
     export_report: dict[str, Any] | None = None
     if args.skip_export:
@@ -353,7 +372,7 @@ def run(args: argparse.Namespace) -> dict[str, Any]:
                 f"{noise_package}, {body_package}"
             )
     else:
-        export_report = _export_packages(noise_package, body_package, tensors, args.precision)
+        export_report = _export_packages(noise_package, body_package, tensors, args)
 
     benchmark = _benchmark(args, tensors, noise_package, body_package)
     split_metrics = benchmark["metrics"]["split_vs_fused_trimmed"]
@@ -418,11 +437,19 @@ def main() -> None:
         choices=("fp16", "float16", "fp32", "float32"),
         help="Core ML conversion precision for split packages.",
     )
+    parser.add_argument("--broadcast-adain", action="store_true")
+    parser.add_argument("--native-instance-norm-adain", action="store_true")
+    parser.add_argument(
+        "--deployment-target",
+        default="macos13",
+        choices=("macos13", "macos14", "macos15", "ios17", "ios18"),
+    )
     parser.add_argument("--fused-compute-units", default="cpuAndGPU")
     parser.add_argument("--noise-compute-units", default="cpuAndGPU")
     parser.add_argument("--body-compute-units", default="cpuAndGPU")
     parser.add_argument("--warmup", type=int, default=3)
     parser.add_argument("--iterations", type=int, default=10)
+    parser.add_argument("--report-name", default="report.json")
     parser.add_argument("--min-corr", type=float, default=0.99)
     parser.add_argument("--min-snr", type=float, default=35.0)
     parser.add_argument("--max-abs-error", type=float, default=1e-2)

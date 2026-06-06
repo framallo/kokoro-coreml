@@ -3976,6 +3976,26 @@ vocoder-centered chain. The next viable direction is a narrower strict
 equivalence boundary around the vocoder-like work, not more metadata matching
 on this full decoder+vocoder body.
 
+The narrower generator-only HAR-noise split was rerun with the same
+native-InstanceNorm/iOS17 surface. This keeps decoder/HAR exactly as shipped and
+only splits the current generator into `noise_convs/noise_res` and the main
+generator body. It also fails to beat the fused package:
+
+| Machine | Units | Fused | Split total | Noise | Body | Parity vs fused | Decision |
+| --- | --- | ---: | ---: | ---: | ---: | --- | --- |
+| m2-studio | noise CPU+GPU, body CPU+GPU | 26.43 ms | 28.86 ms | 11.25 ms | 17.59 ms | corr 0.999994, SNR 49.84 dB | reject; close but slower |
+| m2-studio | noise CPU+GPU, body CPU+NE | 28.19 ms | 161.41 ms | 11.40 ms | 150.02 ms | corr 0.999905, SNR 37.64 dB | reject |
+| irvine-m1 | noise CPU+GPU, body CPU+GPU | 168.31 ms | 179.84 ms | 74.02 ms | 105.89 ms | corr 0.999995, SNR 50.29 dB | reject; close but slower |
+| irvine-m1 | noise CPU+GPU, body CPU+NE | 172.20 ms | 294.06 ms | 73.63 ms | 220.34 ms | corr 0.077158, SNR 0.01 dB | reject; quality fails |
+
+This is the current tightest strict-equivalent split result. Native
+InstanceNorm reduces the generator body, but the separate HAR-noise package and
+extra Core ML boundary still cost more than the fused graph saves. The remaining
+laishere advantage is therefore not solved by a strict split of the shipped
+HAR-post generator either; it likely requires moving to a laishere-style source
+contract, proving that drift acceptable by listening review, or finding a new
+single-package optimization that preserves the exact Swift HAR contract.
+
 ---
 
 ## Bakeoff v5: Corrected benchmark (3s-30s) on M2 Ultra
