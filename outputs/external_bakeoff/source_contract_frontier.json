@@ -1,0 +1,39 @@
+{
+  "body_counterfactuals": [
+    {
+      "body_only_ms": 17.58937496924773,
+      "body_only_saves_ms": 8.843333518598229,
+      "full_split_delta_ms": -2.4232500582002103,
+      "fused_ms": 26.432708487845957,
+      "machine_id": "m2-studio",
+      "passes": true,
+      "source_noise_ms": 11.251229036133736,
+      "split_total_ms": 28.855958546046168
+    },
+    {
+      "body_only_ms": 105.8871874702163,
+      "body_only_saves_ms": 62.41916696308181,
+      "full_split_delta_ms": -11.533791024703532,
+      "fused_ms": 168.3063544332981,
+      "machine_id": "irvine-m1",
+      "passes": true,
+      "source_noise_ms": 74.02070797979832,
+      "split_total_ms": 179.84014545800164
+    }
+  ],
+  "decision": "The Swift-like source equation is solved, but recomputed HAR/STFT is not. The body package is fast if x_source tensors are free, and quality-fail F0/source branches would close several warmed Irvine profile rows. The next useful work is a cheaper strict source/HAR contract or listening-accepted source replacement, not another exact HAR-post split.",
+  "irvine_real_loss_count": 4,
+  "irvine_source_body_loss_count": 4,
+  "max_dump_source_recomputed_har_snr_db": 8.229891414486117,
+  "min_swift_like_source_snr_db": 138.14856132621145,
+  "quality_fail_warmed_profile_buckets": [
+    "7s",
+    "10s",
+    "15s"
+  ],
+  "quality_fail_warmed_profile_closers": 3,
+  "recomputed_stft_har_is_solved": false,
+  "source_equation_is_solved": true,
+  "source_variant_rows": 5,
+  "strict_pass_closers": 0
+}

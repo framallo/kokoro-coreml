@@ -65,6 +65,10 @@ from scripts.external_bakeoff.summarize_stage_gap_decomposition import (
     summarize_laishere_record,
     summarize_stage_gaps,
 )
+from scripts.external_bakeoff.summarize_source_contract_frontier import (
+    render_markdown as render_source_contract_frontier_markdown,
+    summarize_source_contract_frontier,
+)
 from scripts.external_bakeoff.validate_listening_decisions import validate_rows
 from scripts.external_bakeoff.verify_external_bakeoff_completion import (
     _check_iphone,
@@ -1923,3 +1927,72 @@ def test_config_f_ios_runner_mocked_success_flow(tmp_path, monkeypatch):
     assert status["ingest"]["ok"] is True
     assert status["frontier"]["ok"] is True
     assert any(command[:5] == ["xcrun", "devicectl", "device", "process", "launch"] for command in calls)
+
+
+def test_source_contract_frontier_summarizes_body_counterfactuals():
+    source_variants = {
+        "source_equation_is_solved": True,
+        "recomputed_stft_har_is_solved": False,
+        "rows": [{}, {}],
+        "min_swift_like_source_snr_db": 139.25,
+        "max_dump_source_recomputed_har_snr_db": 8.23,
+    }
+    irvine_targets = {
+        "real_loss_count": 4,
+        "strict_pass_closers": 0,
+        "rows": [
+            {
+                "input_key": "7s",
+                "target_class": "source/body quality branch",
+                "quality_fail_vs_warmed_profile": {
+                    "would_beat_warmed_laishere_profile": True
+                },
+            },
+            {
+                "input_key": "15s",
+                "target_class": "strict rewrite",
+                "quality_fail_vs_warmed_profile": {
+                    "would_beat_warmed_laishere_profile": False
+                },
+            },
+        ],
+    }
+    m2_report = {
+        "passes": True,
+        "benchmark": {
+            "warm_predict_median_ms": {
+                "fused": 26.4,
+                "split_body": 17.6,
+                "split_noise": 11.2,
+                "split_total": 28.8,
+            }
+        },
+    }
+    irvine_report = {
+        "passes": True,
+        "benchmark": {
+            "warm_predict_median_ms": {
+                "fused": 168.3,
+                "split_body": 105.9,
+                "split_noise": 74.0,
+                "split_total": 179.9,
+            }
+        },
+    }
+
+    summary = summarize_source_contract_frontier(
+        source_variants,
+        irvine_targets,
+        m2_report,
+        irvine_report,
+    )
+    markdown = render_source_contract_frontier_markdown(summary)
+
+    assert summary["source_equation_is_solved"] is True
+    assert summary["recomputed_stft_har_is_solved"] is False
+    assert summary["quality_fail_warmed_profile_closers"] == 1
+    assert summary["quality_fail_warmed_profile_buckets"] == ["7s"]
+    assert summary["body_counterfactuals"][0]["body_only_saves_ms"] == 8.799999999999997
+    assert summary["body_counterfactuals"][1]["full_split_delta_ms"] == -11.599999999999994
+    assert "Source equation solved: `true`" in markdown
+    assert "`7s`." in markdown
