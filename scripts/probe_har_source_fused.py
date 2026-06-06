@@ -35,6 +35,7 @@ def _make_har_source_fused_module(
     pad_har_to: int | None,
     *,
     nyquist_input: bool,
+    dual_output_body: bool,
 ):
     import torch
     import torch.nn as nn
@@ -167,12 +168,34 @@ def _make_har_source_fused_module(
                     xs = y if xs is None else xs + y
                 x = xs / gen.num_kernels
             x = F.leaky_relu(x)
+            if dual_output_body:
+                anchor = x.mean().reshape(1)
+                return anchor, x
             logits = gen.conv_post(x)
             spec = torch.exp(logits[:, : gen.post_n_fft // 2 + 1, :])
             phase = torch.sin(logits[:, gen.post_n_fft // 2 + 1 :, :])
             return gen.stft.inverse(spec, phase)
 
     return _HarSourceFusedGenerator(generator).eval()
+
+
+def _make_tail_module(generator: Any):
+    import torch
+    import torch.nn as nn
+
+    class _Tail(nn.Module):
+        def __init__(self, gen: Any):
+            super().__init__()
+            self.gen = gen
+
+        def forward(self, pre_tail: Any):
+            gen = self.gen
+            logits = gen.conv_post(pre_tail)
+            spec = torch.exp(logits[:, : gen.post_n_fft // 2 + 1, :])
+            phase = torch.sin(logits[:, gen.post_n_fft // 2 + 1 :, :])
+            return gen.stft.inverse(spec, phase)
+
+    return _Tail(generator).eval()
 
 
 def _predict(model: Any, feed: dict[str, np.ndarray]) -> tuple[np.ndarray, float]:
@@ -200,6 +223,7 @@ def run(args: argparse.Namespace) -> dict[str, Any]:
     label = args.label or _duration_label_from_dump(args.tensor_dump, manifest)
     work_dir = args.output_dir / label
     package = work_dir / f"kokoro_har_source_fused_{label}.mlpackage"
+    tail_package = work_dir / f"kokoro_har_source_tail_{label}.mlpackage"
     report_path = work_dir / args.report_name
 
     kmodel = _load_kmodel()
@@ -216,6 +240,7 @@ def run(args: argparse.Namespace) -> dict[str, Any]:
             args.phase_mode,
             args.pad_har_to,
             nyquist_input=args.nyquist_input,
+            dual_output_body=args.dual_output_tail,
         )
         removed_dropouts = remove_dropout(module)
         trace_inputs = [
@@ -241,10 +266,13 @@ def run(args: argparse.Namespace) -> dict[str, Any]:
                 strict=False,
                 check_trace=False,
             )
+        body_outputs = [ct.TensorType(name="anchor"), ct.TensorType(name="pre_tail")] if args.dual_output_tail else [
+            ct.TensorType(name="waveform")
+        ]
         model = ct.convert(
             traced,
             inputs=convert_inputs,
-            outputs=[ct.TensorType(name="waveform")],
+            outputs=body_outputs,
             convert_to="mlprogram",
             minimum_deployment_target=ct.target.macOS13,
             compute_precision=_precision_arg(ct, args.precision),
@@ -253,13 +281,41 @@ def run(args: argparse.Namespace) -> dict[str, Any]:
         package.parent.mkdir(parents=True, exist_ok=True)
         _remove_existing_package(package)
         model.save(str(package))
+        if args.dual_output_tail:
+            with torch.no_grad():
+                body_out = traced(*tuple(trace_inputs))
+                pre_tail = body_out[1]
+                tail = _make_tail_module(gen)
+                removed_dropouts += remove_dropout(tail)
+                traced_tail = torch.jit.trace(
+                    tail,
+                    torch.zeros(tuple(pre_tail.shape), dtype=torch.float32),
+                    strict=False,
+                    check_trace=False,
+                )
+            tail_model = ct.convert(
+                traced_tail,
+                inputs=[ct.TensorType(name="pre_tail", shape=tuple(pre_tail.shape), dtype=np.float32)],
+                outputs=[ct.TensorType(name="waveform")],
+                convert_to="mlprogram",
+                minimum_deployment_target=ct.target.macOS13,
+                compute_precision=ct.precision.FLOAT32,
+                compute_units=ct.ComputeUnit.ALL,
+            )
+            _remove_existing_package(tail_package)
+            tail_model.save(str(tail_package))
     else:
         removed_dropouts = None
         if not package.is_dir():
             raise SystemExit(f"--skip-export requested but package is missing: {package}")
+        if args.dual_output_tail and not tail_package.is_dir():
+            raise SystemExit(f"--skip-export requested but tail package is missing: {tail_package}")
 
     fused = ct.models.MLModel(str(args.fused_package), compute_units=_compute_units(ct, args.fused_compute_units))
     candidate = ct.models.MLModel(str(package), compute_units=_compute_units(ct, args.compute_units))
+    tail_model = None
+    if args.dual_output_tail:
+        tail_model = ct.models.MLModel(str(tail_package), compute_units=_compute_units(ct, args.tail_compute_units))
 
     candidate_feed = {"x_pre": x_pre, "ref_s": ref_s, "har_source": har_source}
     if args.nyquist_input:
@@ -267,18 +323,49 @@ def run(args: argparse.Namespace) -> dict[str, Any]:
         candidate_feed["nyquist_phase"] = nyquist_phase
 
     baseline_first, baseline_first_ms = _predict(fused, {"x_pre": x_pre, "ref_s": ref_s, "har": har})
-    candidate_first, candidate_first_ms = _predict(candidate, candidate_feed)
+    if args.dual_output_tail:
+        start = time.perf_counter()
+        candidate_body_first = candidate.predict(candidate_feed)
+        body_first_ms = (time.perf_counter() - start) * 1000.0
+        assert tail_model is not None
+        candidate_first, tail_first_ms = _predict(
+            tail_model,
+            {"pre_tail": np.asarray(candidate_body_first["pre_tail"], dtype=np.float32)},
+        )
+        candidate_first_ms = body_first_ms + tail_first_ms
+    else:
+        candidate_first, candidate_first_ms = _predict(candidate, candidate_feed)
     for _ in range(max(0, args.warmup)):
         _predict(fused, {"x_pre": x_pre, "ref_s": ref_s, "har": har})
-        _predict(candidate, candidate_feed)
+        if args.dual_output_tail:
+            body_out = candidate.predict(candidate_feed)
+            assert tail_model is not None
+            _predict(tail_model, {"pre_tail": np.asarray(body_out["pre_tail"], dtype=np.float32)})
+        else:
+            _predict(candidate, candidate_feed)
 
     baseline_times: list[float] = []
     candidate_times: list[float] = []
+    candidate_body_times: list[float] = []
+    candidate_tail_times: list[float] = []
     last_baseline = baseline_first
     last_candidate = candidate_first
     for _ in range(max(1, args.iterations)):
         last_baseline, baseline_ms = _predict(fused, {"x_pre": x_pre, "ref_s": ref_s, "har": har})
-        last_candidate, candidate_ms = _predict(candidate, candidate_feed)
+        if args.dual_output_tail:
+            start = time.perf_counter()
+            body_out = candidate.predict(candidate_feed)
+            body_ms = (time.perf_counter() - start) * 1000.0
+            assert tail_model is not None
+            last_candidate, tail_ms = _predict(
+                tail_model,
+                {"pre_tail": np.asarray(body_out["pre_tail"], dtype=np.float32)},
+            )
+            candidate_ms = body_ms + tail_ms
+            candidate_body_times.append(body_ms)
+            candidate_tail_times.append(tail_ms)
+        else:
+            last_candidate, candidate_ms = _predict(candidate, candidate_feed)
         baseline_times.append(baseline_ms)
         candidate_times.append(candidate_ms)
 
@@ -290,13 +377,16 @@ def run(args: argparse.Namespace) -> dict[str, Any]:
         "tensor_dump": str(args.tensor_dump),
         "label": label,
         "package": str(package),
+        "tail_package": str(tail_package) if args.dual_output_tail else None,
         "removed_dropouts": removed_dropouts,
         "manifest_metadata": manifest.get("metadata", {}),
         "precision": args.precision,
         "phase_mode": args.phase_mode,
         "pad_har_to": args.pad_har_to,
         "nyquist_input": bool(args.nyquist_input),
+        "dual_output_tail": bool(args.dual_output_tail),
         "compute_units": args.compute_units,
+        "tail_compute_units": args.tail_compute_units if args.dual_output_tail else None,
         "fused_compute_units": args.fused_compute_units,
         "first_predict_ms": {
             "baseline_generator": float(baseline_first_ms),
@@ -305,10 +395,14 @@ def run(args: argparse.Namespace) -> dict[str, Any]:
         "warm_predict_times_ms": {
             "baseline_generator": baseline_times,
             "candidate_har_source_fused": candidate_times,
+            "candidate_body": candidate_body_times if args.dual_output_tail else None,
+            "candidate_tail": candidate_tail_times if args.dual_output_tail else None,
         },
         "warm_predict_median_ms": {
             "baseline_generator": med_baseline,
             "candidate_har_source_fused": med_candidate,
+            "candidate_body": float(statistics.median(candidate_body_times)) if candidate_body_times else None,
+            "candidate_tail": float(statistics.median(candidate_tail_times)) if candidate_tail_times else None,
         },
         "speedup_vs_generator_pct": float((med_baseline - med_candidate) / med_baseline * 100.0),
         "metrics": {
@@ -342,7 +436,13 @@ def main() -> None:
         help="Feed dumped Swift Nyquist phase as a tiny extra input and splice it into recomputed HAR phase.",
     )
     parser.add_argument("--compute-units", default="all")
+    parser.add_argument("--tail-compute-units", default="all")
     parser.add_argument("--fused-compute-units", default="all")
+    parser.add_argument(
+        "--dual-output-tail",
+        action="store_true",
+        help="Export source/body with discarded anchor + pre_tail, then run a separate fp32 tail package.",
+    )
     parser.add_argument("--warmup", type=int, default=2)
     parser.add_argument("--iterations", type=int, default=10)
     parser.add_argument("--skip-export", action="store_true")

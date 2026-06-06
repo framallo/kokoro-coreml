@@ -724,6 +724,8 @@ they are rejection probes only.
 | dual-output audio anchor + cos Snake | 3s | noise ALL, vocoder CPU+ANE, fp32 tail ALL | 35.7 ms | 242.3 ms | noise 11.8 ms, vocoder 226.4 ms, tail 1.5 ms | corr 0.999916, SNR 38.11 dB | reject |
 | dual-output mean anchor + cos Snake + int8-pal vocoder | 3s | noise ALL, vocoder CPU+ANE, fp32 tail ALL | 32.9 ms | 252.3 ms | noise 11.9 ms, vocoder 238.5 ms, tail 2.0 ms | corr 0.999848, SNR 35.61 dB | reject |
 | dual-output mean anchor + cos Snake + int8-pal vocoder | 3s | noise CPU+GPU, vocoder CPU+GPU, fp32 tail CPU+GPU | 27.9 ms | 32.4 ms | noise 11.2 ms, vocoder 19.9 ms, tail 1.2 ms | corr 0.999933, SNR 39.10 dB | reject |
+| exact HAR-source dual-output body + fp32 tail | 3s | body CPU+GPU, tail CPU+GPU | 26.5 ms | 27.7 ms | body 26.7 ms, tail 1.1 ms | corr 0.999995, SNR 50.05 dB | reject |
+| exact HAR-source dual-output body + fp32 tail | 3s | body CPU+ANE, tail CPU+GPU | 27.8 ms | 210.3 ms | body 208.3 ms, tail 2.0 ms | corr 0.999995, SNR 50.05 dB | reject |
 
 The final-tail split is too small to matter; the tail costs only about 1-2 ms.
 The HAR-noise split is more informative: it proves the graph can be partitioned
@@ -743,6 +745,17 @@ and CPU+GPU remains slower than the fused package because extra package
 dispatch plus noise/tail stages outweigh the smaller vocoder body. The next
 viable performance work is therefore an operator-surface rewrite or a larger
 end-to-end graph reshaping, not more generator package-boundary experiments.
+
+The `exact HAR-source dual-output body + fp32 tail` rows additionally test the
+boundary that is closest to Config F's Swift runtime contract: Swift still
+produces the exact dumped `har_source`/Nyquist inputs, the Core ML body emits a
+discarded mean anchor plus `pre_tail`, and a separate fp32 tail runs
+`conv_post`/ISTFT. This preserves strict waveform parity but does not produce a
+faster warmed path on local M2 Studio. On Irvine M1 the same exported packages
+also reject: CPU+GPU measured `168.2 ms` fused versus `191.0 ms` split
+(`186.5 ms` body, `4.6 ms` tail), while CPU+ANE measured `171.7 ms` fused
+versus `335.5 ms` split (`331.5 ms` body, `3.9 ms` tail). That rules out the
+laishere-style discarded-anchor/tail split as the missing M1 short-bucket win.
 
 The per-stage split proves there is no hidden ANE-friendly island inside the
 current generator body. Explicit CPU+ANE makes every stage slower: noise grows
