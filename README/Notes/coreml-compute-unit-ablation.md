@@ -477,6 +477,13 @@ sudo powermetrics -i 1000 --samplers ane
   runtime failure. Do not attribute laishere's M1/M2 Air advantage to the
   vocoder interface dtype or generic weight palettization in our static 3s
   export.
+- **iOS17 target lowering does not rescue the laishere-style body:** Added
+  `--deployment-target` to `scripts/probe_f0_noise_exact_shape.py` and reran the
+  local 3s F0-source split with `ios17`, fp16 body inputs, body palettization,
+  and `CPU_AND_NE` body execution. The candidate got slower: baseline
+  `34.34 ms`, candidate `265.89 ms`, body `256.57 ms`, corr `0.930895`, SNR
+  `9.13 dB`. This rejects "laishere is faster only because iOS17 lowering
+  unlocks a better static body plan" for the current probe.
 
 **2026-05-17**
 

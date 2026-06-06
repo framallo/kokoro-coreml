@@ -72,6 +72,20 @@ def _np_dtype(name: str) -> type[np.floating[Any]]:
     raise ValueError(f"Unsupported dtype: {name}")
 
 
+def _deployment_target(ct: Any, name: str) -> Any:
+    """Return a Core ML deployment target from a probe CLI option."""
+
+    targets = {
+        "macos13": ct.target.macOS13,
+        "ios16": ct.target.iOS16,
+        "ios17": ct.target.iOS17,
+    }
+    try:
+        return targets[name]
+    except KeyError as exc:
+        raise ValueError(f"Unsupported deployment target: {name}") from exc
+
+
 def _patch_resblock_rsqrt() -> None:
     """Patch decoder AdaIN residual blocks to match laishere's scale form."""
 
@@ -268,6 +282,7 @@ def _export_packages(
         _patch_cos_snake()
     if args.patch_resblock_scale:
         _patch_resblock_rsqrt()
+    deployment_target = _deployment_target(ct, args.deployment_target)
 
     kmodel = _load_kmodel()
     decoder = kmodel.decoder
@@ -299,7 +314,7 @@ def _export_packages(
         ],
         outputs=[ct.TensorType(name=f"x_source_{idx}") for idx in range(len(source_shapes))],
         convert_to="mlprogram",
-        minimum_deployment_target=ct.target.macOS13,
+        minimum_deployment_target=deployment_target,
         compute_precision=_precision_arg(ct, args.noise_precision),
         compute_units=ct.ComputeUnit.ALL,
     )
@@ -335,7 +350,7 @@ def _export_packages(
         inputs=body_inputs,
         outputs=[ct.TensorType(name="anchor"), ct.TensorType(name="pre_tail")],
         convert_to="mlprogram",
-        minimum_deployment_target=ct.target.macOS13,
+        minimum_deployment_target=deployment_target,
         compute_precision=_precision_arg(ct, args.body_precision),
         compute_units=ct.ComputeUnit.ALL,
     )
@@ -356,7 +371,7 @@ def _export_packages(
         inputs=[ct.TensorType(name="pre_tail", shape=pre_tail_shape, dtype=np.float32)],
         outputs=[ct.TensorType(name="waveform")],
         convert_to="mlprogram",
-        minimum_deployment_target=ct.target.macOS13,
+        minimum_deployment_target=deployment_target,
         compute_precision=_precision_arg(ct, args.tail_precision),
         compute_units=ct.ComputeUnit.ALL,
     )
@@ -376,6 +391,7 @@ def _export_packages(
 
     return {
         "toolchain": _toolchain_report(),
+        "deployment_target": args.deployment_target,
         "noise_package": str(noise_package),
         "body_package": str(body_package),
         "tail_package": str(tail_package),
@@ -683,6 +699,7 @@ def main() -> None:
     parser.add_argument("--body-precision", default="fp16", choices=("fp16", "float16", "fp32", "float32"))
     parser.add_argument("--body-input-dtype", default="fp32", choices=("fp16", "float16", "fp32", "float32"))
     parser.add_argument("--tail-precision", default="fp32", choices=("fp16", "float16", "fp32", "float32"))
+    parser.add_argument("--deployment-target", default="macos13", choices=("macos13", "ios16", "ios17"))
     parser.add_argument("--decoder-pre-compute-units", default="cpuAndNeuralEngine")
     parser.add_argument("--fused-compute-units", default="cpuAndGPU")
     parser.add_argument("--noise-compute-units", default="all")

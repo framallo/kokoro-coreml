@@ -3175,6 +3175,11 @@ warm generator path. Package inspection shows the palettized body shrank from
 ~`214 ms` for the body. This closes the "we missed laishere's fp16/palette
 vocoder contract" hypothesis for the current static 3s export.
 
+The same fp16-input + palettized-body probe converted with `--deployment-target
+ios17` was slower again: baseline `34.34 ms`, candidate `265.89 ms`, body
+`256.57 ms`, corr `0.930895`, SNR `9.13 dB`. Deployment target alone is not the
+missing laishere speed ingredient for this static-body probe.
+
 ---
 
 ## Bakeoff v5: Corrected benchmark (3s-30s) on M2 Ultra
