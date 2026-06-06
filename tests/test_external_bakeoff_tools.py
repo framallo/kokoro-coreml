@@ -24,6 +24,10 @@ from scripts.external_bakeoff.summarize_frontier_freshness import (
     render_markdown as render_frontier_freshness_markdown,
     summarize_freshness,
 )
+from scripts.external_bakeoff.summarize_irvine_next_targets import (
+    render_markdown as render_irvine_next_targets_markdown,
+    summarize_targets as summarize_irvine_next_targets,
+)
 from scripts.external_bakeoff.summarize_stage_gap_decomposition import (
     render_markdown as render_stage_gap_markdown,
     summarize_config_record,
@@ -945,6 +949,103 @@ def test_stage_gap_decomposition_renders_loss_rows(tmp_path):
     markdown = render_stage_gap_markdown(summary)
     assert "Loss rows analyzed: `1`." in markdown
     assert "| irvine-m1 | 3s | 110.0 ms | 90.0 ms | 20.0 ms |" in markdown
+
+
+def test_irvine_next_targets_keeps_only_real_irvine_losses():
+    freshness = {
+        "loss_rows": [
+            {
+                "machine_id": "m2-air",
+                "input_key": "3s",
+                "profile_outcome": "profile-tie",
+                "profile_config_f_ms": 148.0,
+                "profile_laishere_ms": 149.0,
+                "profile_gap_ms": -1.0,
+                "profile_gap_pct": -0.7,
+            },
+            {
+                "machine_id": "irvine-m1",
+                "input_key": "3s",
+                "profile_outcome": "profile-config-f-loses",
+                "profile_config_f_ms": 233.6,
+                "profile_laishere_ms": 195.0,
+                "profile_gap_ms": 38.6,
+                "profile_gap_pct": 19.8,
+            },
+            {
+                "machine_id": "irvine-m1",
+                "input_key": "7s",
+                "profile_outcome": "profile-config-f-loses",
+                "profile_config_f_ms": 492.7,
+                "profile_laishere_ms": 444.2,
+                "profile_gap_ms": 48.5,
+                "profile_gap_pct": 10.9,
+            },
+        ]
+    }
+    stage_gaps = {
+        "rows": [
+            {
+                "machine_id": "irvine-m1",
+                "input_key": "3s",
+                "config_generator_minus_laishere_nvt_s": 0.022,
+                "config_nongenerator_minus_laishere_other_prepare_s": 0.013,
+            },
+            {
+                "machine_id": "irvine-m1",
+                "input_key": "7s",
+                "config_generator_minus_laishere_nvt_s": 0.043,
+                "config_nongenerator_minus_laishere_other_prepare_s": 0.004,
+            },
+        ]
+    }
+    gap_candidates = {
+        "loss_cells": [
+            {
+                "machine_id": "irvine-m1",
+                "input_key": "3s",
+                "strict_pass_closers": 0,
+                "quality_fail_closers": 0,
+                "top_candidates": [
+                    {
+                        "quality_status": "quality-fail",
+                        "label": "3s_fast_fail",
+                        "family": "f0_noise_exact_shape",
+                        "delta_ms": 18.0,
+                        "estimated_margin_ms": -20.0,
+                    },
+                    {
+                        "quality_status": "strict-pass",
+                        "label": "3s_strict_small",
+                        "family": "generator_har_input_trim",
+                        "delta_ms": 0.7,
+                        "estimated_margin_ms": -37.9,
+                    },
+                ],
+            },
+            {
+                "machine_id": "irvine-m1",
+                "input_key": "7s",
+                "strict_pass_closers": 0,
+                "quality_fail_closers": 0,
+                "top_candidates": [],
+            },
+        ]
+    }
+
+    summary = summarize_irvine_next_targets(freshness, stage_gaps, gap_candidates)
+    assert summary["real_loss_count"] == 2
+    assert summary["strict_pass_closers"] == 0
+    assert summary["quality_fail_closers"] == 0
+    assert summary["rows"][0]["target_class"] == "source/body primary; upstream/runtime material"
+    assert summary["rows"][1]["target_class"] == "source/body dominates"
+    assert summary["rows"][0]["best_strict_candidate"]["label"] == "3s_strict_small"
+    assert summary["rows"][0]["best_quality_fail_signal"]["label"] == "3s_fast_fail"
+
+    markdown = render_irvine_next_targets_markdown(summary)
+    assert "Real Irvine loss rows: `2`." in markdown
+    assert "source/body primary; upstream/runtime material" in markdown
+    assert "Do not promote fresh Irvine timing" in markdown
 
 
 def test_coreml_metadata_summary_normalizes_ios_op_names():
