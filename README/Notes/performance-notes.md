@@ -926,6 +926,12 @@ Two contract details now matter:
   worse. A production fused-source path therefore needs either the exact Swift
   Nyquist convention in Core ML or a representation that removes raw Nyquist
   phase as a learned feature.
+- Rebuilding the DFT basis with Swift-like `Float` trigonometry is not the
+  explanation. A Python scalar reproduction using float32 `2*pi*k*n/N`,
+  float32 Hann values, and float32 frame dot products keeps magnitude exact
+  (SNR `124.76 dB`) but makes Nyquist phase worse (`2871` raw `2*pi` branch
+  errors, channel-10 corr `0.139881`). The problem is the raw Nyquist branch
+  convention itself, not simply NumPy-double versus Swift-float basis constants.
 
 #### HAR input-trim probe
 

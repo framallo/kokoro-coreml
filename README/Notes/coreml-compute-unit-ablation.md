@@ -414,6 +414,12 @@ sudo powermetrics -i 1000 --samplers ane
   restores PyTorch waveform parity to corr `0.999991`, SNR `47.76 dB`. Future
   work should avoid raw phase discontinuities or reproduce the exact Swift HAR
   contract before revisiting the fused source speed path.
+- **Swift-float DFT basis is not the Nyquist fix:** Recomputing the DFT basis
+  with Swift-like float32 trigonometry preserves magnitude (SNR `124.76 dB`) but
+  worsens Nyquist raw branch parity (`2871` raw `2*pi` errors, channel-10 corr
+  `0.139881`). The issue is not merely NumPy-double constants in
+  `CustomSTFT`; it is the raw Nyquist phase convention reaching learned conv
+  features.
 - **HAR input-tail trimming is too small:** `scripts/probe_generator_har_input_trim.py`
   keeps the bucketed `x_pre` shape and current Swift HAR source, but exports a
   temporary `GeneratorFromHar` with a shorter static `har` axis. The aggressive
