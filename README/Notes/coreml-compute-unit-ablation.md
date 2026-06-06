@@ -346,6 +346,19 @@ sudo powermetrics -i 1000 --samplers ane
   `0.64 dB`). Next work should build a first-party F0-noise exact-shape probe
   and run listening/quality recovery; do not spend more time repartitioning the
   current HAR-post package.
+- **First-party F0-noise exact-shape probe confirms speed but rejects quality:**
+  `scripts/probe_f0_noise_exact_shape.py` exports the F0-noise, body, and tail
+  packages from local weights. On M2 Studio 3s natural shape (`asr=112`,
+  `F0=224`), candidate runtime tied/slightly beat the baseline (`32.7 ms` vs
+  `33.4 ms`) but failed parity (corr `0.814046`, SNR `5.08 dB`). Padded shape
+  (`asr=120`, `F0=240`) improved parity (corr `0.931896`, SNR `9.19 dB`) but
+  lost speed (`33.7 ms` vs `33.5 ms`). On Irvine M1 natural shape, the
+  candidate was materially faster (`153.3 ms` vs `172.0 ms`) but failed the
+  same parity threshold (corr `0.814046`, SNR `5.08 dB`). The PyTorch candidate
+  metrics are similarly poor (`corr ~0.804`, SNR `~4.54 dB` for natural shape),
+  so the issue is inherent source-path drift rather than Core ML conversion
+  drift. Next work must recover or validate audio quality before any runtime
+  integration.
 
 **2026-05-17**
 

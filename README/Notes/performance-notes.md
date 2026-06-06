@@ -719,6 +719,34 @@ low for a parity claim. The next optimization target should be a first-party
 F0-noise exact-shape probe with listening review and quality recovery, not more
 HAR-post repartitioning.
 
+#### First-party F0-noise exact-shape probe
+
+`scripts/probe_f0_noise_exact_shape.py` exports the F0-noise path from our own
+weights instead of reusing laishere packages. It keeps the checked-in
+`decoder_pre + GeneratorFromHar` packages as the baseline and compares them
+against first-party `F0_curve + style_timbre -> x_source_*`, decoder+generator
+body, and fp32 tail packages. The probe also records a PyTorch candidate
+reference so conversion drift can be separated from inherent path drift.
+
+The source-shape reduction is real: local `3s` natural-ASR export produces
+`x_source_0=[1,256,2240]` and `x_source_1=[1,128,13441]`, compared with the
+HAR-noise split's `x_source_0=[1,256,4800]` and `x_source_1=[1,128,28801]`.
+
+| Machine | Shape | Baseline median | Candidate median | Stage medians | Parity vs current dump | PyTorch candidate vs dump | Decision |
+| --- | --- | ---: | ---: | --- | --- | --- | --- |
+| m2-studio | natural `asr=112`, `F0=224` | 33.4 ms | 32.7 ms | noise 7.3 ms, body 23.5 ms, tail 2.1 ms | corr 0.814046, SNR 5.08 dB | corr 0.804153, SNR 4.54 dB | reject for quality; speed tie |
+| m2-studio | padded `asr=120`, `F0=240` | 33.5 ms | 33.7 ms | noise 7.6 ms, body 24.4 ms, tail 1.5 ms | corr 0.931896, SNR 9.19 dB | corr 0.939812, SNR 9.57 dB | reject; quality better but no speed |
+| irvine-m1 | natural `asr=112`, `F0=224` | 172.0 ms | 153.3 ms | noise 37.1 ms, body 111.4 ms, tail 4.6 ms | corr 0.814046, SNR 5.08 dB | corr 0.804153, SNR 4.54 dB | promising M1 speed, not quality-safe |
+
+This is a useful narrowing result. The first-party candidate reproduces the M1
+speed opportunity without relying on external packages, but the PyTorch
+candidate itself diverges from the current HAR output. That means the quality
+failure is inherent to the F0-noise/source formulation being tested, not a Core
+ML conversion bug. A shippable optimization must either make the F0-noise path
+match the current Swift HnSF/HAR source closely enough, or prove through
+listening review that the different source is acceptable. Until then, this is a
+research target rather than a production replacement.
+
 #### HnSF vDSP optimization
 
 Current `main` vectorizes the Swift HnSF STFT path with cached 20-point DFT
