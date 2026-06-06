@@ -536,7 +536,11 @@ sudo powermetrics -i 1000 --samplers ane
   baseline, `+9.7%`) but fails quality (`corr 0.955085`, SNR `10.86 dB`).
   Natural shape (`asr=384`, `F0=768`) is faster again (`76.37 ms` vs
   `86.01 ms`, `+11.2%`) but worse on metrics (`corr 0.866976`, SNR
-  `6.55 dB`). PyTorch references are already divergent, so this remains source
+  `6.55 dB`). Copied the temporary packages to Irvine M1 and reran with
+  `--skip-export`; the same speed-positive/quality-negative pattern holds:
+  padded `509.02 ms` vs `565.71 ms` baseline (`+10.0%`, corr `0.955223`),
+  natural `487.11 ms` vs `563.90 ms` (`+13.6%`, corr `0.867049`). PyTorch
+  references are already divergent locally, so this remains source
   formulation/listening acceptance, not Core ML conversion drift. Rendered the
   no-ASR 10s listening pack at
   `outputs/f0_source_listening/10s_speed_branch/README.md`.

@@ -757,17 +757,20 @@ At `7s`, the natural-ASR export uses `x_source_0=[1,256,5400]` and
 | irvine-m1 | padded `asr=280`, `F0=560` | 390.8 ms | 358.9 ms | noise 89.6 ms, body 261.5 ms, tail 7.4 ms | corr 0.962306, SNR 11.52 dB | corr 0.968596, SNR 12.51 dB | faster, quality closer but not parity |
 | m2-studio | natural `asr=384`, `F0=768` | 86.0 ms | 76.4 ms | noise 18.2 ms, body 56.1 ms, tail 2.7 ms | corr 0.866976, SNR 6.55 dB | corr 0.843346, SNR 5.40 dB | faster, reject for quality |
 | m2-studio | padded `asr=400`, `F0=800` | 87.6 ms | 79.0 ms | noise 18.4 ms, body 57.8 ms, tail 2.8 ms | corr 0.955085, SNR 10.86 dB | corr 0.942765, SNR 9.78 dB | faster, quality closer but not parity |
+| irvine-m1 | natural `asr=384`, `F0=768` | 563.9 ms | 487.1 ms | noise 122.8 ms, body 353.5 ms, tail 10.2 ms | corr 0.867049, SNR 6.55 dB | not rerun | faster, reject for quality |
+| irvine-m1 | padded `asr=400`, `F0=800` | 565.7 ms | 509.0 ms | noise 127.5 ms, body 369.6 ms, tail 11.1 ms | corr 0.955223, SNR 10.87 dB | not rerun | faster, quality closer but not parity |
 
 This is a useful narrowing result. The first-party candidate reproduces the M1
 and `7s` speed opportunity without relying on external packages, but the PyTorch
 candidate itself diverges from the current HAR output. The added `10s` bucket
 keeps the same pattern: the F0-source path is faster, especially at natural
-shape, but the PyTorch reference is already too far from the current dump. That
-means the quality failure is inherent to the F0-noise/source formulation being
-tested, not a Core ML conversion bug. A shippable optimization must either make
-the F0-noise path match the current Swift HnSF/HAR source closely enough, or
-prove through listening review that the different source is acceptable. Until
-then, this is a research target rather than a production replacement.
+shape, on both local M2 Studio and Irvine M1. The local PyTorch reference is
+already too far from the current dump, so the quality failure is inherent to the
+F0-noise/source formulation being tested, not a Core ML conversion bug. A
+shippable optimization must either make the F0-noise path match the current
+Swift HnSF/HAR source closely enough, or prove through listening review that the
+different source is acceptable. Until then, this is a research target rather
+than a production replacement.
 
 #### F0-source listening pack
 
