@@ -663,6 +663,25 @@ was apparently already handling the dynamic style path efficiently enough that
 constant-folding it is not a speed path. Do not pursue per-voice generator
 packages for performance without a new compiler/runtime reason.
 
+#### Laishere-style decoder+vocoder boundary probe
+
+`scripts/probe_decoder_vocoder_split.py` tests the broader boundary found in
+`laishere/kokoro-coreml`: a separate HAR-noise package, a dual-output body that
+includes decoder F0/N conv, decoder encode/decode, and the generator body, then
+a separate fp32 tail. The baseline is the same Swift tensor dump run through the
+checked-in `decoder_pre` package plus the checked-in fused HAR-post generator.
+
+Local M2 Studio `3s` results:
+
+| Candidate body units | Baseline median | Candidate median | Stage medians | Parity vs fused | Decision |
+| --- | ---: | ---: | --- | --- | --- |
+| CPU+ANE | 32.9 ms | 119.5 ms | noise 12.0 ms, body 105.6 ms, tail 1.5 ms | corr 0.999917, SNR 38.19 dB | reject; ANE compiler failure emitted |
+| CPU+GPU | 33.2 ms | 38.0 ms | noise 11.9 ms, body 24.7 ms, tail 1.4 ms | corr 0.999991, SNR 47.76 dB | reject; dispatch/noise overhead beats body reduction |
+
+This closes the direct "copy laishere's decoder+vocoder split boundary" path for
+our current Swift dump contract. The remaining laishere advantage on Irvine M1
+short/medium rows is not explained by this boundary alone.
+
 #### HnSF vDSP optimization
 
 Current `main` vectorizes the Swift HnSF STFT path with cached 20-point DFT
