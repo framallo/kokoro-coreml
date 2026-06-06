@@ -19,6 +19,7 @@ Generated files stay under ``outputs/``.
 from __future__ import annotations
 
 import argparse
+import csv
 import json
 import sys
 from pathlib import Path
@@ -48,6 +49,16 @@ from probe_generator_exact_geometry import _compute_units  # noqa: E402
 
 
 SAMPLE_RATE = 24_000
+DECISION_COLUMNS = [
+    "label",
+    "waveform_gate_decision",
+    "candidate_wav",
+    "review",
+    "source_report",
+    "human_decision",
+    "notes",
+]
+PRESERVED_DECISION_FIELDS = ("human_decision", "notes")
 
 
 def _load_model(package: Path, compute_units: str) -> Any:
@@ -240,13 +251,72 @@ def _write_review(path: Path, provenance: dict[str, Any]) -> None:
     path.write_text("\n".join(lines) + "\n")
 
 
+def _decision_rows(records: list[dict[str, Any]]) -> list[dict[str, str]]:
+    """Return CSV rows for human decisions on F0-source candidates."""
+
+    rows = []
+    for record in records:
+        rows.append(
+            {
+                "label": str(record["label"]),
+                "waveform_gate_decision": str(record["waveform_gate_decision"]),
+                "candidate_wav": str(record["wavs"]["candidate"]),
+                "review": str(record["review"]),
+                "source_report": str(record["source_report"]),
+                "human_decision": "",
+                "notes": "",
+            }
+        )
+    return rows
+
+
+def _load_existing_decisions(path: Path) -> dict[str, dict[str, str]]:
+    """Return existing decisions keyed by stable label."""
+
+    if not path.exists():
+        return {}
+    with path.open(newline="") as handle:
+        reader = csv.DictReader(handle)
+        return {str(row.get("label") or ""): row for row in reader if row.get("label")}
+
+
+def _write_decisions_csv(
+    path: Path,
+    rows: list[dict[str, str]],
+    *,
+    preserve_existing: bool = True,
+) -> None:
+    """Write a fillable F0-source decision CSV, preserving human fields."""
+
+    existing = _load_existing_decisions(path) if preserve_existing else {}
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with path.open("w", newline="") as handle:
+        writer = csv.DictWriter(handle, fieldnames=DECISION_COLUMNS)
+        writer.writeheader()
+        for row in rows:
+            merged = {column: str(row.get(column, "")) for column in DECISION_COLUMNS}
+            previous = existing.get(merged["label"], {})
+            for field in PRESERVED_DECISION_FIELDS:
+                value = str(previous.get(field) or "")
+                if value:
+                    merged[field] = value
+            writer.writerow(merged)
+
+
 def run(args: argparse.Namespace) -> dict[str, Any]:
     """Create listening packs for all requested reports."""
 
     records = [_render_pair(path, args.out_dir, args) for path in args.report]
+    decisions_path = args.out_dir / "f0_source_listening_decisions.csv"
+    _write_decisions_csv(
+        decisions_path,
+        _decision_rows(records),
+        preserve_existing=not args.reset_decisions,
+    )
     index = {
         "asr_used": False,
         "asr_note": "No ASR/Whisper gate used; packs require human listening after waveform-health checks.",
+        "decisions_csv": _relative(decisions_path),
         "records": records,
     }
     args.out_dir.mkdir(parents=True, exist_ok=True)
@@ -258,6 +328,9 @@ def run(args: argparse.Namespace) -> dict[str, Any]:
         "# F0 Source Listening Packs",
         "",
         "No ASR/Whisper gate is used here. These artifacts support human listening after objective waveform-health checks.",
+        "",
+        f"Fill decisions in `{_relative(decisions_path)}` with `pass`, `caveat`, or `fail`.",
+        "`caveat` requires notes. Validate with `python scripts/validate_f0_source_listening_decisions.py --decisions <csv>`.",
         "",
         "| Label | Waveform gate | Candidate WAV | Review |",
         "| --- | --- | --- | --- |",
@@ -290,6 +363,11 @@ def main() -> None:
     parser.add_argument("--body-compute-units", default="cpuAndGPU")
     parser.add_argument("--tail-compute-units", default="all")
     parser.add_argument("--plots", action="store_true")
+    parser.add_argument(
+        "--reset-decisions",
+        action="store_true",
+        help="Rewrite the decisions CSV with blank human_decision and notes fields.",
+    )
     args = parser.parse_args()
 
     result = run(args)

@@ -986,7 +986,7 @@ replacement.
 re-exporting packages and without ASR/Whisper. It renders the Swift dump
 reference, checked-in baseline Core ML path, and F0-source candidate on the same
 tensor dump, then runs the repo's objective waveform-health gate and writes a
-fillable listening review.
+fillable listening review plus `f0_source_listening_decisions.csv`.
 
 Local generated pack:
 
@@ -1000,7 +1000,19 @@ uv run --no-sync python scripts/create_f0_source_listening_pack.py \
   --plots
 ```
 
-Output index: `outputs/f0_source_listening/README.md`.
+Output index: `outputs/f0_source_listening/README.md`. Fill each generated CSV
+decision row with `pass`, `caveat`, or `fail`; `caveat` requires notes. Validate
+with:
+
+```bash
+uv run --no-sync python scripts/validate_f0_source_listening_decisions.py \
+  --decisions outputs/f0_source_listening/native_in_ios17_speed_branch/f0_source_listening_decisions.csv
+```
+
+The validator intentionally fails while `human_decision` is blank. For the
+native-IN iOS17/spec8 pack, the current pre-listening state is
+`valid=false` with `missing human_decision`, which prevents this speed branch
+from silently becoming a production claim before human review.
 
 | Candidate | Waveform health gate | Candidate vs baseline | Review WAV |
 | --- | --- | --- | --- |

@@ -18,6 +18,8 @@ from scripts.external_bakeoff.verify_external_bakeoff_completion import (
     _check_preflight,
     _load_records,
 )
+from scripts.create_f0_source_listening_pack import _write_decisions_csv as _write_f0_decisions_csv
+from scripts.validate_f0_source_listening_decisions import validate_rows as validate_f0_rows
 
 
 def _manifest() -> dict:
@@ -196,6 +198,81 @@ def test_listening_review_reset_decisions_blanks_human_fields(tmp_path):
     row = next(csv.DictReader(decisions.open()))
     assert row["human_decision"] == ""
     assert row["notes"] == ""
+
+
+def test_f0_source_decision_validator_blocks_blank_rows():
+    summary, errors = validate_f0_rows(
+        [
+            {
+                "label": "candidate",
+                "waveform_gate_decision": "needs_listening",
+                "candidate_wav": "candidate.wav",
+                "review": "review.md",
+                "source_report": "report.json",
+                "human_decision": "",
+                "notes": "",
+            }
+        ]
+    )
+
+    assert not summary["valid"]
+    assert summary["rows"] == 1
+    assert errors == ["candidate: missing human_decision"]
+
+
+def test_f0_source_decision_validator_requires_caveat_notes():
+    summary, errors = validate_f0_rows(
+        [
+            {
+                "label": "candidate",
+                "waveform_gate_decision": "needs_listening",
+                "candidate_wav": "candidate.wav",
+                "review": "review.md",
+                "source_report": "report.json",
+                "human_decision": "caveat",
+                "notes": "",
+            }
+        ]
+    )
+
+    assert not summary["valid"]
+    assert errors == ["candidate: human_decision=caveat requires notes"]
+
+
+def test_f0_source_decision_csv_preserves_human_fields(tmp_path):
+    decisions = tmp_path / "f0_decisions.csv"
+    original = [
+        {
+            "label": "candidate",
+            "waveform_gate_decision": "needs_listening",
+            "candidate_wav": "old.wav",
+            "review": "old.md",
+            "source_report": "old.json",
+            "human_decision": "pass",
+            "notes": "acceptable source character",
+        }
+    ]
+    regenerated = [
+        {
+            "label": "candidate",
+            "waveform_gate_decision": "needs_listening",
+            "candidate_wav": "new.wav",
+            "review": "new.md",
+            "source_report": "new.json",
+            "human_decision": "",
+            "notes": "",
+        }
+    ]
+
+    _write_f0_decisions_csv(decisions, original)
+    _write_f0_decisions_csv(decisions, regenerated)
+
+    row = next(csv.DictReader(decisions.open()))
+    assert row["candidate_wav"] == "new.wav"
+    assert row["review"] == "new.md"
+    assert row["source_report"] == "new.json"
+    assert row["human_decision"] == "pass"
+    assert row["notes"] == "acceptable source character"
 
 
 def test_completion_verifier_allows_mlx_3s_error_but_requires_iphone():
