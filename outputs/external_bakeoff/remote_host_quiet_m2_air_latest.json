@@ -1,67 +1,67 @@
 {
-  "checked_at_local": "2026-06-06T13:13:35-07:00",
+  "checked_at_local": "2026-06-06T13:17:39-07:00",
   "publishable_timing_allowed": false,
   "rows": [
     {
       "blockers": [
-        "load1 2.19 exceeds 1.00"
+        "load1 1.55 exceeds 1.00"
       ],
       "load": {
-        "fifteen_minutes": 2.23,
-        "five_minutes": 1.92,
-        "one_minute": 2.19
+        "fifteen_minutes": 2.09,
+        "five_minutes": 1.75,
+        "one_minute": 1.55
       },
       "machine_id": "m2-air",
       "ok": true,
       "processes": [
         {
-          "command": "(system_profiler)",
-          "cpu_pct": 27.6,
+          "command": "/usr/libexec/airportd",
+          "cpu_pct": 32.5,
           "noisy": false
         },
         {
-          "command": "/usr/libexec/airportd",
-          "cpu_pct": 9.7,
+          "command": "/System/Library/CoreServices/WiFiAgent.app/Contents/MacOS/WiFiAgent",
+          "cpu_pct": 13.9,
           "noisy": false
         },
         {
           "command": "sshd-session: mattmireles [priv]",
-          "cpu_pct": 9.5,
+          "cpu_pct": 9.2,
           "noisy": false
         },
         {
-          "command": "/System/Library/DriverExtensions/com.apple.DriverKit-AppleBCMWLAN.dext/com.apple.DriverKit-AppleBCMWLAN",
-          "cpu_pct": 4.6,
-          "noisy": false
-        },
-        {
-          "command": "/usr/libexec/syspolicyd",
-          "cpu_pct": 4.1,
+          "command": "/usr/libexec/dasd",
+          "cpu_pct": 8.9,
           "noisy": false
         },
         {
           "command": "/usr/libexec/opendirectoryd",
-          "cpu_pct": 4.0,
+          "cpu_pct": 4.8,
+          "noisy": false
+        },
+        {
+          "command": "/usr/libexec/runningboardd",
+          "cpu_pct": 4.4,
           "noisy": false
         },
         {
           "command": "/usr/libexec/sysmond",
-          "cpu_pct": 3.7,
+          "cpu_pct": 4.3,
           "noisy": false
         },
         {
-          "command": "/usr/sbin/system_profiler",
-          "cpu_pct": 2.7,
-          "noisy": false
-        },
-        {
-          "command": "/System/Library/PrivateFrameworks/TCC.framework/Support/tccd",
-          "cpu_pct": 2.4,
+          "command": "/usr/libexec/UserEventAgent",
+          "cpu_pct": 2.6,
           "noisy": false
         },
         {
           "command": "/Applications/Botnet.app/Contents/MacOS/Brave Browser",
-          "cpu_pct": 2.3,
+          "cpu_pct": 2.6,
+          "noisy": false
+        },
+        {
+          "command": "/System/Library/CoreServices/powerd.bundle/powerd",
+          "cpu_pct": 1.8,
           "noisy": false
         },
         {
@@ -70,7 +70,7 @@
           "noisy": false
         },
         {
-          "command": "/usr/libexec/trustd",
+          "command": "/Applications/Botnet.app/Contents/Frameworks/Brave Browser Framework.framework/Versions/148.1.90.122/Helpers/Brave Browser Helper (Renderer).app/Contents/MacOS/Brave Browser Helper (Renderer)",
           "cpu_pct": 1.6,
           "noisy": false
         }
@@ -88,7 +88,7 @@
           "photoanalysisd"
         ]
       },
-      "uptime": "13:13  up 8 days, 14:50, 1 user, load averages: 2.19 1.92 2.23"
+      "uptime": "13:17  up 8 days, 14:54, 1 user, load averages: 1.55 1.75 2.09"
     }
   ]
 }

@@ -1,0 +1,187 @@
+{
+  "benchmark": {
+    "body_compute_units": "cpuAndGPU",
+    "decoder_pre_compute_units": "cpuAndNeuralEngine",
+    "first_predict_ms": {
+      "baseline_decoder_pre": 6.77354199999991,
+      "baseline_generator": 3335.608917,
+      "baseline_total": 3342.382459,
+      "candidate_body": 1691.5047090000003,
+      "candidate_noise": 2989.69675,
+      "candidate_tail": 214.4591249999994,
+      "candidate_total": 4895.660583999999
+    },
+    "fused_compute_units": "cpuAndGPU",
+    "iterations": 9,
+    "metrics": {
+      "baseline_vs_dump_trimmed": {
+        "candidate_samples": 67200,
+        "correlation": 0.9999918876365191,
+        "cosine_similarity": 0.9999926563624634,
+        "max_abs_error": 0.012786865234375,
+        "mean_abs_error": 7.335753874210397e-05,
+        "reference_samples": 67200,
+        "rmse": 0.00020750416129297413,
+        "samples_compared": 67200,
+        "snr_db": 48.33014870446093
+      },
+      "candidate_vs_baseline_trimmed": {
+        "candidate_samples": 67200,
+        "correlation": 0.8139864009787668,
+        "cosine_similarity": 0.8316987638922481,
+        "max_abs_error": 0.4395064264535904,
+        "mean_abs_error": 0.012622133717567636,
+        "reference_samples": 67200,
+        "rmse": 0.030158425418276128,
+        "samples_compared": 67200,
+        "snr_db": 5.082788574287398
+      },
+      "candidate_vs_dump_trimmed": {
+        "candidate_samples": 67200,
+        "correlation": 0.8140452110638607,
+        "cosine_similarity": 0.8317443032475473,
+        "max_abs_error": 0.4399947077035904,
+        "mean_abs_error": 0.012611316704082451,
+        "reference_samples": 67200,
+        "rmse": 0.030153705962470394,
+        "samples_compared": 67200,
+        "snr_db": 5.083871003983251
+      }
+    },
+    "noise_compute_units": "all",
+    "tail_compute_units": "all",
+    "toolchain": {
+      "coremltools": "9.0",
+      "numpy": "2.0.2",
+      "torch": null
+    },
+    "warm_predict_median_ms": {
+      "baseline_decoder_pre": 2.9283329999998386,
+      "baseline_generator": 120.72524999999956,
+      "baseline_total": 123.8840839999984,
+      "candidate_body": 78.97979200000016,
+      "candidate_noise": 25.7850409999989,
+      "candidate_tail": 1.944957999999275,
+      "candidate_total": 106.68554099999916
+    },
+    "warm_predict_times_ms": {
+      "baseline_decoder_pre": [
+        4.20433300000056,
+        3.8586249999994493,
+        3.476707999999107,
+        2.6772499999996313,
+        2.9283329999998386,
+        2.761749999999452,
+        2.7825420000002765,
+        3.9628339999993045,
+        2.8517499999995977
+      ],
+      "baseline_generator": [
+        120.78566699999982,
+        120.98662499999868,
+        120.72524999999956,
+        120.71016600000029,
+        120.95583300000001,
+        119.91279099999907,
+        120.77570800000004,
+        119.92124999999909,
+        120.05587500000026
+      ],
+      "baseline_total": [
+        124.99000000000038,
+        124.84524999999813,
+        124.20195799999867,
+        123.38741599999992,
+        123.88416599999985,
+        122.67454099999853,
+        123.55825000000031,
+        123.8840839999984,
+        122.90762499999985
+      ],
+      "candidate_body": [
+        78.95854100000044,
+        79.07633299999972,
+        78.67137499999899,
+        78.92270800000034,
+        78.99712500000078,
+        78.69454100000084,
+        79.05012499999842,
+        79.16029199999919,
+        78.97979200000016
+      ],
+      "candidate_noise": [
+        25.87866600000055,
+        25.98554199999903,
+        25.7850409999989,
+        25.817874999999546,
+        25.627458999998964,
+        25.550167000000457,
+        26.028500000000676,
+        25.523500000000254,
+        25.517833000000323
+      ],
+      "candidate_tail": [
+        2.0558749999999293,
+        1.8954579999999055,
+        1.932957999999374,
+        1.944957999999275,
+        1.9311670000004,
+        2.1369589999995497,
+        1.926249999998575,
+        2.0703330000007014,
+        2.099250000000552
+      ],
+      "candidate_total": [
+        106.89308200000092,
+        106.95733299999866,
+        106.38937399999726,
+        106.68554099999916,
+        106.55575100000014,
+        106.38166700000085,
+        107.00487499999767,
+        106.75412500000014,
+        106.59687500000103
+      ]
+    },
+    "warmup": 5
+  },
+  "body_package": "outputs/f0_noise_exact_shape/3s_natural_asr_cos_rsqrt/kokoro_f0_noise_body_3s_natural_asr_cos_rsqrt.mlpackage",
+  "decoder_pre_package": "coreml/kokoro_decoder_pre_3s.mlpackage",
+  "export": null,
+  "fused_package": "coreml/kokoro_decoder_har_post_3s.mlpackage",
+  "manifest_metadata": {
+    "bucket_seconds": 3,
+    "canonical_duration_s": 2.8,
+    "decoder_frame_count": 120,
+    "duration_model": "padded_t64",
+    "duration_model_allows_padding": true,
+    "duration_token_length": 64,
+    "executable": "kokoro-bench",
+    "full_f0_len": 240,
+    "har_expected_time": 28801,
+    "hnsf_reference_command": "uv run --no-sync python scripts/validate_hnsf_swift.py generate",
+    "input_key": "3s",
+    "natural_frames": 112,
+    "num_tokens": 44,
+    "observed_audio_duration_s": 2.8,
+    "producer": "swift",
+    "seed": 42,
+    "speed": 1,
+    "t_frames": 120,
+    "text": "The quick brown fox jumps over the dog.",
+    "trim_len": 67200,
+    "voice": "af_heart",
+    "x_pre_expected_time": 240
+  },
+  "noise_package": "outputs/f0_noise_exact_shape/3s_natural_asr_cos_rsqrt/kokoro_f0_noise_3s_natural_asr_cos_rsqrt.mlpackage",
+  "passes": false,
+  "report": "outputs/f0_noise_exact_shape/3s_natural_asr_cos_rsqrt/report_f0_noise_exact_3s_m2_air.json",
+  "speedup_vs_baseline_pct": 13.882770445313586,
+  "tail_package": "outputs/f0_noise_exact_shape/3s_natural_asr_cos_rsqrt/kokoro_f0_noise_tail_3s_natural_asr_cos_rsqrt.mlpackage",
+  "tensor_dump": "outputs/generator_isolation/dumps/3s",
+  "thresholds": {
+    "max_abs_error": 0.01,
+    "min_corr": 0.99,
+    "min_snr": 35.0
+  }
+}

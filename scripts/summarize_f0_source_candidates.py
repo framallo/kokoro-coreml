@@ -31,7 +31,7 @@ def _machine_from_path(path: Path) -> str:
     text = path.as_posix().lower()
     if "irvine" in text:
         return "irvine-m1"
-    if "m2-air" in text:
+    if "m2-air" in text or "m2_air" in text:
         return "m2-air"
     return "m2-studio"
 
