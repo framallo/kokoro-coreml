@@ -25,6 +25,10 @@ from scripts.external_bakeoff.summarize_competitive_frontier import (
     render_markdown as render_frontier_markdown,
     summarize_frontier,
 )
+from scripts.external_bakeoff.summarize_mlx_speed_explanation import (
+    build_report as build_mlx_speed_explanation,
+    render_markdown as render_mlx_speed_explanation_markdown,
+)
 from scripts.external_bakeoff.summarize_candidate_frontier_matrix import (
     build_payload as build_candidate_frontier_matrix,
     render_markdown as render_candidate_frontier_matrix_markdown,
@@ -655,6 +659,105 @@ def test_competitive_frontier_filters_short_outputs_and_marks_losses(tmp_path):
     assert "Config F needs 4.2%" in markdown
     assert "Excluded Short Outputs" in markdown
     assert "| m2-air | 7s | Soniqo | 70.0 ms | 0.741 |" in markdown
+
+
+def test_mlx_speed_explanation_separates_corrected_frontier_from_raw_rows(tmp_path):
+    results_dir = tmp_path / "outputs" / "external_bakeoff"
+    results_dir.mkdir(parents=True)
+    frontier = {
+        "rows": [
+            {
+                "machine_id": "m2-air",
+                "input_key": "7s",
+                "impl": "config-f-reference",
+                "status": "ok",
+                "full_duration": True,
+                "warm_median_ms": 330.0,
+                "duration_ratio": 1.0,
+                "source_path": "corrected_config.json",
+            },
+            {
+                "machine_id": "m2-air",
+                "input_key": "7s",
+                "impl": "mlx-audio",
+                "status": "ok",
+                "full_duration": True,
+                "warm_median_ms": 680.0,
+                "duration_ratio": 1.0,
+                "source_path": "mlx.json",
+            },
+            {
+                "machine_id": "m2-air",
+                "input_key": "3s",
+                "impl": "config-f-reference",
+                "status": "ok",
+                "full_duration": True,
+                "warm_median_ms": 148.0,
+                "duration_ratio": 1.0,
+                "source_path": "corrected_config.json",
+            },
+            {
+                "machine_id": "m2-air",
+                "input_key": "3s",
+                "impl": "mlx-audio",
+                "status": "error",
+                "full_duration": False,
+                "warm_median_ms": None,
+                "duration_ratio": None,
+                "source_path": "mlx.json",
+                "error": "ValueError: broadcast",
+            },
+        ],
+        "summary": {},
+    }
+    frontier_path = results_dir / "competitive_frontier.json"
+    frontier_path.write_text(json.dumps(frontier))
+
+    raw_config = {
+        "records": [
+            {
+                "input_key": "7s",
+                "status": "ok",
+                "warm_wall_times_s": [0.800, 0.810, 0.820],
+                "canonical_audio_duration_s": 6.75,
+                "observed_audio_duration_s": 6.75,
+            }
+        ]
+    }
+    mlx = {
+        "records": [
+            {
+                "input_key": "7s",
+                "status": "ok",
+                "warm_wall_times_s": [0.670, 0.680, 0.690],
+                "canonical_audio_duration_s": 6.75,
+                "observed_audio_duration_s": 6.75,
+            },
+            {
+                "input_key": "3s",
+                "status": "error",
+                "warm_wall_times_s": [],
+                "canonical_audio_duration_s": 2.8,
+                "error": "ValueError: broadcast",
+            },
+        ]
+    }
+    (results_dir / "results_config_f_reference_m2-air.json").write_text(json.dumps(raw_config))
+    (results_dir / "results_mlx_audio_m2-air.json").write_text(json.dumps(mlx))
+
+    report = build_mlx_speed_explanation(results_dir, frontier_path)
+
+    assert report["summary"]["corrected_warmed_mlx_wins"] == 0
+    assert report["summary"]["corrected_warmed_config_wins"] == 1
+    assert report["summary"]["mlx_error_rows"] == 1
+    assert report["summary"]["raw_apparent_mlx_wins"] == 1
+    assert report["raw_apparent_mlx_wins"][0]["machine_id"] == "m2-air"
+    assert report["raw_apparent_mlx_wins"][0]["input_key"] == "7s"
+
+    markdown = render_mlx_speed_explanation_markdown(report)
+    assert "MLX is not faster than corrected warmed Config F" in markdown
+    assert "| m2-air | 7s | 330.0 ms | 680.0 ms | 1.000 | config-faster |" in markdown
+    assert "| m2-air | 7s | 810.0 ms | 680.0 ms | 130.0 ms |" in markdown
 
 
 def test_frontier_freshness_flags_stage_profile_ties():
