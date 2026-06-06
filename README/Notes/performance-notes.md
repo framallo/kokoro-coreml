@@ -3946,6 +3946,19 @@ current traceable STFT/phase path. This closes the "just export Swift-like
 source" path unless the STFT/phase representation is changed or the runtime
 passes the already-built Swift HAR/source tensor across the boundary.
 
+A follow-up stage-isolation pass on the faster no-native-IN Swift-like variant
+(`29.14 ms` candidate vs `31.23 ms` baseline, still quality-fail) localizes the
+Core ML conversion/runtime break to the noise/source package, not the body or
+tail. Core ML vs PyTorch for `x_source_0` is only corr `0.829361`, SNR
+`5.80 dB`; `x_source_1` is better at corr `0.990291`, SNR `19.02 dB`. Feeding
+the body with PyTorch source tensors makes `pre_tail` essentially exact
+(`corr 0.9999997`, SNR `62.12 dB`), and the fp32 tail fed PyTorch `pre_tail`
+is exact (`corr 1.0`, SNR `102.46 dB`). The source/noise package is therefore
+the only broken Core ML stage for this branch. Even if that stage is fixed, the
+PyTorch Swift-like candidate remains below strict waveform parity versus the
+dump (`corr 0.988115`, SNR `16.68 dB`), so this is still a source/STFT contract
+research path rather than an integration-ready speed win.
+
 Rendered a no-ASR listening pack for the 3s and 7s cos/residual speed branch at
 `outputs/f0_source_listening/cos_resblock_speed_branch/README.md`. Both
 candidates are `needs_listening` with no waveform-health reject reasons. This
