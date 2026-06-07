@@ -20,6 +20,16 @@ landed.
 - `/Users/mm/Documents/GitHub/llm-workflows/outputs/create-guide/kokoro-m1-vocoder-runtime-boundary-strategies-for-lower-end-apple-silicon/2026-06-06T23-29-40-654Z/raw-report.md`
 - `/Users/mm/Documents/GitHub/llm-workflows/outputs/create-guide/apple-silicon-warmed-inference-benchmark-hygiene-for-kokoro-core-ml-and-mlx/2026-06-06T23-29-40-666Z/raw-report.md`
 - `/Users/mm/Documents/GitHub/llm-workflows/outputs/create-guide/kokoro-har-stft-strict-repair-and-lightweight-distillation-for-core-ml-source-bo/2026-06-06T23-29-40-702Z/raw-report.md`
+- `/Users/mm/Documents/GitHub/llm-workflows/outputs/create-guide/kokoro-m1-har-stft-contract-repair-for-strict-core-ml-source-body-vocoder-path/2026-06-06T22-37-46-144Z/raw-report.md`
+- `/Users/mm/Documents/GitHub/llm-workflows/outputs/create-guide/core-ml-ane-compiler-failure-triage-for-large-ml-program-models-retry/2026-06-06T23-25-15-016Z/raw-report.md`
+- `/Users/mm/Documents/GitHub/llm-workflows/outputs/create-guide/core-ml-ane-transformer-layout-and-op-compatibility-retry/2026-06-06T23-25-22-946Z/raw-report.md`
+- `/Users/mm/Documents/GitHub/llm-workflows/outputs/create-guide/core-ml-split-graphs-and-multifunction-packaging-for-streaming-inference-retry/2026-06-06T23-25-30-108Z/raw-report.md`
+- `/Users/mm/Documents/GitHub/llm-workflows/outputs/create-guide/iphone-core-ml-device-lab-runbook-for-signing-profiling-and-evidence-capture-ret/2026-06-06T23-25-36-950Z/raw-report.md`
+- `/Users/mm/Documents/GitHub/llm-workflows/outputs/create-guide/core-ml-ane-temporal-escape-hatches-for-stateful-streaming-transformers-on-iphon/2026-06-06T22-48-22-802Z/raw-report.md`
+
+Older duplicate runs also landed for several restarted topics. Their
+same-topic drafts were superseded by the restarted raw reports above and were
+not imported as separate canonical guides.
 
 ## Immediate Decisions
 
@@ -48,6 +58,9 @@ landed.
 | 6 | Source/body compact representation | Useful only if it avoids the padded HAR payload and stays inside one runtime-positive package boundary. |
 
 ## Verified API Facts
+
+Verification used the current local toolchain: Xcode `MacOSX26.5.sdk` Core ML
+headers and installed `coremltools 9.0`.
 
 - `MLPredictionOptions.outputBackings` exists in the local Xcode SDK and is
   available on macOS 11.0+ / iOS 16.0+.

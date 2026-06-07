@@ -20,4 +20,8 @@ top-level `README/*.md` files; link from notes instead of duplicating.
 - [Kokoro M1 source/body Core ML guide](../Guides/apple-silicon/Kokoro-M1-source-body-coreml-guide.md) - Source/body implementation path against laishere without adding losing hot-path splits.
 - [Kokoro HAR/STFT strict repair and distillation guide](../Guides/apple-silicon/Kokoro-HAR-STFT-strict-repair-distillation-guide.md) - Strict HAR/STFT representation-repair and tiny-adapter triage.
 - [Kokoro strict source/HAR representation repair prompt](Kokoro-strict-source-HAR-representation-repair-deep-research-prompt.md) - External research brief for strict source/HAR representation repair, first-layer folding, and tiny adapter calibration.
+- [Core ML ANE compiler failure triage](../Guides/apple-silicon/CoreML-ANE-compiler-failure-triage-guide.md) - Execution-plan failure taxonomy and warmed-inference separation.
+- [Core ML ANE transformer layout and op compatibility](../Guides/apple-silicon/CoreML-ANE-transformer-layout-op-compatibility-guide.md) - Transferable static-shape and op-surface checks for layout rewrites.
+- [Core ML split graphs and multifunction packaging](../Guides/apple-silicon/CoreML-split-graphs-multifunction-packaging-guide.md) - Boundary-count rules for split graph and multifunction package candidates.
+- [Core ML ANE temporal escape hatches](../Guides/apple-silicon/CoreML-ANE-temporal-escape-hatches-guide.md) - Stateful temporal caveats for future streaming or iPhone paths.
 - [iPhone Core ML device lab runbook](../Guides/apple-silicon/iPhone-CoreML-device-lab-runbook.md) - Device setup, foreground policy, and evidence capture for future physical-iPhone benchmark rows.
