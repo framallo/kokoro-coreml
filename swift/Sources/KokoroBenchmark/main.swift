@@ -175,6 +175,7 @@ class ModelCache: KokoroModelProvider {
     let decoderPreConfig: MLModelConfiguration
     let generatorConfig: MLModelConfiguration
     let computeUnitPolicyLabel: String
+    let reuseInputArrays: Bool
     private let durationChoices: [DurationModelChoice]
 
     // Layer 1: Compiled URLs (persist forever — compilation is expensive)
@@ -188,12 +189,14 @@ class ModelCache: KokoroModelProvider {
     var f0nModels: [Int: MLModel] = [:]
     var decPreModels: [Int: MLModel] = [:]
     var genModels: [Int: MLModel] = [:]
+    private var reusableArrays: [String: MLMultiArray] = [:]
 
     init(
         modelsDir: URL,
         computeUnits: MLComputeUnits = .all,
         stagedComputeUnits: Bool = false,
-        stagePolicy: StageComputeUnitPolicy? = nil
+        stagePolicy: StageComputeUnitPolicy? = nil,
+        reuseInputArrays: Bool = false
     ) {
         self.modelsDir = modelsDir
         let resolvedPolicy = stagePolicy ?? (stagedComputeUnits ? .staged : .single(computeUnits))
@@ -202,8 +205,12 @@ class ModelCache: KokoroModelProvider {
         self.decoderPreConfig = Self.makeConfig(resolvedPolicy.decoderPre)
         self.generatorConfig = Self.makeConfig(resolvedPolicy.generator)
         self.computeUnitPolicyLabel = resolvedPolicy.label
+        self.reuseInputArrays = reuseInputArrays
         self.durationChoices = KokoroPipeline.discoverDurationChoices(modelsDirectory: modelsDir)
         fputs("  Compute units: \(resolvedPolicy.label)\n", stderr)
+        if reuseInputArrays {
+            fputs("  Reusing benchmark input arrays by shape\n", stderr)
+        }
         fputs("  Duration choices: \(durationChoices.map { $0.cacheKey }.joined(separator: ", "))\n", stderr)
     }
 
@@ -229,6 +236,17 @@ class ModelCache: KokoroModelProvider {
 
     func prepareForBucket(bucketSec: Int, tFrames: Int) throws {
         evictExcept(bucket: bucketSec, tFrames: tFrames)
+    }
+
+    func reusableFloatArray(name: String, shape: [Int]) throws -> MLMultiArray? {
+        guard reuseInputArrays else { return nil }
+        let key = "\(name):\(shape.map(String.init).joined(separator: "x"))"
+        if let cached = reusableArrays[key] {
+            return cached
+        }
+        let array = try MLMultiArray(shape: shape.map { NSNumber(value: $0) }, dataType: .float32)
+        reusableArrays[key] = array
+        return array
     }
 
     func f0ntrainModel(tFrames: Int) throws -> MLModel {
@@ -435,6 +453,7 @@ func runPipeline(
         "status": "ok",
         "error": NSNull(),
         "compute_unit_policy": cache.computeUnitPolicyLabel,
+        "reuse_input_arrays": cache.reuseInputArrays,
         "wall_time_s": round(result.wallTimeSeconds * 1e6) / 1e6,
         "canonical_audio_duration_s": round(canonicalDur * 1e6) / 1e6,
         "observed_audio_duration_s": round(observedDur * 1e6) / 1e6,
@@ -507,7 +526,8 @@ func runSingleShot(modelsDir: String, inputsDir: String, hnsfWeightsPath: String
                     warmupCount: Int,
                     computeUnits: MLComputeUnits = .all,
                     stagedComputeUnits: Bool = false,
-                    stagePolicy: StageComputeUnitPolicy? = nil) throws {
+                    stagePolicy: StageComputeUnitPolicy? = nil,
+                    reuseInputArrays: Bool = false) throws {
     let weightsData = try Data(contentsOf: URL(fileURLWithPath: hnsfWeightsPath))
     let weights = try JSONDecoder().decode(HnsfWeights.self, from: weightsData)
 
@@ -519,7 +539,8 @@ func runSingleShot(modelsDir: String, inputsDir: String, hnsfWeightsPath: String
         modelsDir: URL(fileURLWithPath: modelsDir),
         computeUnits: computeUnits,
         stagedComputeUnits: stagedComputeUnits,
-        stagePolicy: stagePolicy
+        stagePolicy: stagePolicy,
+        reuseInputArrays: reuseInputArrays
     )
 
     fputs("Loading models...\n", stderr)
@@ -672,14 +693,16 @@ func runGeneratorInputDump(modelsDir: String, tensorInputDumpPath: String,
 func runBatch(modelsDir: String, inputsDir: String, hnsfWeightsPath: String,
               computeUnits: MLComputeUnits = .all,
               stagedComputeUnits: Bool = false,
-              stagePolicy: StageComputeUnitPolicy? = nil) throws {
+              stagePolicy: StageComputeUnitPolicy? = nil,
+              reuseInputArrays: Bool = false) throws {
     let weightsData = try Data(contentsOf: URL(fileURLWithPath: hnsfWeightsPath))
     let weights = try JSONDecoder().decode(HnsfWeights.self, from: weightsData)
     let cache = ModelCache(
         modelsDir: URL(fileURLWithPath: modelsDir),
         computeUnits: computeUnits,
         stagedComputeUnits: stagedComputeUnits,
-        stagePolicy: stagePolicy
+        stagePolicy: stagePolicy,
+        reuseInputArrays: reuseInputArrays
     )
     let inputsDirURL = URL(fileURLWithPath: inputsDir)
 
@@ -771,6 +794,7 @@ func main() throws {
     var f0nComputeUnitsStr: String?
     var decoderPreComputeUnitsStr: String?
     var generatorComputeUnitsStr: String?
+    var reuseInputArrays = false
 
     var i = 1
     while i < args.count {
@@ -811,6 +835,8 @@ func main() throws {
             i += 1; decoderPreComputeUnitsStr = args[i]
         case "--generator-compute-units":
             i += 1; generatorComputeUnitsStr = args[i]
+        case "--reuse-input-arrays":
+            reuseInputArrays = true
         default:
             break
         }
@@ -856,7 +882,8 @@ func main() throws {
         try runBatch(modelsDir: modelsDir, inputsDir: inputsDir, hnsfWeightsPath: hnsfWeightsPath,
                      computeUnits: computeUnits,
                      stagedComputeUnits: stagedComputeUnits,
-                     stagePolicy: stagePolicy)
+                     stagePolicy: stagePolicy,
+                     reuseInputArrays: reuseInputArrays)
     } else if let generatorInputDumpPath {
         try runGeneratorInputDump(
             modelsDir: modelsDir,
@@ -881,7 +908,8 @@ func main() throws {
                           warmupCount: warmupCount,
                           computeUnits: computeUnits,
                           stagedComputeUnits: stagedComputeUnits,
-                          stagePolicy: stagePolicy)
+                          stagePolicy: stagePolicy,
+                          reuseInputArrays: reuseInputArrays)
     }
 }
 

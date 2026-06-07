@@ -145,8 +145,8 @@ def _host_status(
     *,
     max_load_1: float,
     max_noisy_cpu_pct: float,
-    max_swap_used_mb: float,
-    min_memory_free_pct: int,
+    max_swap_used_mb: float | None,
+    min_memory_free_pct: int | None,
     require_ac_power: bool,
     timeout_s: int,
 ) -> dict[str, Any]:
@@ -177,8 +177,13 @@ def _host_status(
             "returncode": result.returncode,
         }
     sections = _split_sections(result.stdout)
-    uptime = sections.get("uptime", "")
-    ps_output = sections.get("ps", "")
+    if sections:
+        uptime = sections.get("uptime", "")
+        ps_output = sections.get("ps", "")
+    else:
+        lines = result.stdout.splitlines()
+        uptime = lines[0] if lines else ""
+        ps_output = "\n".join(lines[1:])
     swapusage = sections.get("swap", "")
     memory_pressure = sections.get("memory_pressure", "")
     power = sections.get("power", "")
@@ -192,8 +197,10 @@ def _host_status(
     thermals_ok = _thermal_ok(thermal)
     load_ok = load_1 is not None and load_1 <= max_load_1
     noisy_ok = not noisy_processes
-    swap_ok = swap_used_mb is not None and swap_used_mb <= max_swap_used_mb
-    memory_ok = memory_free_pct is not None and memory_free_pct >= min_memory_free_pct
+    swap_ok = max_swap_used_mb is None or (swap_used_mb is not None and swap_used_mb <= max_swap_used_mb)
+    memory_ok = min_memory_free_pct is None or (
+        memory_free_pct is not None and memory_free_pct >= min_memory_free_pct
+    )
     power_ok = (not require_ac_power) or ac_power is True
     thermal_gate_ok = thermals_ok is not False
     quiet = load_ok and noisy_ok and swap_ok and memory_ok and power_ok and thermal_gate_ok
@@ -266,15 +273,18 @@ def build_payload(args: argparse.Namespace) -> dict[str, Any]:
 
     host_values = args.host if args.host else list(DEFAULT_HOSTS)
     hosts = [_parse_host(value) for value in host_values]
+    max_swap_used_mb = getattr(args, "max_swap_used_mb", None)
+    min_memory_free_pct = getattr(args, "min_memory_free_pct", None)
+    allow_battery = getattr(args, "allow_battery", True)
     rows = [
         _host_status(
             machine_id,
             target,
             max_load_1=args.max_load_1,
             max_noisy_cpu_pct=args.max_noisy_cpu_pct,
-            max_swap_used_mb=args.max_swap_used_mb,
-            min_memory_free_pct=args.min_memory_free_pct,
-            require_ac_power=not args.allow_battery,
+            max_swap_used_mb=max_swap_used_mb,
+            min_memory_free_pct=min_memory_free_pct,
+            require_ac_power=not allow_battery,
             timeout_s=args.timeout,
         )
         for machine_id, target in hosts

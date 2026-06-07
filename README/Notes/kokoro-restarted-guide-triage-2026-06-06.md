@@ -4,13 +4,13 @@ June 6, 2026
 
 > **Scope:** Six restarted create-guide reports landed after the workflow reset.
 > Treat them as draft research input. This note records the implementation
-> triage only; full guide-ingest still needs current-doc/API verification and
-> corpus cross-linking before any claim becomes canonical.
+> triage and points to the repo-native guides produced by guide-ingest.
 
 ## Status
 
-All six restarted runs completed on the second attempt. The 15-minute heartbeat
-was deleted after all reports landed.
+All six restarted runs completed on the second attempt and have been folded
+into repo-native guides. The 15-minute heartbeat was deleted after all reports
+landed.
 
 ## Raw Reports
 
@@ -119,9 +119,9 @@ change dtype/layout and invalidate existing strict parity assumptions.
 
 ## Ingested Guides
 
-The reports are now folded into repo-native guides. These guides preserve raw
-report paths, mark speculative claims, and link back to the current Kokoro
-evidence instead of importing the raw reports as canonical truth:
+The restarted reports are now folded into repo-native guides. These guides
+preserve raw report paths, mark speculative claims, and link back to the
+current Kokoro evidence instead of importing the raw reports as canonical truth:
 
 - [Apple Silicon warmed-inference benchmark hygiene](../Guides/apple-silicon/Apple-Silicon-warmed-inference-benchmark-hygiene-guide.md)
 - [Kokoro Irvine M1 3s/7s paper frontier](../Guides/apple-silicon/Kokoro-Irvine-M1-3s-7s-paper-frontier-guide.md)
@@ -130,3 +130,12 @@ evidence instead of importing the raw reports as canonical truth:
 - [Kokoro M1 vocoder runtime boundary](../Guides/apple-silicon/Kokoro-M1-vocoder-runtime-boundary-guide.md)
 - [Kokoro HAR/STFT strict repair and distillation](../Guides/apple-silicon/Kokoro-HAR-STFT-strict-repair-distillation-guide.md)
 - [Kokoro M1 HAR/STFT contract repair](../Guides/apple-silicon/Kokoro-M1-HAR-STFT-contract-repair-guide.md)
+
+Additional completed Core ML guide reports from the same batch are also
+ingested:
+
+- [Core ML ANE compiler failure triage](../Guides/apple-silicon/CoreML-ANE-compiler-failure-triage-guide.md)
+- [Core ML ANE transformer layout and op compatibility](../Guides/apple-silicon/CoreML-ANE-transformer-layout-op-compatibility-guide.md)
+- [Core ML split graphs and multifunction packaging](../Guides/apple-silicon/CoreML-split-graphs-multifunction-packaging-guide.md)
+- [iPhone Core ML device lab runbook](../Guides/apple-silicon/iPhone-CoreML-device-lab-runbook.md)
+- [Core ML ANE temporal escape hatches](../Guides/apple-silicon/CoreML-ANE-temporal-escape-hatches-guide.md)

@@ -13,10 +13,12 @@ public protocol KokoroModelProvider {
     func decoderPreModel(bucketSec: Int) throws -> MLModel
     func generatorModel(bucketSec: Int) throws -> MLModel
     func prepareForBucket(bucketSec: Int, tFrames: Int) throws
+    func reusableFloatArray(name: String, shape: [Int]) throws -> MLMultiArray?
 }
 
 public extension KokoroModelProvider {
     func prepareForBucket(bucketSec: Int, tFrames: Int) throws {}
+    func reusableFloatArray(name: String, shape: [Int]) throws -> MLMultiArray? { nil }
 }
 
 /// Pre-tokenized synthesis request for the shared Swift/Core ML pipeline.
@@ -280,11 +282,11 @@ public func executeKokoroSynthesis(
     // HnSF depends only on padded F0 and can overlap this Core ML prediction.
     let t10 = CFAbsoluteTimeGetCurrent()
     let decPreModel = try modelProvider.decoderPreModel(bucketSec: bucketSec)
-    let f0Array3D = try makeZeroArray3D(channels: 1, time: fullF0Len)
+    let f0Array3D = try makeZeroArray3D(modelProvider: modelProvider, name: "decoder_pre.f0", channels: 1, time: fullF0Len)
     copyInto(array: f0Array3D, from: f0Padded)
-    let nArray3D = try makeZeroArray3D(channels: 1, time: fullF0Len)
+    let nArray3D = try makeZeroArray3D(modelProvider: modelProvider, name: "decoder_pre.n_input", channels: 1, time: fullF0Len)
     copyInto(array: nArray3D, from: nPadded)
-    let decRefS = try makeZeroArray2D(dim: PipelineConstants.voiceEmbeddingDim)
+    let decRefS = try makeZeroArray2D(modelProvider: modelProvider, name: "decoder_pre.ref_s", dim: PipelineConstants.voiceEmbeddingDim)
     copyInto(array: decRefS, from: request.refS)
 
     let decPreInput = try MLDictionaryFeatureProvider(dictionary: [
@@ -349,18 +351,22 @@ public func executeKokoroSynthesis(
     // Stage 8: GeneratorFromHar Core ML.
     let t14 = CFAbsoluteTimeGetCurrent()
     let genModel = try modelProvider.generatorModel(bucketSec: bucketSec)
-    let genRefS = try makeZeroArray2D(dim: PipelineConstants.voiceEmbeddingDim)
+    let genRefS = try makeZeroArray2D(modelProvider: modelProvider, name: "generator.ref_s", dim: PipelineConstants.voiceEmbeddingDim)
     copyInto(array: genRefS, from: request.refS)
 
     let genShapes = inputShapes(from: genModel)
     let xPreExpectedTime = genShapes["x_pre"]?.last ?? xPre.shape.last!.intValue
     let harExpectedTime = genShapes["har"]?.last ?? harFrames
     let xPrePadded = try zeroPad3D(
+        modelProvider: modelProvider,
+        name: "generator.x_pre",
         source: xPre,
         channels: xPre.shape[1].intValue,
         targetTime: xPreExpectedTime
     )
     let harPadded = try zeroPad3D(
+        modelProvider: modelProvider,
+        name: "generator.har",
         sourceValues: harFlat,
         channels: HarmonicConstants.harChannels,
         sourceTime: harFrames,
@@ -612,6 +618,137 @@ private func warmModels(
 
 private func decoderPreFrameCount(fullF0Len: Int) -> Int {
     (fullF0Len - 1) / 2 + 1
+}
+
+private func makeZeroArray3D(
+    modelProvider: KokoroModelProvider,
+    name: String,
+    channels: Int,
+    time: Int
+) throws -> MLMultiArray {
+    if let array = try modelProvider.reusableFloatArray(name: name, shape: [1, channels, time]) {
+        zero(array)
+        return array
+    }
+    return try makeZeroArray3D(channels: channels, time: time)
+}
+
+private func makeZeroArray2D(
+    modelProvider: KokoroModelProvider,
+    name: String,
+    dim: Int
+) throws -> MLMultiArray {
+    if let array = try modelProvider.reusableFloatArray(name: name, shape: [1, dim]) {
+        zero(array)
+        return array
+    }
+    return try makeZeroArray2D(dim: dim)
+}
+
+private func zero(_ array: MLMultiArray) {
+    let byteCount: Int
+    switch array.dataType {
+    case .float32:
+        byteCount = array.count * MemoryLayout<Float>.size
+    case .float16:
+        byteCount = array.count * MemoryLayout<Float16>.size
+    case .double:
+        byteCount = array.count * MemoryLayout<Double>.size
+    case .int32:
+        byteCount = array.count * MemoryLayout<Int32>.size
+    case .int8:
+        byteCount = array.count * MemoryLayout<Int8>.size
+    @unknown default:
+        for i in 0..<array.count {
+            array[localMultiIndex(offset: i, shape: array.shape.map { $0.intValue })] = 0
+        }
+        return
+    }
+    memset(array.dataPointer, 0, byteCount)
+}
+
+private func localMultiIndex(offset: Int, shape: [Int]) -> [NSNumber] {
+    guard !shape.isEmpty else { return [] }
+    var remainder = offset
+    var result = [Int](repeating: 0, count: shape.count)
+    for dimIndex in stride(from: shape.count - 1, through: 0, by: -1) {
+        let dim = max(1, shape[dimIndex])
+        result[dimIndex] = remainder % dim
+        remainder /= dim
+    }
+    return result.map { NSNumber(value: $0) }
+}
+
+private func zeroPad3D(
+    modelProvider: KokoroModelProvider,
+    name: String,
+    source: MLMultiArray,
+    channels: Int,
+    targetTime: Int
+) throws -> MLMultiArray {
+    if let array = try modelProvider.reusableFloatArray(name: name, shape: [1, channels, targetTime]) {
+        zero(array)
+        let sourceShape = source.shape.map { $0.intValue }
+        let sourceTime = sourceShape.count >= 3 ? sourceShape[2] : targetTime
+        let copyTime = min(sourceTime, targetTime)
+        let dstPtr = array.dataPointer.assumingMemoryBound(to: Float.self)
+        let srcStrides = source.strides.map { $0.intValue }
+        if source.dataType == .float32,
+           srcStrides.count >= 3,
+           srcStrides[2] == 1,
+           srcStrides[1] == sourceTime {
+            let srcPtr = source.dataPointer.assumingMemoryBound(to: Float.self)
+            for c in 0..<channels {
+                memcpy(
+                    dstPtr + c * targetTime,
+                    srcPtr + c * sourceTime,
+                    copyTime * MemoryLayout<Float>.size
+                )
+            }
+        } else {
+            for c in 0..<channels {
+                for t in 0..<copyTime {
+                    dstPtr[c * targetTime + t] = source[[0, c, t] as [NSNumber]].floatValue
+                }
+            }
+        }
+        return array
+    }
+    return try zeroPad3D(source: source, channels: channels, targetTime: targetTime)
+}
+
+private func zeroPad3D(
+    modelProvider: KokoroModelProvider,
+    name: String,
+    sourceValues: [Float],
+    channels: Int,
+    sourceTime: Int,
+    targetTime: Int
+) throws -> MLMultiArray {
+    if let array = try modelProvider.reusableFloatArray(name: name, shape: [1, channels, targetTime]) {
+        zero(array)
+        let copyTime = max(0, min(sourceTime, targetTime))
+        if copyTime > 0 {
+            let dstPtr = array.dataPointer.assumingMemoryBound(to: Float.self)
+            sourceValues.withUnsafeBufferPointer { srcBuf in
+                guard let srcBase = srcBuf.baseAddress else { return }
+                for c in 0..<channels {
+                    memcpy(
+                        dstPtr + c * targetTime,
+                        srcBase + c * sourceTime,
+                        copyTime * MemoryLayout<Float>.size
+                    )
+                }
+            }
+        }
+        return array
+    }
+    return try zeroPad3D(
+        sourceValues: sourceValues,
+        channels: channels,
+        sourceTime: sourceTime,
+        targetTime: targetTime
+    )
 }
 
 private func buildTimedHar(

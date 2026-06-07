@@ -2138,7 +2138,7 @@ def test_nyquist_phase_summary_tracks_padded_strict_and_natural_failure(tmp_path
     ]
     assert "padded shipping HAR geometry repairs" in summary["interpretation"]
     assert "Natural HAR geometry still fails" in summary["interpretation"]
-    assert "removes the speed edge" in summary["interpretation"]
+    assert "removes the direct speed edge" in summary["interpretation"]
 
     markdown = render_nyquist_phase_markdown(summary)
     assert "Strict waveform gate pass rows: `2`" in markdown
@@ -2308,9 +2308,9 @@ def test_candidate_frontier_matrix_records_successes_failures_and_blockers(tmp_p
     families = {row["family"] for row in payload["candidates"]}
 
     assert payload["summary"] == {
-        "candidate_count": 16,
+        "candidate_count": 21,
         "production_ready_strict_candidates": 2,
-        "strict_rejected_or_too_small": 10,
+        "strict_rejected_or_too_small": 15,
         "non_strict_candidates": 4,
         "profile_rows_remaining_after_rewrite": 4,
         "iphone_launch_blocker": "device_locked",
@@ -2322,9 +2322,10 @@ def test_candidate_frontier_matrix_records_successes_failures_and_blockers(tmp_p
     assert "CT8/CT9/iOS17 toolchain-only rebuild" in families
     assert "Style-specialized generator plus upsample rewrite" in families
     assert "LUT-palettized full surface plus upsample rewrite" in families
+    assert "Reusable Swift input MLMultiArrays" in families
     assert "Fast F0/source simplification" in families
     assert "Per-stage prefix compute-unit overrides" in families
-    assert "Candidates recorded: `16`" in markdown
+    assert "Candidates recorded: `21`" in markdown
     assert "Run scripts/external_bakeoff/check_remote_host_quiet.py" in markdown
 
 

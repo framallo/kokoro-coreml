@@ -4142,6 +4142,47 @@ Bakeoff plan Phase 7: `README/Plans/kokoro-bakeoff-v2.md`
 
 ---
 
+## Reusable Swift Input MLMultiArrays Probe
+
+Collected: 2026-06-06.
+
+Hypothesis: Config F short buckets might be paying avoidable fixed cost by
+allocating fresh Swift `MLMultiArray` inputs for DecoderPre and Generator on
+every synthesis call. A benchmark-only `--reuse-input-arrays` flag was added to
+`kokoro-bench` and `run_config_f_reference.py` to reuse zeroed float input
+buffers by logical role and shape.
+
+Important failure found during the probe:
+
+- A first implementation keyed the cache by shape only. That was not strict:
+  same-shape inputs such as DecoderPre `f0` and `n_input` aliased inside one
+  Core ML prediction.
+- After adding logical-role keys, tensor dumps still diverged because the
+  reusable `har_padded` path copied flat channel-major HAR data contiguously
+  instead of copying each channel row from `sourceTime` to `targetTime`.
+- The fixed implementation has exact 3s tensor-dump parity and hash-identical
+  3s/7s spotcheck WAVs.
+
+Final local M2 Studio staged A/B, warmed only, `iterations=10`,
+`preflight-runs=3`:
+
+| Bucket | Baseline | Reusable arrays | Speedup | Hash |
+| --- | ---: | ---: | ---: | --- |
+| `3s` | `49.412 ms` | `50.011 ms` | `-1.21%` | identical |
+| `7s` | `93.877 ms` | `97.355 ms` | `-3.71%` | identical |
+
+Decision: reject as a production optimization. Reusing input buffers does not
+remove the real short-bucket bottleneck and can make Core ML scheduling or
+provider handling slower. Keep the flag as a diagnostic harness only.
+
+Artifacts:
+
+- `outputs/external_bakeoff/results_config_f_reference_m2-studio-local_reuse_arrays_baseline_v3_short.json`
+- `outputs/external_bakeoff/results_config_f_reference_m2-studio-local_reuse_arrays_candidate_v3_short.json`
+- `outputs/reuse_input_arrays_debug/`
+
+---
+
 ## External bakeoff follow-up: laishere fp16 vocoder interface probe
 
 **First collected:** 2026-06-06

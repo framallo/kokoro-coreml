@@ -79,11 +79,29 @@ def summarize_reports(paths: list[Path]) -> dict[str, Any]:
             "affine_nyquist_snr_db": _metric(report, "recomputed_manual_affine_nyquist", "snr_db"),
             "negated_nyquist_corr": _metric(report, "recomputed_manual_negated_nyquist", "correlation"),
             "negated_nyquist_snr_db": _metric(report, "recomputed_manual_negated_nyquist", "snr_db"),
+            "swift_basis_nyquist_corr": _metric(
+                report, "recomputed_manual_swift_basis_nyquist", "correlation"
+            ),
+            "swift_basis_nyquist_snr_db": _metric(
+                report, "recomputed_manual_swift_basis_nyquist", "snr_db"
+            ),
+            "swift_basis_atan2_nyquist_corr": _metric(
+                report, "recomputed_manual_swift_basis_atan2_nyquist", "correlation"
+            ),
+            "swift_basis_atan2_nyquist_snr_db": _metric(
+                report, "recomputed_manual_swift_basis_atan2_nyquist", "snr_db"
+            ),
             "nyquist_wrapped_max_abs_error": _feature_metric(
                 report, "recomputed_nyquist_phase_vs_dumped", "wrapped_max_abs_error"
             ),
             "nyquist_two_pi_branch_errors": _feature_metric(
                 report, "recomputed_nyquist_phase_vs_dumped", "two_pi_branch_errors"
+            ),
+            "swift_basis_nyquist_two_pi_branch_errors": _feature_metric(
+                report, "swift_basis_nyquist_phase_vs_dumped", "two_pi_branch_errors"
+            ),
+            "swift_basis_atan2_nyquist_two_pi_branch_errors": _feature_metric(
+                report, "swift_basis_atan2_nyquist_phase_vs_dumped", "two_pi_branch_errors"
             ),
         }
         row["dumped_nyquist_delta_snr_db"] = None
@@ -111,10 +129,11 @@ def summarize_reports(paths: list[Path]) -> dict[str, Any]:
             "Using the raw trimmed waveform reference, dumped Nyquist phase plus "
             "padded shipping HAR geometry repairs the source-boundary path across "
             "3s/7s/10s/15s/30s. Natural HAR geometry still fails strict waveform "
-            "parity, and oracle-fitted affine/negated Nyquist repairs still do "
-            "not reach the dumped-Nyquist strict gate. Prior fused-source timing "
-            "shows padded geometry removes the speed edge, so Nyquist splicing is "
-            "evidence for the blocker rather than a production win."
+            "parity. Branch-only Swift-basis Nyquist repair fails, but exact "
+            "Swift Float real/imag dot products followed by atan2 matches the "
+            "dumped-Nyquist oracle. Prior fused-source timing still shows padded "
+            "geometry removes the direct speed edge, so exact Nyquist repair is "
+            "a strict contract unlock rather than a standalone production win."
         ),
     }
 
@@ -130,8 +149,8 @@ def render_markdown(summary: dict[str, Any]) -> str:
         f"Rows: `{summary['row_count']}`.",
         f"Strict waveform gate pass rows: `{summary['strict_waveform_gate_pass_count']}`.",
         "",
-        "| Bucket | Geometry | Dumped HAR SNR | Recomputed SNR | + dumped Nyquist SNR | Affine Nyquist SNR | Negated Nyquist SNR | Zero-Nyquist SNR | Nyquist wrapped max | 2pi errors | Report |",
-        "| --- | --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | --- |",
+        "| Bucket | Geometry | Dumped HAR SNR | Recomputed SNR | + dumped Nyquist SNR | Swift-branch Nyquist SNR | Swift-atan2 Nyquist SNR | Affine Nyquist SNR | Negated Nyquist SNR | Zero-Nyquist SNR | Nyquist wrapped max | 2pi errors | Swift-branch 2pi errors | Swift-atan2 2pi errors | Report |",
+        "| --- | --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | --- |",
     ]
     for row in summary["rows"]:
         lines.append(
@@ -143,11 +162,19 @@ def render_markdown(summary: dict[str, Any]) -> str:
                     _fmt(row["dumped_har_snr_db"]),
                     _fmt(row["recomputed_manual_snr_db"]),
                     _fmt(row["recomputed_manual_dumped_nyquist_snr_db"]),
+                    _fmt(row["swift_basis_nyquist_snr_db"]),
+                    _fmt(row["swift_basis_atan2_nyquist_snr_db"]),
                     _fmt(row["affine_nyquist_snr_db"]),
                     _fmt(row["negated_nyquist_snr_db"]),
                     _fmt(row["zero_nyquist_snr_db"]),
                     _fmt(row["nyquist_wrapped_max_abs_error"], 4),
                     "n/a" if row["nyquist_two_pi_branch_errors"] is None else str(row["nyquist_two_pi_branch_errors"]),
+                    "n/a"
+                    if row["swift_basis_nyquist_two_pi_branch_errors"] is None
+                    else str(row["swift_basis_nyquist_two_pi_branch_errors"]),
+                    "n/a"
+                    if row["swift_basis_atan2_nyquist_two_pi_branch_errors"] is None
+                    else str(row["swift_basis_atan2_nyquist_two_pi_branch_errors"]),
                     f"`{row['path']}`",
                 ]
             )

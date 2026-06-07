@@ -12,6 +12,12 @@ top-level `README/*.md` files; link from notes instead of duplicating.
 ## Index
 
 - [Core ML compute-unit ablation](coreml-compute-unit-ablation.md) - F/G/G-prime/G-double-prime benchmark logic for isolating `.all`, ANE, GPU, and CPU behavior in the Swift pipeline.
-- [Restarted Kokoro guide triage](kokoro-restarted-guide-triage-2026-06-06.md) - Draft Deep Research report triage for warmed lower-end Mac optimization, benchmark hygiene, and source/body candidate priority.
+- [Restarted Kokoro guide triage](kokoro-restarted-guide-triage-2026-06-06.md) - Ingested Deep Research guide triage for warmed lower-end Mac optimization, benchmark hygiene, and source/body candidate priority.
+- [Apple Silicon warmed-inference benchmark hygiene](../Guides/apple-silicon/Apple-Silicon-warmed-inference-benchmark-hygiene-guide.md) - Warmed-only benchmark contract, quiet-host gating, and Core ML compile/cache separation.
+- [Kokoro Irvine M1 paper frontier guide](../Guides/apple-silicon/Kokoro-Irvine-M1-3s-7s-paper-frontier-guide.md) - Lower-end Mac `3s`/`7s` frontier strategy after corrected MLX comparisons.
+- [Kokoro M1 vocoder runtime boundary guide](../Guides/apple-silicon/Kokoro-M1-vocoder-runtime-boundary-guide.md) - Runtime-boundary strategy for strict lower-end Apple Silicon wins.
+- [Kokoro M1 vocoder partition and boundary guide](../Guides/apple-silicon/Kokoro-M1-vocoder-partition-boundary-guide.md) - Core ML partition and boundary mechanics for strict Kokoro vocoder bodies.
+- [Kokoro M1 source/body Core ML guide](../Guides/apple-silicon/Kokoro-M1-source-body-coreml-guide.md) - Source/body implementation path against laishere without adding losing hot-path splits.
+- [Kokoro HAR/STFT strict repair and distillation guide](../Guides/apple-silicon/Kokoro-HAR-STFT-strict-repair-distillation-guide.md) - Strict HAR/STFT representation-repair and tiny-adapter triage.
 - [Kokoro strict source/HAR representation repair prompt](Kokoro-strict-source-HAR-representation-repair-deep-research-prompt.md) - External research brief for strict source/HAR representation repair, first-layer folding, and tiny adapter calibration.
 - [iPhone Core ML device lab runbook](../Guides/apple-silicon/iPhone-CoreML-device-lab-runbook.md) - Device setup, foreground policy, and evidence capture for future physical-iPhone benchmark rows.

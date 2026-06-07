@@ -27,6 +27,10 @@ sys.path.insert(0, str(_ROOT))
 from audio_parity_tensor_io import load_tensor_dump  # noqa: E402
 from probe_generator_exact_geometry import _compute_units, _load_kmodel, _metrics  # noqa: E402
 from probe_generator_split import _duration_label_from_dump, _precision_arg, _remove_existing_package  # noqa: E402
+from probe_nyquist_phase_contribution import (  # noqa: E402
+    SWIFT_NYQUIST_IMAG_BASIS,
+    SWIFT_NYQUIST_REAL_BASIS,
+)
 
 
 def _make_har_source_fused_module(
@@ -48,6 +52,7 @@ def _make_har_source_fused_module(
             super().__init__()
             self.center = original_stft.center
             self.n_fft = original_stft.n_fft
+            self.hop_length = original_stft.hop_length
             self.pad_mode = original_stft.pad_mode
             self.freq_bins = original_stft.freq_bins
             self.conv_real = nn.Conv1d(
@@ -68,6 +73,14 @@ def _make_har_source_fused_module(
             )
             self.conv_real.weight = nn.Parameter(original_stft.weight_forward_real, requires_grad=False)
             self.conv_imag.weight = nn.Parameter(original_stft.weight_forward_imag, requires_grad=False)
+            self.register_buffer(
+                "swift_nyquist_real",
+                torch.from_numpy(SWIFT_NYQUIST_REAL_BASIS.reshape(1, 1, -1)).to(dtype=torch.float32),
+            )
+            self.register_buffer(
+                "swift_nyquist_imag",
+                torch.from_numpy(SWIFT_NYQUIST_IMAG_BASIS.reshape(1, 1, -1)).to(dtype=torch.float32),
+            )
 
         def transform(self, waveform: Any):
             if self.center:
@@ -77,7 +90,12 @@ def _make_har_source_fused_module(
             real = self.conv_real(x)
             imag = self.conv_imag(x)
             magnitude = torch.sqrt(real**2 + imag**2 + 1e-14)
-            if phase_mode == "atan2":
+            if phase_mode in {
+                "atan2",
+                "swift_nyquist_atan2",
+                "swift_dc_nyquist_atan2",
+                "swift_dc_branch_nyquist_atan2",
+            }:
                 phase = torch.atan2(imag, real)
             elif phase_mode == "acos":
                 denom = torch.clamp(magnitude, min=1e-12)
@@ -116,6 +134,25 @@ def _make_har_source_fused_module(
                     )
             else:
                 raise RuntimeError(f"unsupported phase_mode: {phase_mode}")
+            if phase_mode in {
+                "swift_nyquist_atan2",
+                "swift_dc_nyquist_atan2",
+                "swift_dc_branch_nyquist_atan2",
+            }:
+                nyquist_real = F.conv1d(x, self.swift_nyquist_real, stride=self.hop_length)
+                nyquist_imag = F.conv1d(x, self.swift_nyquist_imag, stride=self.hop_length)
+                nyquist_phase = torch.atan2(nyquist_imag, nyquist_real)
+                phase = torch.cat([phase[:, :10, :], nyquist_phase, phase[:, 11:, :]], dim=1)
+            if phase_mode == "swift_dc_nyquist_atan2":
+                dc_phase = torch.zeros_like(phase[:, :1, :])
+                phase = torch.cat([dc_phase, phase[:, 1:, :]], dim=1)
+            if phase_mode == "swift_dc_branch_nyquist_atan2":
+                dc_phase = torch.where(
+                    real[:, :1, :] < 0.0,
+                    torch.full_like(phase[:, :1, :], torch.pi),
+                    torch.zeros_like(phase[:, :1, :]),
+                )
+                phase = torch.cat([dc_phase, phase[:, 1:, :]], dim=1)
             return magnitude, phase
 
     class _HarSourceFusedGenerator(nn.Module):
@@ -428,7 +465,19 @@ def main() -> None:
     parser.add_argument("--report-name", default="report_har_source_fused.json")
     parser.add_argument("--fused-package", type=Path, default=Path("coreml/kokoro_decoder_har_post_3s.mlpackage"))
     parser.add_argument("--precision", default="fp16", choices=["fp16", "fp32"])
-    parser.add_argument("--phase-mode", default="atan2", choices=["atan2", "acos", "atan_manual", "atan_swift"])
+    parser.add_argument(
+        "--phase-mode",
+        default="atan2",
+        choices=[
+            "atan2",
+            "acos",
+            "atan_manual",
+            "atan_swift",
+            "swift_nyquist_atan2",
+            "swift_dc_nyquist_atan2",
+            "swift_dc_branch_nyquist_atan2",
+        ],
+    )
     parser.add_argument("--pad-har-to", type=int, default=None)
     parser.add_argument(
         "--nyquist-input",

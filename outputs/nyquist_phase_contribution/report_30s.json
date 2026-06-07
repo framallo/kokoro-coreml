@@ -164,6 +164,34 @@
       "two_pi_branch_errors": 0,
       "wrapped_max_abs_error": 0.011708378791809082,
       "wrapped_mean_abs_error": 1.978070447252253e-05
+    },
+    "swift_basis_atan2_nyquist_phase_vs_dumped": {
+      "candidate_samples": 144001,
+      "correlation": 0.9999999905828887,
+      "cosine_similarity": 0.9999999912348804,
+      "max_abs_error": 0.10951006412506104,
+      "mean_abs_error": 1.2373553920729628e-06,
+      "reference_samples": 144001,
+      "rmse": 0.00029414824037350825,
+      "samples_compared": 144001,
+      "snr_db": 77.56212248437127,
+      "two_pi_branch_errors": 0,
+      "wrapped_max_abs_error": 0.10951006412506104,
+      "wrapped_mean_abs_error": 1.2373553920729628e-06
+    },
+    "swift_basis_nyquist_phase_vs_dumped": {
+      "candidate_samples": 144001,
+      "correlation": 0.6884157969779016,
+      "cosine_similarity": 0.7072293126780613,
+      "max_abs_error": 3.141592740155685,
+      "mean_abs_error": 1.5703885399983653,
+      "reference_samples": 144001,
+      "rmse": 2.2210565285343247,
+      "samples_compared": 144001,
+      "snr_db": 0.002255339395693439,
+      "two_pi_branch_errors": 0,
+      "wrapped_max_abs_error": 3.1415926532075176,
+      "wrapped_mean_abs_error": 1.5703885398954571
     }
   },
   "manifest_metadata": {
@@ -316,6 +344,28 @@
       "rmse": 0.011630059366319176,
       "samples_compared": 657000,
       "snr_db": 14.120087390842247
+    },
+    "recomputed_manual_swift_basis_atan2_nyquist": {
+      "candidate_samples": 720000,
+      "correlation": 0.9841390965986049,
+      "cosine_similarity": 0.9860037619216467,
+      "max_abs_error": 0.2092159390449524,
+      "mean_abs_error": 0.00469509050198764,
+      "reference_samples": 657000,
+      "rmse": 0.009964695176939735,
+      "samples_compared": 657000,
+      "snr_db": 15.46244566237206
+    },
+    "recomputed_manual_swift_basis_nyquist": {
+      "candidate_samples": 720000,
+      "correlation": 0.9830975135468792,
+      "cosine_similarity": 0.9850334663735991,
+      "max_abs_error": 0.2493906021118164,
+      "mean_abs_error": 0.005035251884375344,
+      "reference_samples": 657000,
+      "rmse": 0.010468350472639769,
+      "samples_compared": 657000,
+      "snr_db": 15.034160941764004
     },
     "recomputed_manual_zero_nyquist": {
       "candidate_samples": 720000,

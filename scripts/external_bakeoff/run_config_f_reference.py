@@ -38,6 +38,7 @@ class ConfigFBatchRunner:
         inputs_dir: Path,
         hnsf_weights: Path,
         use_exact_duration_models: bool,
+        reuse_input_arrays: bool,
     ) -> None:
         env = os.environ.copy()
         if use_exact_duration_models:
@@ -50,6 +51,8 @@ class ConfigFBatchRunner:
             "--batch",
             "--compute-units", compute_units,
         ]
+        if reuse_input_arrays:
+            cmd.append("--reuse-input-arrays")
         for flag, value in (
             ("--duration-compute-units", stage_compute_units.get("duration")),
             ("--f0n-compute-units", stage_compute_units.get("f0n")),
@@ -179,6 +182,11 @@ def main() -> None:
     )
     parser.add_argument("--input-key", action="append", default=None)
     parser.add_argument("--spotcheck-dir", type=Path, default=None)
+    parser.add_argument(
+        "--reuse-input-arrays",
+        action="store_true",
+        help="Pass --reuse-input-arrays to kokoro-bench to reuse zeroed MLMultiArray input buffers by shape.",
+    )
     args = parser.parse_args()
 
     if not args.binary.exists():
@@ -207,6 +215,7 @@ def main() -> None:
             args.inputs_dir,
             args.hnsf_weights,
             args.use_exact_duration_models,
+            args.reuse_input_arrays,
         )
         for key in keys:
             item = manifest["inputs"][key]
@@ -250,6 +259,7 @@ def main() -> None:
                             "batch_mode": True,
                             "preflight_discarded_runs": args.preflight_runs,
                             "use_exact_duration_models": args.use_exact_duration_models,
+                            "reuse_input_arrays": args.reuse_input_arrays,
                             "raw_preflight_results": preflight,
                             "bucket_used": warm[-1].get("bucket_used"),
                             "spotcheck_wav": str(spotcheck_dir / f"{key}.wav"),
