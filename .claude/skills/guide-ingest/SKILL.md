@@ -25,6 +25,10 @@ Research / external-agent output that has already landed as raw source material.
 `README/Notes/` is for this repo's own learnings, experiment logs, decisions,
 and provenance. Do not invent new guide material from local analysis alone; put
 local analysis in `README/Notes/` and link to existing guides when useful.
+There is a hard provenance gate: no `raw-report.md` or equivalent externally
+generated source artifact means no new `README/Guides/` file. A prompt,
+checkpoint, local audit, or Codex-authored synthesis belongs in `README/Notes/`
+until the external guide actually lands.
 
 This skill **subsumes** the older mechanical-only `ingest-guide` flow: use
 **guide-ingest** for all guide imports here.
@@ -60,7 +64,9 @@ This skill **subsumes** the older mechanical-only `ingest-guide` flow: use
 ### 1. Normalize to proper markdown
 
 1. Confirm the source is an externally generated guide/report. Record the source
-   path in the guide. If the content is only repo-local investigation, write a
+   path in the guide, preferably the absolute `raw-report.md` path under
+   `llm-workflows/outputs/create-guide`. If the content is only repo-local
+   investigation, a prompt, a checkpoint, or a local summary, stop and write a
    note, not a guide.
 2. Read the **`markdown`** skill and
    [markdown-authoring-guide.md](../../../README/Guides/content/markdown-authoring-guide.md).

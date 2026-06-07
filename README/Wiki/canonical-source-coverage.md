@@ -1,6 +1,6 @@
 ---
 title: Canonical Source Coverage
-last_synced: 2026-06-06
+last_synced: 2026-06-07
 coverage_index: true
 ---
 
@@ -10,22 +10,45 @@ This is a deterministic coverage index, not a current-belief page. It lists read
 
 ## Sources
 
+- [AGENTS.md](../../AGENTS.md)
 - [CLAUDE.md](../../CLAUDE.md)
 - [README.md](../../README.md)
 - [README/COREML_EXPORT_SUMMARY.md](../COREML_EXPORT_SUMMARY.md)
 - [README/CoreML-runtime-error-deep-research.md](../CoreML-runtime-error-deep-research.md)
 - [README/EXPORT_FIX_PLAN.md](../EXPORT_FIX_PLAN.md)
 - [README/Guides/In-Repo-memory-guide.md](../Guides/In-Repo-memory-guide.md)
+- [README/Guides/apple-silicon/Apple-Silicon-warmed-inference-benchmark-hygiene-guide.md](../Guides/apple-silicon/Apple-Silicon-warmed-inference-benchmark-hygiene-guide.md)
+- [README/Guides/apple-silicon/Core ML-MLX-Scheduling-1D-ConvTranspose-ISTFTNet-vocoders-guide.md](../Guides/apple-silicon/Core ML-MLX-Scheduling-1D-ConvTranspose-ISTFTNet-vocoders-guide.md)
+- [README/Guides/apple-silicon/CoreML-ANE-compiler-failure-triage-guide.md](../Guides/apple-silicon/CoreML-ANE-compiler-failure-triage-guide.md)
+- [README/Guides/apple-silicon/CoreML-ANE-temporal-escape-hatches-guide.md](../Guides/apple-silicon/CoreML-ANE-temporal-escape-hatches-guide.md)
+- [README/Guides/apple-silicon/CoreML-ANE-transformer-layout-op-compatibility-guide.md](../Guides/apple-silicon/CoreML-ANE-transformer-layout-op-compatibility-guide.md)
 - [README/Guides/apple-silicon/CoreML-Compute-Unit-Scheduling-guide.md](../Guides/apple-silicon/CoreML-Compute-Unit-Scheduling-guide.md)
-- [README/Guides/apple-silicon/Core ML-MLX-Scheduling-1D-ConvTranspose-ISTFTNet-vocoders-guide.md](../Guides/apple-silicon/Core%20ML-MLX-Scheduling-1D-ConvTranspose-ISTFTNet-vocoders-guide.md)
 - [README/Guides/apple-silicon/CoreML-LSTM-Enumerated-Shapes.md](../Guides/apple-silicon/CoreML-LSTM-Enumerated-Shapes.md)
 - [README/Guides/apple-silicon/CoreML-LSTM-export-guide.md](../Guides/apple-silicon/CoreML-LSTM-export-guide.md)
+- [README/Guides/apple-silicon/CoreML-split-graphs-multifunction-packaging-guide.md](../Guides/apple-silicon/CoreML-split-graphs-multifunction-packaging-guide.md)
 - [README/Guides/apple-silicon/HF-transformers-MPS-guide.md](../Guides/apple-silicon/HF-transformers-MPS-guide.md)
+- [README/Guides/apple-silicon/Kokoro-HAR-STFT-strict-repair-distillation-guide.md](../Guides/apple-silicon/Kokoro-HAR-STFT-strict-repair-distillation-guide.md)
+- [README/Guides/apple-silicon/Kokoro-Irvine-M1-3s-7s-paper-frontier-guide.md](../Guides/apple-silicon/Kokoro-Irvine-M1-3s-7s-paper-frontier-guide.md)
+- [README/Guides/apple-silicon/Kokoro-M1-HAR-STFT-contract-repair-guide.md](../Guides/apple-silicon/Kokoro-M1-HAR-STFT-contract-repair-guide.md)
+- [README/Guides/apple-silicon/Kokoro-M1-source-body-coreml-guide.md](../Guides/apple-silicon/Kokoro-M1-source-body-coreml-guide.md)
+- [README/Guides/apple-silicon/Kokoro-M1-vocoder-partition-boundary-guide.md](../Guides/apple-silicon/Kokoro-M1-vocoder-partition-boundary-guide.md)
+- [README/Guides/apple-silicon/Kokoro-M1-vocoder-runtime-boundary-guide.md](../Guides/apple-silicon/Kokoro-M1-vocoder-runtime-boundary-guide.md)
+- [README/Guides/apple-silicon/Kokoro-to-CoreML-conversion.md](../Guides/apple-silicon/Kokoro-to-CoreML-conversion.md)
+- [README/Guides/apple-silicon/iPhone-CoreML-device-lab-runbook.md](../Guides/apple-silicon/iPhone-CoreML-device-lab-runbook.md)
 - [README/Guides/apple-silicon/pytorch-mps.md](../Guides/apple-silicon/pytorch-mps.md)
 - [README/Guides/content/code-documentation-guide.md](../Guides/content/code-documentation-guide.md)
 - [README/Guides/content/markdown-authoring-guide.md](../Guides/content/markdown-authoring-guide.md)
 - [README/Guides/content/notes-consolidation-guide.md](../Guides/content/notes-consolidation-guide.md)
-- [README/Kokoro-to-CoreML-conversion.md](../Kokoro-to-CoreML-conversion.md)
+- [README/Notes/Kokoro-Apple-Silicon-benchmark-hygiene-deep-research-prompt.md](../Notes/Kokoro-Apple-Silicon-benchmark-hygiene-deep-research-prompt.md)
+- [README/Notes/Kokoro-HAR-STFT-strict-repair-distillation-deep-research-prompt.md](../Notes/Kokoro-HAR-STFT-strict-repair-distillation-deep-research-prompt.md)
+- [README/Notes/Kokoro-M1-HAR-STFT-contract-deep-research-prompt.md](../Notes/Kokoro-M1-HAR-STFT-contract-deep-research-prompt.md)
+- [README/Notes/Kokoro-M1-graph-surface-target.md](../Notes/Kokoro-M1-graph-surface-target.md)
+- [README/Notes/Kokoro-M1-kernel-partition-deep-research-prompt.md](../Notes/Kokoro-M1-kernel-partition-deep-research-prompt.md)
+- [README/Notes/Kokoro-M1-paper-frontier-3s-7s-deep-research-prompt.md](../Notes/Kokoro-M1-paper-frontier-3s-7s-deep-research-prompt.md)
+- [README/Notes/Kokoro-M1-source-body-deep-research-prompt.md](../Notes/Kokoro-M1-source-body-deep-research-prompt.md)
+- [README/Notes/Kokoro-M1-vocoder-boundary-create-guide-brief.md](../Notes/Kokoro-M1-vocoder-boundary-create-guide-brief.md)
+- [README/Notes/Kokoro-M1-vocoder-boundary-research-brief.md](../Notes/Kokoro-M1-vocoder-boundary-research-brief.md)
+- [README/Notes/Kokoro-strict-source-HAR-representation-repair-deep-research-prompt.md](../Notes/Kokoro-strict-source-HAR-representation-repair-deep-research-prompt.md)
 - [README/Notes/README.md](../Notes/README.md)
 - [README/Notes/bakeoff-results-v1.md](../Notes/bakeoff-results-v1.md)
 - [README/Notes/bakeoff-results-v2.md](../Notes/bakeoff-results-v2.md)
@@ -34,8 +57,12 @@ This is a deterministic coverage index, not a current-belief page. It lists read
 - [README/Notes/debug-notes.md](../Notes/debug-notes.md)
 - [README/Notes/external-bakeoff-phase0-api-audit.md](../Notes/external-bakeoff-phase0-api-audit.md)
 - [README/Notes/external-bakeoff-phase2-run-log.md](../Notes/external-bakeoff-phase2-run-log.md)
+- [README/Notes/fixed-cost-latency-fit.md](../Notes/fixed-cost-latency-fit.md)
+- [README/Notes/har-stft-phase-contract.md](../Notes/har-stft-phase-contract.md)
+- [README/Notes/kokoro-restarted-guide-triage-2026-06-06.md](../Notes/kokoro-restarted-guide-triage-2026-06-06.md)
 - [README/Notes/kokoro-runtime-boundary.md](../Notes/kokoro-runtime-boundary.md)
 - [README/Notes/performance-notes.md](../Notes/performance-notes.md)
+- [README/Notes/stage-compute-policy-ablation.md](../Notes/stage-compute-policy-ablation.md)
 - [README/coreml-conversion-guide.md](../coreml-conversion-guide.md)
 - [README/kokoro-generator-rebuild.md](../kokoro-generator-rebuild.md)
 - [README/learnings.md](../learnings.md)

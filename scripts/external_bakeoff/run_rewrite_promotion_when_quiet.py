@@ -48,10 +48,53 @@ def _run_ssh(target: str, command: str, timeout_s: int) -> subprocess.CompletedP
     )
 
 
+def _run_scp(
+    target: str,
+    remote_path: Path,
+    local_path: Path,
+    timeout_s: int,
+    *,
+    recursive: bool = False,
+) -> subprocess.CompletedProcess[str]:
+    """Copy one remote evidence artifact back to the local checkout."""
+
+    local_path.parent.mkdir(parents=True, exist_ok=True)
+    command = [
+        "scp",
+        "-o",
+        "BatchMode=yes",
+        "-o",
+        f"ConnectTimeout={min(timeout_s, 30)}",
+    ]
+    if recursive:
+        command.append("-r")
+    command.extend([f"{target}:{remote_path}", str(local_path)])
+    return subprocess.run(
+        command,
+        check=False,
+        text=True,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        timeout=timeout_s + 10,
+    )
+
+
 def _shell_join(command: list[str]) -> str:
     """Return a shell-safe command line."""
 
     return " ".join(shlex.quote(part) for part in command)
+
+
+def _result_relative_path(machine_id: str) -> Path:
+    """Return the Config F rewrite promotion result path for one machine."""
+
+    return DEFAULT_OUTPUT_DIR / f"results_config_f_reference_{machine_id}_rewrite_ups_as_conv.json"
+
+
+def _spotcheck_relative_dir(machine_id: str) -> Path:
+    """Return the Config F rewrite promotion spotcheck WAV directory."""
+
+    return DEFAULT_OUTPUT_DIR / "spotcheck_wavs" / f"config_f_reference_{machine_id}_rewrite_ups_as_conv"
 
 
 def _remote_benchmark_command(
@@ -66,7 +109,7 @@ def _remote_benchmark_command(
 ) -> str:
     """Build the remote Config F rewrite-promotion command."""
 
-    output = DEFAULT_OUTPUT_DIR / f"results_config_f_reference_{machine_id}_rewrite_ups_as_conv.json"
+    output = _result_relative_path(machine_id)
     command = [
         "uv",
         "run",
@@ -166,6 +209,51 @@ def run(args: argparse.Namespace) -> dict[str, Any]:
                 "stderr": result.stderr,
             }
         )
+        if result.returncode != 0:
+            rows.append(row)
+            continue
+
+        result_relative_path = _result_relative_path(machine_id)
+        remote_result_path = args.repo_path / result_relative_path
+        local_result_path = Path(result_relative_path)
+        fetch = _run_scp(target, remote_result_path, local_result_path, args.fetch_timeout)
+        row.update(
+            {
+                "remote_result_path": str(remote_result_path),
+                "local_result_path": str(local_result_path),
+                "fetch_returncode": fetch.returncode,
+                "fetch_stdout": fetch.stdout,
+                "fetch_stderr": fetch.stderr,
+            }
+        )
+        if fetch.returncode != 0:
+            row["status"] = "fetch_error"
+            rows.append(row)
+            continue
+
+        spotcheck_relative_dir = _spotcheck_relative_dir(machine_id)
+        remote_spotcheck_dir = args.repo_path / spotcheck_relative_dir
+        local_spotcheck_dir = Path(spotcheck_relative_dir)
+        spotcheck_fetch = _run_scp(
+            target,
+            remote_spotcheck_dir,
+            local_spotcheck_dir.parent,
+            args.fetch_timeout,
+            recursive=True,
+        )
+        row.update(
+            {
+                "remote_spotcheck_dir": str(remote_spotcheck_dir),
+                "local_spotcheck_dir": str(local_spotcheck_dir),
+                "spotcheck_fetch_returncode": spotcheck_fetch.returncode,
+                "spotcheck_fetch_stdout": spotcheck_fetch.stdout,
+                "spotcheck_fetch_stderr": spotcheck_fetch.stderr,
+            }
+        )
+        if spotcheck_fetch.returncode != 0:
+            row["spotcheck_fetch_status"] = "error"
+        else:
+            row["spotcheck_fetch_status"] = "ok"
         rows.append(row)
 
     payload = {
@@ -183,6 +271,10 @@ def run(args: argparse.Namespace) -> dict[str, Any]:
             "ran_hosts": sum(1 for row in rows if row["status"] == "ok"),
             "skipped_noisy_hosts": sum(1 for row in rows if row["status"] == "skipped_noisy_host"),
             "failed_hosts": sum(1 for row in rows if row["status"] == "remote_error"),
+            "fetch_failed_hosts": sum(1 for row in rows if row["status"] == "fetch_error"),
+            "spotcheck_fetch_failed_hosts": sum(
+                1 for row in rows if row.get("spotcheck_fetch_status") == "error"
+            ),
         },
     }
     args.json_output.parent.mkdir(parents=True, exist_ok=True)
@@ -246,6 +338,7 @@ def main() -> int:
     parser.add_argument("--allow-battery", action="store_true")
     parser.add_argument("--quiet-timeout", type=int, default=5)
     parser.add_argument("--run-timeout", type=int, default=7200)
+    parser.add_argument("--fetch-timeout", type=int, default=120)
     parser.add_argument("--dry-run", action="store_true")
     parser.add_argument("--output", type=Path, default=DEFAULT_SUMMARY_MD)
     parser.add_argument("--json-output", type=Path, default=DEFAULT_SUMMARY_JSON)

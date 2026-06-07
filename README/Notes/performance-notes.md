@@ -4708,25 +4708,126 @@ and paired, but launching `com.kokoro.externalbakeoff.ConfigFIOSRunnerManual`
 still fails with `RequestDenied ... Locked`; Config F iPhone warmed timing is
 therefore still blocked only by the physical lock state.
 
+`scripts/external_bakeoff/summarize_source_contract_frontier.py` now folds the
+post-overlap+rewrite budget into
+`outputs/external_bakeoff/source_contract_frontier.md`. This is the current
+strict source/body target ledger: the Swift-like source equation is solved
+(`138.15 dB` minimum SNR), recomputed HAR/STFT is not (`8.23 dB` maximum SNR),
+and no saved strict candidate closes any Irvine row. After the two current
+strict candidates, Irvine still needs `27.0 ms` / `28.0 ms` / `12.8 ms` extra
+strict save on warmed-profile `3s` / `7s` / `10s`, while the paper frontier
+still needs `45.7 ms` / `77.6 ms` / `63.7 ms` / `64.4 ms` on
+`3s` / `7s` / `10s` / `15s`. The body-only counterfactual remains the clue:
+Irvine `3s` body-only would save `62.4 ms` if `x_source_*` tensors were free,
+but the strict full split loses `11.5 ms` once source/noise is included. Do not
+repeat another exact HAR-post split; the next strict implementation must make
+the source/HAR contract cheaper inside a runtime-positive boundary.
+
+First feasibility probes for direct `x_source_*` distillation:
+`scripts/probe_xsource_distillation_feasibility.py` fits bucket-local adapters
+and scores interleaved held-out frames. On the `3s` dump, cheap source-side
+features (`har_source`, F0, noise, voiced mask with radius `8`) are not enough:
+ridge gives `x_source_0` validation SNR `9.40 dB` (corr `0.916991`, max abs
+`3.724303`) and `x_source_1` `24.75 dB` (corr `0.997137`, max abs `0.794217`).
+A one-hidden-layer MLP (`hidden=128`, `steps=300`) improves cheap features only
+to `11.10 dB` for `x_source_0` and `25.20 dB` for `x_source_1`. Giving the
+adapter full strict HAR windows (`22` channels, radius `2`) improves the target
+but still fails strict feasibility: HAR ridge reaches `15.12 dB` / `30.54 dB`
+for `x_source_0` / `x_source_1`, and HAR MLP reaches `15.13 dB` / `32.23 dB`.
+A stronger temporal Conv1d adapter over the same HAR windows (`hidden=128`,
+`depth=4`, `kernel=17`, `steps=600`) solves the easier second source tensor
+(`x_source_1` validation SNR `42.88 dB`, corr `0.999956`) but still fails the
+first tensor (`x_source_0` validation SNR `16.20 dB`, corr `0.983172`, max abs
+`1.167980`) while overfitting train to `22.97 dB`. This rejects simple
+linear/1x1/local-window, tiny per-frame MLP, and compact temporal Conv1d
+shortcuts as strict direct `x_source_*` distillation paths. It also shows that
+`x_source_0` needs a different boundary: actual residual/AdaIN behavior, an
+early/later activation target, or algebraic STFT/HAR folding into the first
+noise convolutions plus residual behavior.
+
+The missing combination of no-side-input exact Swift DC/Nyquist phase repair
+and the HAR-post upsample rewrite was also tested in
+`scripts/probe_har_source_fused.py` using the new `--rewrite-ups-conv-transpose`
+flag. Against the production rewrite package on local M2 Studio `3s`
+CPU+GPU, fp16 is slightly speed-positive but not strict: production rewrite
+`28.27 ms`, candidate `28.07 ms` (`+0.73%`), candidate-vs-dump SNR only
+`33.00 dB`. Re-exporting the same graph in fp32 restores strict quality
+(candidate-vs-baseline SNR `49.87 dB`, candidate-vs-dump SNR `47.75 dB`) but
+loses speed: production rewrite `27.79 ms`, candidate `28.70 ms` (`-3.25%`).
+This rejects the strict no-side-input phase repair plus upsample rewrite as a
+current win; fp16 is not quality-safe, and fp32 is not fast enough.
+
+The direct-distillation probe now also supports `--target-mode pre_noise_conv`
+to test whether the source/HAR fold can stop before AdaIN residuals. That
+fails for cheap source features too. A ridge adapter from source/F0/noise
+windows (`radius=16`) reaches only `2.73 dB` on `pre_noise_conv_0` and
+`9.86 dB` on `pre_noise_conv_1`; a stronger Conv1d adapter (`hidden=128`,
+`depth=4`, `kernel=17`, `steps=400`) reaches only `10.60 dB` and `13.49 dB`.
+The sanity check with full HAR windows confirms the probe is measuring the
+right thing for same-grid convs: `pre_noise_conv_1` is recovered at `93.62 dB`
+because `noise_conv_1` is a `1x1` stride-1 conv, while `pre_noise_conv_0`
+still scores only `11.06 dB` because `noise_conv_0` is a stride-6, kernel-12
+conv and the generic resampling feature builder is not its exact geometry.
+Adding exact `har_conv_geometry` features fixes that measurement: ridge over
+the real `noise_convs[i]` receptive fields recovers `pre_noise_conv_0` at
+`96.64 dB` validation SNR and `pre_noise_conv_1` at `107.06 dB`. Decision: do
+not treat algebraic folding as "learn a cheap source-window adapter." The
+viable strict path is to compute the exact STFT/HAR receptive-field dot
+products needed by the first strided noise conv without materializing the full
+HAR tensor or adding a hot Core ML boundary.
+
+`scripts/summarize_pre_noise_folding_surface.py` quantifies that path across
+all five buckets. It reports `fold_for_memory_locality_not_frame_skipping`:
+because `noise_conv_1` is a `1x1` stride-1 convolution over every HAR frame,
+the two `noise_convs` touch `100.00%` of HAR frames for every bucket. Pre-noise
+outputs are also much larger than HAR (`7.76x` as many values; `3s` fp16 HAR is
+`1.21 MiB` while pre-noise is `9.38 MiB`, and `30s` fp16 HAR is `12.09 MiB`
+while pre-noise is `93.75 MiB`). Do not introduce a new pre-noise tensor
+boundary. Any strict folding implementation must be one fused runtime/kernel
+that improves memory locality and removes materialization/synchronization; it
+will not win by skipping most STFT/HAR frames.
+
+`scripts/external_bakeoff/summarize_strict_folding_ceiling.py` joins that
+surface with the removable Swift STFT timing and the post-overlap+rewrite
+Irvine budget. STFT-only removal closes zero warmed-profile rows and zero paper
+frontier rows: coverage is only `1.92%` / `4.63%` / `13.61%` of the remaining
+profile gap for `3s` / `7s` / `10s`, and `1.13%` / `1.67%` / `2.73%` of the
+paper gap. Decision: do not build a materialized pre-noise boundary, and do not
+spend a large implementation pass on strict folding unless it also removes
+generator-body synchronization or improves Core ML/Metal scheduling. STFT/HAR
+folding alone is too small to win the lower-end Mac rows.
+
 `scripts/external_bakeoff/run_rewrite_promotion_when_quiet.py` is now the
 preferred lower-end Mac promotion entrypoint for the HAR-post rewrite. It checks
 the quiet-host gate first, then runs
 `run_config_f_reference.py --generator-models-dir outputs/export_rewrite_smoke`
-only for quiet hosts. The 2026-06-06 dry-run wrote
+only for quiet hosts. A quiet remote run now counts as `ok` only after the
+remote result JSON is fetched back to the local
+`outputs/external_bakeoff/results_config_f_reference_<host>_rewrite_ups_as_conv.json`
+path; a remote success with missing evidence is recorded as `fetch_error`, not
+publishable timing. The wrapper also fetches the corresponding spotcheck WAV
+directory from
+`outputs/external_bakeoff/spotcheck_wavs/config_f_reference_<host>_rewrite_ups_as_conv`;
+missing spotcheck audio is recorded separately as a review artifact gap. The
+latest dry-run wrote
 `outputs/external_bakeoff/rewrite_promotion_when_quiet_latest.md` with both
-`irvine-m1` and `m2-air` skipped for host noise, so no polluted rewrite timing
+`irvine-m1` and `m2-air` skipped for host noise (`mds_stores`,
+`mediaanalysisd`, high load, and non-zero swap), so no polluted rewrite timing
 was recorded.
 
 `scripts/external_bakeoff/check_remote_host_quiet.py` now records the lower-end
 Mac timing gate at `outputs/external_bakeoff/remote_host_quiet_latest.md`.
-The 2026-06-06 07:16 local run reports `publishable_timing_allowed=false`:
-Irvine M1 has load `2.54/2.64/2.78` with `mediaanalysisd` at `83.0%` CPU and
-`mds_stores` at `28.6%`, while M2 Air has load `4.05/3.76/3.74` with
-`mds_stores` at `107.9%` and `mediaanalysisd` at `36.2%`. Skip lower-end Mac
-frontier promotion until this gate reports `quiet=yes` for the target host.
+The 2026-06-06 18:28 local run reports `publishable_timing_allowed=false`:
+Irvine M1 has load `2.04/2.45/2.53` with `mediaanalysisd` at `83.4%` CPU,
+`mds_stores` at `18.7%`, and `270.12 MB` swap used, while M2 Air has load
+`3.03/2.98/2.92` with `mediaanalysisd` at `63.5%`, `mds_stores` at `48.5%`,
+and `266.94 MB` swap used. A live rewrite promotion attempt at the same time
+skipped both hosts as noisy (`quiet_hosts=0`, `ran_hosts=0`), so no new
+publishable lower-end rewrite timing was recorded. Skip lower-end Mac frontier
+promotion until this gate reports `quiet=yes` for the target host.
 
 Added
-`README/Guides/apple-silicon/Kokoro-M1-kernel-partition-deep-research-prompt.md`
+`README/Notes/Kokoro-M1-kernel-partition-deep-research-prompt.md`
 as the focused external-research handoff for the remaining M1 problem: laishere
 gets a runtime-useful CPU+NE vocoder partition, while first-party strict fused
 packages either stay GPU-only or lose when split. Use it when asking an

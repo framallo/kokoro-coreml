@@ -99,6 +99,10 @@ from scripts.external_bakeoff.summarize_source_contract_frontier import (
     render_markdown as render_source_contract_frontier_markdown,
     summarize_source_contract_frontier,
 )
+from scripts.external_bakeoff.summarize_strict_folding_ceiling import (
+    build_summary as build_strict_folding_ceiling,
+    render_markdown as render_strict_folding_ceiling_markdown,
+)
 from scripts.external_bakeoff.validate_listening_decisions import validate_rows
 from scripts.external_bakeoff.verify_external_bakeoff_completion import (
     _check_iphone,
@@ -113,6 +117,11 @@ from scripts.compare_coreml_metadata import (
 from scripts.analyze_waveform_alignment import analyze_pair
 from scripts.create_f0_source_listening_pack import _write_decisions_csv as _write_f0_decisions_csv
 from scripts.probe_generator_cos_snake import _np_dtype, _trim_or_pad_last_dim
+from scripts.summarize_pre_noise_folding_surface import (
+    _conv_output_length,
+    _touched_frames,
+    render_markdown as render_pre_noise_folding_surface_markdown,
+)
 from scripts.summarize_f0_source_candidates import (
     collect_rows as collect_f0_candidate_rows,
     load_decisions as load_f0_candidate_decisions,
@@ -2406,8 +2415,12 @@ def test_rewrite_promotion_skips_noisy_hosts(monkeypatch, tmp_path):
     def fail_ssh(*args, **kwargs):
         raise AssertionError("noisy hosts must not run remote benchmark")
 
+    def fail_scp(*args, **kwargs):
+        raise AssertionError("noisy hosts must not fetch remote artifacts")
+
     monkeypatch.setattr(run_rewrite_promotion_when_quiet.check_remote_host_quiet, "build_payload", fake_quiet_payload)
     monkeypatch.setattr(run_rewrite_promotion_when_quiet, "_run_ssh", fail_ssh)
+    monkeypatch.setattr(run_rewrite_promotion_when_quiet, "_run_scp", fail_scp)
 
     payload = run_rewrite_promotion_when_quiet.run(
         argparse.Namespace(
@@ -2425,6 +2438,7 @@ def test_rewrite_promotion_skips_noisy_hosts(monkeypatch, tmp_path):
             allow_battery=False,
             quiet_timeout=5,
             run_timeout=7200,
+            fetch_timeout=120,
             dry_run=False,
             output=tmp_path / "summary.md",
             json_output=tmp_path / "summary.json",
@@ -2455,8 +2469,12 @@ def test_rewrite_promotion_dry_run_builds_generator_override_command(monkeypatch
     def fail_ssh(*args, **kwargs):
         raise AssertionError("dry-run should not run remote benchmark")
 
+    def fail_scp(*args, **kwargs):
+        raise AssertionError("dry-run should not fetch remote artifacts")
+
     monkeypatch.setattr(run_rewrite_promotion_when_quiet.check_remote_host_quiet, "build_payload", fake_quiet_payload)
     monkeypatch.setattr(run_rewrite_promotion_when_quiet, "_run_ssh", fail_ssh)
+    monkeypatch.setattr(run_rewrite_promotion_when_quiet, "_run_scp", fail_scp)
 
     payload = run_rewrite_promotion_when_quiet.run(
         argparse.Namespace(
@@ -2474,6 +2492,7 @@ def test_rewrite_promotion_dry_run_builds_generator_override_command(monkeypatch
             allow_battery=False,
             quiet_timeout=5,
             run_timeout=7200,
+            fetch_timeout=120,
             dry_run=True,
             output=tmp_path / "summary.md",
             json_output=tmp_path / "summary.json",
@@ -2486,6 +2505,223 @@ def test_rewrite_promotion_dry_run_builds_generator_override_command(monkeypatch
     assert "--input-key 3s --input-key 7s" in row["command"]
     assert "--iterations 7" in row["command"]
     assert "--preflight-runs 4" in row["command"]
+
+
+def test_rewrite_promotion_fetches_remote_results_after_quiet_run(monkeypatch, tmp_path):
+    fetch_calls = []
+
+    def fake_quiet_payload(args):
+        return {
+            "checked_at_local": "2026-06-06T18:28:40-07:00",
+            "publishable_timing_allowed": True,
+            "rows": [
+                {
+                    "machine_id": "irvine-m1",
+                    "target": "mattmireles@irvine-m1.local",
+                    "ok": True,
+                    "quiet": True,
+                    "blockers": [],
+                }
+            ],
+        }
+
+    def fake_ssh(target, command, timeout_s):
+        assert target == "mattmireles@irvine-m1.local"
+        assert "--machine-id irvine-m1_rewrite_ups_as_conv" in command
+        return subprocess.CompletedProcess(args=["ssh"], returncode=0, stdout="ran", stderr="")
+
+    def fake_scp(target, remote_path, local_path, timeout_s, *, recursive=False):
+        fetch_calls.append((target, remote_path, local_path, timeout_s, recursive))
+        if recursive:
+            fetched_dir = local_path / remote_path.name
+            fetched_dir.mkdir(parents=True, exist_ok=True)
+            (fetched_dir / "3s.wav").write_bytes(b"RIFF")
+        else:
+            local_path.parent.mkdir(parents=True, exist_ok=True)
+            local_path.write_text('{"records": []}\n')
+        return subprocess.CompletedProcess(args=["scp"], returncode=0, stdout="copied", stderr="")
+
+    monkeypatch.setattr(run_rewrite_promotion_when_quiet.check_remote_host_quiet, "build_payload", fake_quiet_payload)
+    monkeypatch.setattr(run_rewrite_promotion_when_quiet, "_run_ssh", fake_ssh)
+    monkeypatch.setattr(run_rewrite_promotion_when_quiet, "_run_scp", fake_scp)
+    monkeypatch.chdir(tmp_path)
+
+    payload = run_rewrite_promotion_when_quiet.run(
+        argparse.Namespace(
+            host=["irvine-m1=mattmireles@irvine-m1.local"],
+            repo_path=Path("/Users/mm/Documents/GitHub/kokoro-coreml"),
+            generator_models_dir=Path("outputs/export_rewrite_smoke"),
+            input_key=["3s"],
+            iterations=5,
+            preflight_runs=3,
+            compute_units="staged",
+            max_load_1=1.5,
+            max_noisy_cpu_pct=5.0,
+            max_swap_used_mb=0.0,
+            min_memory_free_pct=10,
+            allow_battery=False,
+            quiet_timeout=5,
+            run_timeout=7200,
+            fetch_timeout=120,
+            dry_run=False,
+            output=tmp_path / "summary.md",
+            json_output=tmp_path / "summary.json",
+        )
+    )
+
+    row = payload["rows"][0]
+    expected_relative = Path("outputs/external_bakeoff/results_config_f_reference_irvine-m1_rewrite_ups_as_conv.json")
+    expected_spotcheck_dir = Path(
+        "outputs/external_bakeoff/spotcheck_wavs/config_f_reference_irvine-m1_rewrite_ups_as_conv"
+    )
+    assert row["status"] == "ok"
+    assert row["fetch_returncode"] == 0
+    assert row["local_result_path"] == str(expected_relative)
+    assert row["spotcheck_fetch_status"] == "ok"
+    assert row["local_spotcheck_dir"] == str(expected_spotcheck_dir)
+    assert payload["summary"]["ran_hosts"] == 1
+    assert payload["summary"]["fetch_failed_hosts"] == 0
+    assert payload["summary"]["spotcheck_fetch_failed_hosts"] == 0
+    assert fetch_calls == [
+        (
+            "mattmireles@irvine-m1.local",
+            Path("/Users/mm/Documents/GitHub/kokoro-coreml") / expected_relative,
+            expected_relative,
+            120,
+            False,
+        ),
+        (
+            "mattmireles@irvine-m1.local",
+            Path("/Users/mm/Documents/GitHub/kokoro-coreml") / expected_spotcheck_dir,
+            expected_spotcheck_dir.parent,
+            120,
+            True,
+        )
+    ]
+    assert expected_relative.exists()
+    assert (expected_spotcheck_dir / "3s.wav").exists()
+
+
+def test_rewrite_promotion_marks_fetch_failure_after_remote_success(monkeypatch, tmp_path):
+    def fake_quiet_payload(args):
+        return {
+            "checked_at_local": "2026-06-06T18:28:40-07:00",
+            "publishable_timing_allowed": True,
+            "rows": [
+                {
+                    "machine_id": "m2-air",
+                    "target": "mattmireles@m2-air.local",
+                    "ok": True,
+                    "quiet": True,
+                    "blockers": [],
+                }
+            ],
+        }
+
+    def fake_ssh(target, command, timeout_s):
+        return subprocess.CompletedProcess(args=["ssh"], returncode=0, stdout="ran", stderr="")
+
+    def fake_scp(target, remote_path, local_path, timeout_s, *, recursive=False):
+        return subprocess.CompletedProcess(args=["scp"], returncode=1, stdout="", stderr="missing result")
+
+    monkeypatch.setattr(run_rewrite_promotion_when_quiet.check_remote_host_quiet, "build_payload", fake_quiet_payload)
+    monkeypatch.setattr(run_rewrite_promotion_when_quiet, "_run_ssh", fake_ssh)
+    monkeypatch.setattr(run_rewrite_promotion_when_quiet, "_run_scp", fake_scp)
+    monkeypatch.chdir(tmp_path)
+
+    payload = run_rewrite_promotion_when_quiet.run(
+        argparse.Namespace(
+            host=["m2-air=mattmireles@m2-air.local"],
+            repo_path=Path("/Users/mm/Documents/GitHub/kokoro-coreml"),
+            generator_models_dir=Path("outputs/export_rewrite_smoke"),
+            input_key=["3s"],
+            iterations=5,
+            preflight_runs=3,
+            compute_units="staged",
+            max_load_1=1.5,
+            max_noisy_cpu_pct=5.0,
+            max_swap_used_mb=0.0,
+            min_memory_free_pct=10,
+            allow_battery=False,
+            quiet_timeout=5,
+            run_timeout=7200,
+            fetch_timeout=120,
+            dry_run=False,
+            output=tmp_path / "summary.md",
+            json_output=tmp_path / "summary.json",
+        )
+    )
+
+    row = payload["rows"][0]
+    assert row["status"] == "fetch_error"
+    assert row["returncode"] == 0
+    assert row["fetch_returncode"] == 1
+    assert "missing result" in row["fetch_stderr"]
+    assert payload["summary"]["ran_hosts"] == 0
+    assert payload["summary"]["fetch_failed_hosts"] == 1
+
+
+def test_rewrite_promotion_keeps_timing_when_spotcheck_fetch_fails(monkeypatch, tmp_path):
+    def fake_quiet_payload(args):
+        return {
+            "checked_at_local": "2026-06-06T18:28:40-07:00",
+            "publishable_timing_allowed": True,
+            "rows": [
+                {
+                    "machine_id": "m2-air",
+                    "target": "mattmireles@m2-air.local",
+                    "ok": True,
+                    "quiet": True,
+                    "blockers": [],
+                }
+            ],
+        }
+
+    def fake_ssh(target, command, timeout_s):
+        return subprocess.CompletedProcess(args=["ssh"], returncode=0, stdout="ran", stderr="")
+
+    def fake_scp(target, remote_path, local_path, timeout_s, *, recursive=False):
+        if recursive:
+            return subprocess.CompletedProcess(args=["scp"], returncode=1, stdout="", stderr="missing wavs")
+        local_path.parent.mkdir(parents=True, exist_ok=True)
+        local_path.write_text('{"records": []}\n')
+        return subprocess.CompletedProcess(args=["scp"], returncode=0, stdout="copied", stderr="")
+
+    monkeypatch.setattr(run_rewrite_promotion_when_quiet.check_remote_host_quiet, "build_payload", fake_quiet_payload)
+    monkeypatch.setattr(run_rewrite_promotion_when_quiet, "_run_ssh", fake_ssh)
+    monkeypatch.setattr(run_rewrite_promotion_when_quiet, "_run_scp", fake_scp)
+    monkeypatch.chdir(tmp_path)
+
+    payload = run_rewrite_promotion_when_quiet.run(
+        argparse.Namespace(
+            host=["m2-air=mattmireles@m2-air.local"],
+            repo_path=Path("/Users/mm/Documents/GitHub/kokoro-coreml"),
+            generator_models_dir=Path("outputs/export_rewrite_smoke"),
+            input_key=["3s"],
+            iterations=5,
+            preflight_runs=3,
+            compute_units="staged",
+            max_load_1=1.5,
+            max_noisy_cpu_pct=5.0,
+            max_swap_used_mb=0.0,
+            min_memory_free_pct=10,
+            allow_battery=False,
+            quiet_timeout=5,
+            run_timeout=7200,
+            fetch_timeout=120,
+            dry_run=False,
+            output=tmp_path / "summary.md",
+            json_output=tmp_path / "summary.json",
+        )
+    )
+
+    row = payload["rows"][0]
+    assert row["status"] == "ok"
+    assert row["fetch_returncode"] == 0
+    assert row["spotcheck_fetch_status"] == "error"
+    assert "missing wavs" in row["spotcheck_fetch_stderr"]
+    assert payload["summary"]["ran_hosts"] == 1
+    assert payload["summary"]["spotcheck_fetch_failed_hosts"] == 1
 
 
 def test_remote_host_quiet_parser_and_status(monkeypatch):
@@ -2675,12 +2911,84 @@ def test_source_contract_frontier_summarizes_body_counterfactuals():
             }
         },
     }
+    strict_budget = {
+        "candidate_label": "overlap + rewrite",
+        "rows": [
+            {
+                "bucket": "3s",
+                "additional_profile_save_required_ms": 27.0,
+                "additional_profile_generator_speedup_required_pct": 16.88,
+                "additional_paper_save_required_ms": 45.7,
+                "additional_paper_generator_speedup_required_pct": 28.57,
+            },
+            {
+                "bucket": "15s",
+                "additional_profile_save_required_ms": 0.0,
+                "additional_profile_generator_speedup_required_pct": 0.0,
+                "additional_paper_save_required_ms": 64.4,
+                "additional_paper_generator_speedup_required_pct": 8.06,
+            },
+        ],
+    }
+    xsource_feasibility = {
+        "tensor_dump": "outputs/generator_isolation/dumps/3s",
+        "decision": "promising_adapter",
+        "target_mode": "pre_noise_conv",
+        "model": "ridge",
+        "feature_set": "har_conv_geometry",
+        "radius": 8,
+        "holdout_stride": 5,
+        "rows": [
+            {
+                "name": "pre_noise_conv_0",
+                "feature_shape": [4800, 265],
+                "validation_metrics": {
+                    "snr_db": 96.64,
+                    "correlation": 1.0,
+                    "max_abs_error": 0.000142,
+                },
+            }
+        ],
+    }
+    pre_noise_folding_surface = {
+        "decision": "fold_for_memory_locality_not_frame_skipping",
+        "rows": [
+            {
+                "input_key": "3s",
+                "union_touched_har_frame_pct": 100.0,
+                "full_har_bytes_fp16": 1267244,
+                "total_pre_noise_bytes_fp16": 9830656,
+                "pre_noise_to_har_value_ratio": 7.7575,
+            }
+        ],
+    }
+    strict_folding_ceiling = {
+        "summary": {
+            "decision": "do_not_build_materialized_pre_noise_boundary",
+            "profile_rows_closed_by_stft_only": 0,
+            "paper_rows_closed_by_stft_only": 0,
+        },
+        "rows": [
+            {
+                "bucket": "3s",
+                "removable_swift_stft_ms": 0.5,
+                "strict_profile_save_needed_ms": 27.0,
+                "profile_gap_coverage_pct": 1.85,
+                "strict_paper_save_needed_ms": 45.7,
+                "paper_gap_coverage_pct": 1.09,
+            }
+        ],
+    }
 
     summary = summarize_source_contract_frontier(
         source_variants,
         irvine_targets,
         m2_report,
         irvine_report,
+        strict_budget,
+        xsource_feasibility,
+        pre_noise_folding_surface,
+        strict_folding_ceiling,
     )
     markdown = render_source_contract_frontier_markdown(summary)
 
@@ -2688,7 +2996,131 @@ def test_source_contract_frontier_summarizes_body_counterfactuals():
     assert summary["recomputed_stft_har_is_solved"] is False
     assert summary["quality_fail_warmed_profile_closers"] == 1
     assert summary["quality_fail_warmed_profile_buckets"] == ["7s"]
+    assert summary["post_overlap_rewrite_budget"]["profile_rows_remaining"] == 1
+    assert summary["post_overlap_rewrite_budget"]["paper_rows_remaining"] == 2
+    assert summary["implementation_queue"][0]["track"] == "strict"
+    assert summary["implementation_queue"][0]["experiment"] == "algebraically fold STFT/HAR into first noise convolutions"
+    assert summary["implementation_queue"][0]["target_buckets"] == ["3s"]
+    assert summary["implementation_queue"][0]["required_profile_save_ms"] == 27.0
+    assert summary["implementation_queue"][1]["experiment"] == (
+        "distill a different strict boundary, not compact direct x_source tensors"
+    )
+    assert summary["implementation_queue"][2]["track"] == "quality-changing"
+    assert summary["implementation_queue"][2]["target_buckets"] == ["7s"]
+    assert summary["implementation_queue"][3]["track"] == "stop"
+    assert summary["xsource_distillation_feasibility"]["decision"] == "promising_adapter"
+    assert summary["xsource_distillation_feasibility"]["target_mode"] == "pre_noise_conv"
+    assert summary["pre_noise_folding_surface"]["decision"] == "fold_for_memory_locality_not_frame_skipping"
+    assert summary["strict_folding_ceiling"]["profile_rows_closed_by_stft_only"] == 0
     assert summary["body_counterfactuals"][0]["body_only_saves_ms"] == 8.799999999999997
     assert summary["body_counterfactuals"][1]["full_split_delta_ms"] == -11.599999999999994
     assert "Source equation solved: `true`" in markdown
+    assert "| warmed profile | `3s` | 27.0 ms | 16.88% |" in markdown
+    assert "| paper frontier | `15s` | 64.4 ms | 8.06% |" in markdown
+    assert "algebraically fold STFT/HAR into first noise convolutions" in markdown
+    assert "compact direct x_source or pre-noise adapters" in markdown
+    assert "Source-Side Feasibility Smoke" in markdown
+    assert "| `pre_noise_conv_0` | 265 | 96.64 dB | 1.000000 | 0.000142 |" in markdown
+    assert "| `3s` | 1.21 MiB | 100.00% | 9.38 MiB | 7.76x |" in markdown
+    assert "Strict Folding Ceiling" in markdown
+    assert "| `3s` | 0.5 ms | 1.85% | 1.09% |" in markdown
     assert "`7s`." in markdown
+
+
+def test_pre_noise_folding_surface_renders_frame_coverage():
+    output_len = _conv_output_length(28801, kernel=12, stride=6, padding=3, dilation=1)
+    touched = _touched_frames(28801, output_len=output_len, kernel=12, stride=6, padding=3, dilation=1)
+    assert output_len == 4800
+    assert len(touched) == 28801
+
+    summary = {
+        "decision": "fold_for_memory_locality_not_frame_skipping",
+        "stft": {"filter_length": 20, "hop_length": 5, "har_channels": 22},
+        "rows": [
+            {
+                "input_key": "3s",
+                "har_shape": [1, 22, 28801],
+                "full_har_bytes_fp16": 1267244,
+                "union_touched_har_frames": 28801,
+                "union_touched_har_frame_pct": 100.0,
+                "total_pre_noise_bytes_fp16": 9830656,
+                "pre_noise_to_har_value_ratio": 7.7575,
+                "conv_rows": [
+                    {
+                        "index": 0,
+                        "touched_har_frames": 28801,
+                        "touched_har_frame_pct": 100.0,
+                        "geometry": {
+                            "weight_shape": [256, 22, 12],
+                            "stride": 6,
+                            "padding": 3,
+                            "nonzero_input_channels_l1_gt_1e_9": 22,
+                        },
+                    },
+                    {
+                        "index": 1,
+                        "touched_har_frames": 28801,
+                        "touched_har_frame_pct": 100.0,
+                        "geometry": {
+                            "weight_shape": [128, 22, 1],
+                            "stride": 1,
+                            "padding": 0,
+                            "nonzero_input_channels_l1_gt_1e_9": 22,
+                        },
+                    },
+                ],
+            }
+        ],
+    }
+    markdown = render_pre_noise_folding_surface_markdown(summary)
+    assert "fold_for_memory_locality_not_frame_skipping" in markdown
+    assert "| `3s` | `1x22x28801` | 1.21 MiB | 28801 (100.00%) | 9.38 MiB | 7.76x |" in markdown
+    assert "Because `noise_conv_1` is a 1x1 stride-1 convolution" in markdown
+
+
+def test_strict_folding_ceiling_rejects_stft_only_closure():
+    hnsf_boundary = {
+        "hnsf_timing": "outputs/external_bakeoff/hnsf_source_stft_timing_local.json",
+        "rows": [
+            {"bucket": "3s", "removable_swift_stft_ms": 0.5},
+            {"bucket": "7s", "removable_swift_stft_ms": 1.3},
+        ],
+    }
+    strict_budget = {
+        "candidate_label": "overlap + rewrite",
+        "rows": [
+            {
+                "bucket": "3s",
+                "additional_profile_save_required_ms": 27.0,
+                "additional_paper_save_required_ms": 45.7,
+            },
+            {
+                "bucket": "7s",
+                "additional_profile_save_required_ms": 28.0,
+                "additional_paper_save_required_ms": 77.6,
+            },
+        ],
+    }
+    folding_surface = {
+        "decision": "fold_for_memory_locality_not_frame_skipping",
+        "rows": [
+            {
+                "input_key": "3s",
+                "union_touched_har_frame_pct": 100.0,
+                "pre_noise_to_har_value_ratio": 7.76,
+            },
+            {
+                "input_key": "7s",
+                "union_touched_har_frame_pct": 100.0,
+                "pre_noise_to_har_value_ratio": 7.76,
+            },
+        ],
+    }
+    summary = build_strict_folding_ceiling(hnsf_boundary, strict_budget, folding_surface)
+    markdown = render_strict_folding_ceiling_markdown(summary)
+
+    assert summary["summary"]["profile_rows_closed_by_stft_only"] == 0
+    assert summary["summary"]["paper_rows_closed_by_stft_only"] == 0
+    assert round(summary["rows"][0]["profile_gap_coverage_pct"], 2) == 1.85
+    assert "do_not_build_materialized_pre_noise_boundary" in markdown
+    assert "| `3s` | 0.5 ms | 27.0 ms | 1.85% | 45.7 ms | 1.09% | 100.00% | 7.76x |" in markdown

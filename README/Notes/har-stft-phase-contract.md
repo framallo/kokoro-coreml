@@ -42,6 +42,8 @@ strict waveform-parity proof for this trained generator.
 | exact Swift Float Nyquist `atan2` repair | matches dumped-Nyquist oracle on padded geometry: SNR `50.06/49.14/49.87/49.21/48.42 dB` for `3s/7s/10s/15s/30s`; branch-only Swift basis fails at `25-27 dB` | same direct speed envelope as dumped-Nyquist padded path; no standalone net win after Swift STFT credit | keep as strict source-contract unlock, not current production replacement |
 | exact Swift Nyquist plus shorter padding | first strict points: `3s` HAR `28561` and `7s` HAR `66601`, saving only `0.83%` and `0.89%` of full padded HAR frames | too small to close lower-end Mac losses; 3s matches prior `har28561` trim neighborhood | reject as standalone tail-trim path |
 | embedded exact Swift Nyquist inside fused Core ML graph | first attempt failed because Core ML collapsed DC phase channel `11` to `0` where Swift/PyTorch require `real < 0 ? pi : 0`; explicit DC branch plus exact Swift Nyquist repairs Core ML HAR to `147.21 dB` vs PyTorch | corrected no-side-input fused package is strict but slower: 3s `27.53 ms` vs `26.98 ms` (`-2.05%`), 7s `58.36 ms` vs `56.40 ms` (`-3.47%`) | keep correctness fix; reject as current speed win |
+| embedded exact Swift Nyquist plus upsample rewrite, fp16 | local M2 Studio `3s` candidate-vs-dump SNR only `33.00 dB` | slightly faster than production rewrite: `28.07 ms` vs `28.27 ms` (`+0.73%`) | reject: speed-positive but not strict |
+| embedded exact Swift Nyquist plus upsample rewrite, fp32 | local M2 Studio `3s` candidate-vs-baseline SNR `49.87 dB`, candidate-vs-dump SNR `47.75 dB` | slower than production rewrite: `28.70 ms` vs `27.79 ms` (`-3.25%`) | reject: strict but slower |
 
 ## Net Source-Boundary Timing
 
@@ -95,6 +97,10 @@ Generated artifacts:
   Float real/imag dot products followed by `atan2`. This makes the MLProgram
   strict, but it is still slower than the current HAR-post generator on local
   3s/7s warmed CPU+GPU, so do not promote it as a speed win.
+- Combining the no-side-input phase repair with the HAR-post upsample rewrite
+  does not change that decision. The fp16 combined graph is fast but quality
+  failing; the fp32 combined graph is strict but slower than the production
+  rewrite.
 
 The first ingested external research report is summarized in
 [Kokoro M1 HAR/STFT contract repair guide](../Guides/apple-silicon/Kokoro-M1-HAR-STFT-contract-repair-guide.md).

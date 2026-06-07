@@ -143,7 +143,12 @@ python scripts/external_bakeoff/run_config_f_reference.py \
 ```
 
 For lower-end Macs, run the quiet-gated wrapper instead. It writes skip records
-for noisy hosts and only runs timing on `quiet=yes` hosts:
+for noisy hosts and only runs timing on `quiet=yes` hosts. When a remote timing
+run succeeds, the wrapper fetches the result JSON back into the local
+`outputs/external_bakeoff/` directory and fetches the matching spotcheck WAV
+directory under `outputs/external_bakeoff/spotcheck_wavs/`. A remote success
+with a missing result JSON is recorded as `fetch_error`, not publishable timing;
+a missing spotcheck directory is recorded separately for review follow-up.
 
 ```bash
 python scripts/external_bakeoff/run_rewrite_promotion_when_quiet.py

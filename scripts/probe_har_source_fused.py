@@ -247,7 +247,7 @@ def run(args: argparse.Namespace) -> dict[str, Any]:
     import coremltools as ct
     import torch
 
-    from export_synth.wrappers import GeneratorFromHar, remove_dropout
+    from export_synth.wrappers import GeneratorFromHar, remove_dropout, rewrite_generator_ups_conv_transpose
 
     manifest, tensors = load_tensor_dump(args.tensor_dump)
     required = ["x_pre_padded", "ref_s", "har_padded", "har_source", "waveform"]
@@ -265,6 +265,7 @@ def run(args: argparse.Namespace) -> dict[str, Any]:
 
     kmodel = _load_kmodel()
     gen = kmodel.decoder.generator
+    rewritten_ups = rewrite_generator_ups_conv_transpose(gen) if args.rewrite_ups_conv_transpose else 0
     x_pre = tensors["x_pre_padded"].astype(np.float32)
     ref_s = tensors["ref_s"].astype(np.float32)
     har_source = tensors["har_source"].astype(np.float32)
@@ -420,6 +421,8 @@ def run(args: argparse.Namespace) -> dict[str, Any]:
         "precision": args.precision,
         "phase_mode": args.phase_mode,
         "pad_har_to": args.pad_har_to,
+        "rewrite_ups_conv_transpose": bool(args.rewrite_ups_conv_transpose),
+        "rewritten_ups": int(rewritten_ups),
         "nyquist_input": bool(args.nyquist_input),
         "dual_output_tail": bool(args.dual_output_tail),
         "compute_units": args.compute_units,
@@ -494,6 +497,11 @@ def main() -> None:
     )
     parser.add_argument("--warmup", type=int, default=2)
     parser.add_argument("--iterations", type=int, default=10)
+    parser.add_argument(
+        "--rewrite-ups-conv-transpose",
+        action="store_true",
+        help="Rewrite generator ConvTranspose upsamplers as zero-insert Conv1d before export.",
+    )
     parser.add_argument("--skip-export", action="store_true")
     args = parser.parse_args()
     print(json.dumps(run(args), indent=2, sort_keys=True))
