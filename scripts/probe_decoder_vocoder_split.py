@@ -194,7 +194,7 @@ def _export_packages(
     import coremltools as ct
     import torch
 
-    from export_synth.wrappers import remove_dropout
+    from export_synth.wrappers import remove_dropout, rewrite_generator_ups_conv_transpose
 
     if args.cos_snake:
         _patch_cos_snake()
@@ -208,6 +208,9 @@ def _export_packages(
     kmodel = _load_kmodel()
     decoder = kmodel.decoder
     gen = decoder.generator
+    rewritten_ups = 0
+    if args.rewrite_ups_conv_transpose:
+        rewritten_ups = rewrite_generator_ups_conv_transpose(gen)
 
     ref_s_shape = tuple(int(v) for v in tensors["ref_s"].shape)
     style_shape = (ref_s_shape[0], 128)
@@ -312,6 +315,8 @@ def _export_packages(
         "broadcast_adain": bool(args.broadcast_adain),
         "native_instance_norm_adain": bool(args.native_instance_norm_adain),
         "deployment_target": args.deployment_target,
+        "rewrite_ups_conv_transpose": bool(args.rewrite_ups_conv_transpose),
+        "rewritten_upsample_layers": int(rewritten_ups),
         "palettize_noise": bool(args.palettize_noise),
         "palettize_body": bool(args.palettize_body),
         "noise_precision": args.noise_precision,
@@ -522,6 +527,8 @@ def run(args: argparse.Namespace) -> dict[str, Any]:
         label = f"{label}_native_in"
     if args.broadcast_adain:
         label = f"{label}_broadcast"
+    if args.rewrite_ups_conv_transpose:
+        label = f"{label}_ups_as_conv"
     if args.deployment_target.lower() != "macos13":
         label = f"{label}_{args.deployment_target.lower()}"
     if args.palettize_noise:
@@ -600,6 +607,11 @@ def main() -> None:
     parser.add_argument("--patch-resblock-scale", action="store_true")
     parser.add_argument("--broadcast-adain", action="store_true")
     parser.add_argument("--native-instance-norm-adain", action="store_true")
+    parser.add_argument(
+        "--rewrite-ups-conv-transpose",
+        action="store_true",
+        help="Rewrite main generator ConvTranspose1d upsamples as zero insertion plus Conv1d before export.",
+    )
     parser.add_argument(
         "--deployment-target",
         default="macos13",

@@ -1,7 +1,9 @@
 {
-  "decision": "On Irvine M1, source/body plus the HAR-post rewrite is enough for the 10s paper row if listening accepts the source candidate. The 15s row is close, while 3s and 7s still need larger implementation wins than the current saved probes provide.",
-  "paper_rows_closed_by_source_plus_rewrite": 1,
-  "paper_rows_remaining_after_source_plus_rewrite": 3,
+  "decision": "The independent source/body plus production-rewrite projection is optimistic and must not be treated as a direct combined measurement. Direct local source/body+upsample-rewrite probes on all accepted buckets are speed-positive, but much smaller than the production-rewrite projection; Irvine paper rows still require another implementation win.",
+  "paper_rows_closed_by_direct_source_rewrite": 0,
+  "paper_rows_closed_by_independent_projection": 1,
+  "paper_rows_remaining_after_independent_projection": 3,
+  "paper_rows_with_direct_source_rewrite_measurement": 4,
   "rows": [
     {
       "additional_save_required_ms": 0.0,
@@ -10,13 +12,27 @@
       "combined_paper_margin_ms": 2.642555731342327,
       "combined_projected_ms": 591.2494442686576,
       "corr": 0.867048600284446,
-      "human_decision": "",
+      "direct_source_rewrite": {
+        "local_direct_rewrite_save_ms": 4.4973750482313335,
+        "original_candidate_ms": 76.366167049855,
+        "original_label": "10s_natural_asr_cos_resblock_natural_asr_cos_rsqrt",
+        "original_report": "outputs/f0_noise_exact_shape/10s_natural_asr_cos_resblock_natural_asr_cos_rsqrt/report_cos_resblock.json",
+        "rewritten_candidate_ms": 71.86879200162366,
+        "rewritten_label": "10s_natural_asr_cos_resblock_natural_asr_cos_rsqrt_ups_as_conv_natural_asr_cos_rsqrt",
+        "rewritten_report": "outputs/f0_noise_exact_shape/10s_natural_asr_cos_resblock_natural_asr_cos_rsqrt_ups_as_conv_natural_asr_cos_rsqrt/report_cos_resblock_ups_as_conv_local.json",
+        "rewritten_upsample_layers": 2
+      },
+      "direct_source_rewrite_additional_save_required_ms": 10.267291785489874,
+      "direct_source_rewrite_paper_margin_ms": -10.267291785489874,
+      "direct_source_rewrite_projected_ms": 604.1592917854898,
+      "human_decision": "pass",
       "paper_competitor": "laishere",
       "paper_competitor_ms": 593.8919999999999,
       "rewrite_save_ms": 17.407222565063577,
       "snr_db": 6.550946325122554,
       "source_paper_margin_ms": -14.764666833721208,
       "source_projected_ms": 608.6566668337211,
+      "would_beat_paper_with_direct_source_rewrite": false,
       "would_beat_paper_with_rewrite": true
     },
     {
@@ -26,13 +42,27 @@
       "combined_paper_margin_ms": -2.69246412284474,
       "combined_projected_ms": 914.6934641228447,
       "corr": 0.9567959243306372,
-      "human_decision": "",
+      "direct_source_rewrite": {
+        "local_direct_rewrite_save_ms": 3.5729581359191798,
+        "original_candidate_ms": 109.19787513557822,
+        "original_label": "15s_padded_cos_resblock_cos_rsqrt",
+        "original_report": "outputs/f0_noise_exact_shape/15s_padded_cos_resblock_cos_rsqrt/report_cos_resblock.json",
+        "rewritten_candidate_ms": 105.62491699965904,
+        "rewritten_label": "15s_padded_cos_resblock_cos_rsqrt_ups_as_conv_cos_rsqrt",
+        "rewritten_report": "outputs/f0_noise_exact_shape/15s_padded_cos_resblock_cos_rsqrt_ups_as_conv_cos_rsqrt/report_cos_resblock_ups_as_conv_local.json",
+        "rewritten_upsample_layers": 2
+      },
+      "direct_source_rewrite_additional_save_required_ms": 20.490332511256042,
+      "direct_source_rewrite_paper_margin_ms": -20.490332511256042,
+      "direct_source_rewrite_projected_ms": 932.491332511256,
+      "human_decision": "pass",
       "paper_competitor": "laishere",
       "paper_competitor_ms": 912.001,
       "rewrite_save_ms": 21.370826524330496,
       "snr_db": 10.996428812223789,
       "source_paper_margin_ms": -24.063290647175222,
       "source_projected_ms": 936.0642906471752,
+      "would_beat_paper_with_direct_source_rewrite": false,
       "would_beat_paper_with_rewrite": false
     },
     {
@@ -42,13 +72,27 @@
       "combined_paper_margin_ms": -31.35266609873588,
       "combined_projected_ms": 207.68266609873587,
       "corr": 0.813995146096268,
-      "human_decision": "",
+      "direct_source_rewrite": {
+        "local_direct_rewrite_save_ms": 3.3498125267215073,
+        "original_candidate_ms": 32.707687525544316,
+        "original_label": "3s_natural_asr_cos_rsqrt",
+        "original_report": "outputs/f0_noise_exact_shape/3s_natural_asr_cos_rsqrt/report_f0_noise_exact_3s_local.json",
+        "rewritten_candidate_ms": 29.35787499882281,
+        "rewritten_label": "3s_natural_asr_cos_rsqrt_ups_as_conv_natural_asr_cos_rsqrt",
+        "rewritten_report": "outputs/f0_noise_exact_shape/3s_natural_asr_cos_rsqrt_ups_as_conv_natural_asr_cos_rsqrt/report_cos_resblock_ups_as_conv_local.json",
+        "rewritten_upsample_layers": 2
+      },
+      "direct_source_rewrite_additional_save_required_ms": 35.15620853917676,
+      "direct_source_rewrite_paper_margin_ms": -35.15620853917676,
+      "direct_source_rewrite_projected_ms": 211.48620853917674,
+      "human_decision": "pass",
       "paper_competitor": "laishere",
       "paper_competitor_ms": 176.32999999999998,
       "rewrite_save_ms": 7.153354967162399,
       "snr_db": 5.082877006874869,
       "source_paper_margin_ms": -38.50602106589827,
       "source_projected_ms": 214.83602106589825,
+      "would_beat_paper_with_direct_source_rewrite": false,
       "would_beat_paper_with_rewrite": false
     },
     {
@@ -58,13 +102,27 @@
       "combined_paper_margin_ms": -37.43527628375472,
       "combined_projected_ms": 432.0012762837547,
       "corr": 0.7967849413320789,
-      "human_decision": "",
+      "direct_source_rewrite": {
+        "local_direct_rewrite_save_ms": 1.7181875082314946,
+        "original_candidate_ms": 56.516604498028755,
+        "original_label": "7s_natural_asr_cos_rsqrt",
+        "original_report": "outputs/f0_noise_exact_shape/7s_natural_asr_cos_rsqrt/report_f0_noise_exact_7s_local.json",
+        "rewritten_candidate_ms": 54.79841698979726,
+        "rewritten_label": "7s_natural_asr_cos_rsqrt_ups_as_conv_natural_asr_cos_rsqrt",
+        "rewritten_report": "outputs/f0_noise_exact_shape/7s_natural_asr_cos_rsqrt_ups_as_conv_natural_asr_cos_rsqrt/report_cos_resblock_ups_as_conv_local.json",
+        "rewritten_upsample_layers": 2
+      },
+      "direct_source_rewrite_additional_save_required_ms": 47.78610482075953,
+      "direct_source_rewrite_paper_margin_ms": -47.78610482075953,
+      "direct_source_rewrite_projected_ms": 442.3521048207595,
+      "human_decision": "pass",
       "paper_competitor": "laishere",
       "paper_competitor_ms": 394.566,
       "rewrite_save_ms": 12.069016045236308,
       "snr_db": 4.7652619820453985,
       "source_paper_margin_ms": -49.50429232899103,
       "source_projected_ms": 444.070292328991,
+      "would_beat_paper_with_direct_source_rewrite": false,
       "would_beat_paper_with_rewrite": false
     }
   ]

@@ -36,6 +36,7 @@ DEFAULT_XSOURCE_FEASIBILITY = Path(
 )
 DEFAULT_PRE_NOISE_FOLDING_SURFACE = Path("outputs/external_bakeoff/pre_noise_folding_surface.json")
 DEFAULT_STRICT_FOLDING_CEILING = Path("outputs/external_bakeoff/strict_folding_ceiling.json")
+DEFAULT_IRVINE_LISTENING_TARGETS = Path("outputs/external_bakeoff/irvine_listening_targets.json")
 DEFAULT_OUTPUT = Path("outputs/external_bakeoff/source_contract_frontier.md")
 DEFAULT_JSON_OUTPUT = Path("outputs/external_bakeoff/source_contract_frontier.json")
 
@@ -89,12 +90,22 @@ def _build_implementation_queue(
     profile_budget_rows: list[dict[str, Any]],
     paper_budget_rows: list[dict[str, Any]],
     quality_profile_closers: list[dict[str, Any]],
+    quality_listening: dict[str, Any] | None = None,
 ) -> list[dict[str, Any]]:
     """Return the next source-contract experiments in priority order."""
 
     profile_buckets = [str(row.get("bucket")) for row in profile_budget_rows]
     paper_buckets = [str(row.get("bucket")) for row in paper_budget_rows]
-    listening_buckets = [str(row.get("input_key")) for row in quality_profile_closers]
+    accepted_buckets = set()
+    pending_buckets = set()
+    if quality_listening is not None:
+        accepted_buckets = set(quality_listening.get("accepted_buckets") or [])
+        pending_buckets = set(quality_listening.get("pending_buckets") or [])
+    listening_buckets = [
+        str(row.get("input_key"))
+        for row in quality_profile_closers
+        if str(row.get("input_key")) not in accepted_buckets
+    ]
     max_profile_save = max(
         (float(row.get("additional_profile_save_required_ms") or 0.0) for row in profile_budget_rows),
         default=0.0,
@@ -151,7 +162,9 @@ def _build_implementation_queue(
             "required_profile_save_ms": 0.0,
             "required_paper_save_ms": 0.0,
             "promotion_gate": (
-                "filled no-ASR listening decisions plus waveform-health review; keep separate from "
+                "filled no-ASR listening decisions plus waveform-health review; pending buckets: "
+                + (", ".join(sorted(pending_buckets)) if pending_buckets else "none")
+                + "; keep separate from "
                 "strict paper claims unless the methodology explicitly accepts listening-equivalent quality"
             ),
         },
@@ -160,13 +173,15 @@ def _build_implementation_queue(
             "track": "stop",
             "experiment": (
                 "do not repeat exact HAR-post splits, sine-source variants, compact direct x_source "
-                "or pre-noise adapters, or no-side-input phase+rewrite packages"
+                "or pre-noise adapters, direct source/body upsample-rewrite-only packages, "
+                "or no-side-input phase+rewrite packages"
             ),
             "why": (
                 "Exact split source/noise production is slower end-to-end, and Swift-like source "
                 "generation already matches dumped har_source; compact direct x_source adapters fail "
                 "on x_source_0; cheap pre-noise adapters fail before the first strided noise conv; "
-                "no-side-input phase+rewrite is either fp16 quality-failing or fp32 slower. The "
+                "direct source/body upsample rewrite saves only a few local milliseconds and closes "
+                "zero Irvine paper rows; no-side-input phase+rewrite is either fp16 quality-failing or fp32 slower. The "
                 "remaining issue is HAR/STFT representation or boundary choice."
             ),
             "target_buckets": [],
@@ -186,6 +201,7 @@ def summarize_source_contract_frontier(
     xsource_feasibility: dict[str, Any] | None = None,
     pre_noise_folding_surface: dict[str, Any] | None = None,
     strict_folding_ceiling: dict[str, Any] | None = None,
+    irvine_listening_targets: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     """Return the source-contract frontier summary."""
 
@@ -209,6 +225,7 @@ def summarize_source_contract_frontier(
     paper_budget_rows = [
         row for row in budget_rows if float(row.get("additional_paper_save_required_ms") or 0.0) > 0.0
     ]
+    quality_listening = _summarize_quality_listening(irvine_listening_targets)
     return {
         "source_equation_is_solved": bool(source_variants.get("source_equation_is_solved")),
         "recomputed_stft_har_is_solved": bool(source_variants.get("recomputed_stft_har_is_solved")),
@@ -249,7 +266,9 @@ def summarize_source_contract_frontier(
             profile_budget_rows,
             paper_budget_rows,
             quality_profile_closers,
+            quality_listening,
         ),
+        "quality_listening_status": quality_listening,
         "xsource_distillation_feasibility": _summarize_xsource_feasibility(xsource_feasibility),
         "pre_noise_folding_surface": _summarize_pre_noise_folding_surface(pre_noise_folding_surface),
         "strict_folding_ceiling": _summarize_strict_folding_ceiling(strict_folding_ceiling),
@@ -260,10 +279,53 @@ def summarize_source_contract_frontier(
         "decision": (
             "The Swift-like source equation is solved, but recomputed HAR/STFT is not. "
             "The body package is fast if x_source tensors are free, and quality-fail "
-            "F0/source branches would close several warmed Irvine profile rows. The "
-            "next useful work is a cheaper strict source/HAR contract or listening-"
-            "accepted source replacement, not another exact HAR-post split."
+            "F0/source branches would close several warmed Irvine profile rows only "
+            "after no-ASR listening acceptance. The next useful work is a cheaper "
+            "strict source/HAR contract or listening-accepted source replacement, "
+            "not another exact HAR-post split."
         ),
+    }
+
+
+def _summarize_quality_listening(report: dict[str, Any] | None) -> dict[str, Any] | None:
+    """Summarize no-ASR human decision status for quality-changing speed branches."""
+
+    if report is None:
+        return None
+    rows = report.get("rows") or []
+    decision_counts: dict[str, int] = {}
+    gate_counts: dict[str, int] = {}
+    accepted_buckets: list[str] = []
+    pending_buckets: list[str] = []
+    failing_buckets: list[str] = []
+    accepted_decisions = {"pass", "caveat"}
+    for row in rows:
+        bucket = str(row.get("bucket") or "")
+        decision = str(row.get("human_decision") or "").strip().lower()
+        gate = str(row.get("waveform_gate_decision") or "").strip().lower()
+        decision_counts[decision] = decision_counts.get(decision, 0) + 1
+        gate_counts[gate] = gate_counts.get(gate, 0) + 1
+        if decision in accepted_decisions:
+            accepted_buckets.append(bucket)
+        elif decision == "fail":
+            failing_buckets.append(bucket)
+        else:
+            pending_buckets.append(bucket)
+    return {
+        "rows": len(rows),
+        "mapped_count": int(report.get("mapped_count") or 0),
+        "exact_timing_report_listening_artifact_count": int(
+            report.get("exact_timing_report_listening_artifact_count") or 0
+        ),
+        "decision_counts": dict(sorted(decision_counts.items())),
+        "gate_counts": dict(sorted(gate_counts.items())),
+        "accepted_count": len(accepted_buckets),
+        "pending_count": len(pending_buckets),
+        "failed_count": len(failing_buckets),
+        "accepted_buckets": accepted_buckets,
+        "pending_buckets": pending_buckets,
+        "failed_buckets": failing_buckets,
+        "asr_used": False,
     }
 
 
@@ -425,6 +487,30 @@ def render_markdown(summary: dict[str, Any]) -> str:
             )
             + " |"
         )
+    quality_listening = summary.get("quality_listening_status")
+    if quality_listening is not None:
+        accepted = ", ".join(f"`{bucket}`" for bucket in quality_listening["accepted_buckets"]) or "none"
+        pending = ", ".join(f"`{bucket}`" for bucket in quality_listening["pending_buckets"]) or "none"
+        failed = ", ".join(f"`{bucket}`" for bucket in quality_listening["failed_buckets"]) or "none"
+        lines.extend(
+            [
+                "",
+                "## Quality-Branch Listening Status",
+                "",
+                "- No ASR/Whisper gate is used for this branch.",
+                f"- Listening rows: `{quality_listening['rows']}`.",
+                f"- Rows with listening artifacts: `{quality_listening['mapped_count']}`.",
+                f"- Accepted human decisions: `{quality_listening['accepted_count']}`.",
+                f"- Pending human decisions: `{quality_listening['pending_count']}`.",
+                f"- Failed human decisions: `{quality_listening['failed_count']}`.",
+                "",
+                "| Status | Buckets |",
+                "| --- | --- |",
+                f"| accepted | {accepted} |",
+                f"| pending | {pending} |",
+                f"| failed | {failed} |",
+            ]
+        )
     feasibility = summary.get("xsource_distillation_feasibility")
     if feasibility is not None:
         lines.extend(
@@ -574,6 +660,7 @@ def main() -> int:
     parser.add_argument("--xsource-feasibility-json", type=Path, default=DEFAULT_XSOURCE_FEASIBILITY)
     parser.add_argument("--pre-noise-folding-surface-json", type=Path, default=DEFAULT_PRE_NOISE_FOLDING_SURFACE)
     parser.add_argument("--strict-folding-ceiling-json", type=Path, default=DEFAULT_STRICT_FOLDING_CEILING)
+    parser.add_argument("--irvine-listening-targets-json", type=Path, default=DEFAULT_IRVINE_LISTENING_TARGETS)
     parser.add_argument("--output", type=Path, default=DEFAULT_OUTPUT)
     parser.add_argument("--json-output", type=Path, default=DEFAULT_JSON_OUTPUT)
     args = parser.parse_args()
@@ -587,6 +674,7 @@ def main() -> int:
         _load_optional_json(args.xsource_feasibility_json),
         _load_optional_json(args.pre_noise_folding_surface_json),
         _load_optional_json(args.strict_folding_ceiling_json),
+        _load_optional_json(args.irvine_listening_targets_json),
     )
     args.output.parent.mkdir(parents=True, exist_ok=True)
     args.output.write_text(render_markdown(summary))

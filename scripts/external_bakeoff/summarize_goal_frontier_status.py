@@ -115,12 +115,16 @@ def summarize_status(
     if irvine_load_note:
         blockers.append(irvine_load_note)
 
-    next_actions = [
-        "Collect no-ASR human decisions for Irvine F0/source speed candidates.",
-        "Retry iPhone Config F runner only after the physical device is unlocked.",
-        "Run publishable Irvine timings only after mediaanalysisd/Spotlight load is idle.",
-        "Create a new strict single-package or source/body formulation; existing strict probes do not close losses.",
-    ]
+    next_actions = []
+    if blank_decisions:
+        next_actions.append("Collect no-ASR human decisions for Irvine F0/source speed candidates.")
+    next_actions.extend(
+        [
+            "Retry iPhone Config F runner only after the physical device is unlocked.",
+            "Run publishable Irvine timings only after mediaanalysisd/Spotlight load is idle.",
+            "Create a new strict single-package or source/body formulation; existing strict probes do not close losses.",
+        ]
+    )
 
     return {
         "absolute_fastest_verified": bool(frontier_summary.get("absolute_fastest_verified")),

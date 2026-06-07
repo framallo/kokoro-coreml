@@ -213,6 +213,11 @@ def build_summary(
         for row in all_rows
         if row["would_win_profile_if_accepted"] and row.get("human_decision") not in {"pass", "caveat"}
     ]
+    accepted_profile_wins = [
+        row
+        for row in all_rows
+        if row["would_win_profile_if_accepted"] and row.get("human_decision") in {"pass", "caveat"}
+    ]
     paper_blocked_rows = [row for row in all_rows if not row["would_win_paper_if_accepted"]]
     return {
         "scope": ["m2-air", "irvine-m1"],
@@ -222,16 +227,19 @@ def build_summary(
         "pending_paper_listening_win_count": len(pending_paper_wins),
         "accepted_paper_win_count": len(accepted_paper_wins),
         "pending_profile_listening_win_count": len(pending_profile_wins),
+        "accepted_profile_win_count": len(accepted_profile_wins),
         "paper_blocked_row_count": len(paper_blocked_rows),
         "m2_air_rows": m2_rows,
         "irvine_rows": irvine_rows,
         "pending_paper_listening_wins": pending_paper_wins,
         "pending_profile_listening_wins": pending_profile_wins,
+        "accepted_profile_wins": accepted_profile_wins,
         "paper_blocked_rows": paper_blocked_rows,
         "decision": (
             "M2 Air 3s has paper-frontier wins gated only by human listening. "
             "Irvine source/body candidates can beat several newer warmed profile "
-            "rows, but none beats the stricter paper-facing frontier yet. Irvine "
+            "rows after no-ASR listening acceptance, but none beats the stricter "
+            "paper-facing frontier yet. Irvine "
             "still needs a combined implementation win, not just listening acceptance."
         ),
     }
@@ -282,6 +290,21 @@ def _render_rows(rows: list[dict[str, Any]]) -> list[str]:
 
 
 def render_markdown(summary: dict[str, Any]) -> str:
+    immediate_work = []
+    if summary["pending_paper_listening_win_count"]:
+        immediate_work.append("- Get no-ASR human listening decisions for paper-frontier listening wins.")
+    if summary["pending_profile_listening_win_count"]:
+        immediate_work.append("- Get no-ASR human listening decisions for remaining profile-only listening wins.")
+    if summary["accepted_profile_win_count"]:
+        immediate_work.append(
+            "- Treat accepted Irvine profile-only source/body wins as quality-approved speed signals, not paper-frontier wins."
+        )
+    immediate_work.extend(
+        [
+            "- Keep Irvine `3s`, `7s`, `10s`, and `15s` as implementation targets for the stricter paper-facing frontier.",
+            "- After acceptance, rerun warmed publishable lower-end rows on quiet hosts and refresh `competitive_frontier`.",
+        ]
+    )
     lines = [
         "# Lower-End Mac Win Gate",
         "",
@@ -292,6 +315,7 @@ def render_markdown(summary: dict[str, Any]) -> str:
         f"Pending paper-frontier listening wins: `{summary['pending_paper_listening_win_count']}`.",
         f"Accepted paper-frontier wins: `{summary['accepted_paper_win_count']}`.",
         f"Pending profile-only listening wins: `{summary['pending_profile_listening_win_count']}`.",
+        f"Accepted profile-only wins: `{summary['accepted_profile_win_count']}`.",
         f"Paper-frontier blocked rows: `{summary['paper_blocked_row_count']}`.",
         "",
         "## Candidate Gates",
@@ -307,12 +331,9 @@ def render_markdown(summary: dict[str, Any]) -> str:
             "",
             "## Immediate Work",
             "",
-            "- Get no-ASR human listening decisions for the M2 Air `3s` candidates.",
-            "- Get no-ASR human listening decisions for Irvine `7s`, `10s`, and `15s` source/body candidates, but treat them as profile-only until the paper frontier is beaten.",
-            "- Keep Irvine `3s`, `7s`, `10s`, and `15s` as implementation targets for the stricter paper-facing frontier.",
-            "- After acceptance, rerun warmed publishable lower-end rows on quiet hosts and refresh `competitive_frontier`.",
         ]
     )
+    lines.extend(immediate_work)
     return "\n".join(lines) + "\n"
 
 

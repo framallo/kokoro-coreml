@@ -424,7 +424,7 @@ def _export_packages(
     import coremltools as ct
     import torch
 
-    from export_synth.wrappers import remove_dropout
+    from export_synth.wrappers import remove_dropout, rewrite_generator_ups_conv_transpose
 
     if args.cos_snake:
         _patch_cos_snake()
@@ -437,6 +437,9 @@ def _export_packages(
     kmodel = _load_kmodel()
     decoder = kmodel.decoder
     gen = decoder.generator
+    rewritten_ups = 0
+    if args.rewrite_ups_conv_transpose:
+        rewritten_ups = rewrite_generator_ups_conv_transpose(gen)
 
     inputs = _select_inputs(tensors, args.natural_asr)
     asr_shape = tuple(int(v) for v in inputs["asr"].shape)
@@ -555,6 +558,8 @@ def _export_packages(
         "palettize_noise": bool(args.palettize_noise),
         "palettize_body": bool(args.palettize_body),
         "native_instance_norm": bool(args.native_instance_norm),
+        "rewrite_ups_conv_transpose": bool(args.rewrite_ups_conv_transpose),
+        "rewritten_upsample_layers": int(rewritten_ups),
         "noise_precision": args.noise_precision,
         "body_precision": args.body_precision,
         "body_input_dtype": args.body_input_dtype,
@@ -863,6 +868,7 @@ def main() -> None:
     parser.add_argument("--deployment-target", default="macos13", choices=("macos13", "ios16", "ios17"))
     parser.add_argument("--phase-mode", default="atan2", choices=("atan2", "acos", "atan_manual", "atan_swift"))
     parser.add_argument("--source-mode", default="current", choices=("current", "swift_like"))
+    parser.add_argument("--rewrite-ups-conv-transpose", action="store_true")
     parser.add_argument("--seed", type=int, default=None)
     parser.add_argument("--decoder-pre-compute-units", default="cpuAndNeuralEngine")
     parser.add_argument("--fused-compute-units", default="cpuAndGPU")

@@ -19,26 +19,24 @@ Quality-fail warmed-profile closers: `3`.
 ## No-ASR Listening
 
 Targets: `4`; mapped artifacts: `4`; exact timing artifacts: `4`.
-Decision counts: `{"blank": 4}`.
+Decision counts: `{"pass": 4}`.
 
 ## iPhone
 
 Install OK: `true`.
 Launch OK: `false`.
 Launch blocker: `device_locked`.
-Latest run check: `2026-06-06T07:23:09-07:00`.
+Latest run check: `2026-06-06T07:32:23-07:00`.
 Bundle: `com.kokoro.externalbakeoff.ConfigFIOSRunnerManual`.
 
 ## Blockers
 
 - absolute_fastest_verified is false
 - no saved strict-pass candidate closes a real Irvine loss
-- 4 Irvine no-ASR listening decisions are blank
 - iPhone Config F launch blocker: device_locked
 
 ## Next Actions
 
-- Collect no-ASR human decisions for Irvine F0/source speed candidates.
 - Retry iPhone Config F runner only after the physical device is unlocked.
 - Run publishable Irvine timings only after mediaanalysisd/Spotlight load is idle.
 - Create a new strict single-package or source/body formulation; existing strict probes do not close losses.

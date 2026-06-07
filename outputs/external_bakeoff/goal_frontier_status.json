@@ -3,7 +3,6 @@
   "blockers": [
     "absolute_fastest_verified is false",
     "no saved strict-pass candidate closes a real Irvine loss",
-    "4 Irvine no-ASR listening decisions are blank",
     "iPhone Config F launch blocker: device_locked"
   ],
   "config_f_loss_cells": 8,
@@ -18,20 +17,19 @@
       "udid": "00008101-001134561A0A001E"
     },
     "install_ok": true,
-    "latest_run_checked_at_local": "2026-06-06T07:23:09-07:00",
+    "latest_run_checked_at_local": "2026-06-06T07:32:23-07:00",
     "launch_blocker": "device_locked",
     "launch_ok": false
   },
   "listening_targets": {
     "decision_counts": {
-      "blank": 4
+      "pass": 4
     },
     "exact_timing_report_artifacts": 4,
     "mapped": 4,
     "rows": 4
   },
   "next_actions": [
-    "Collect no-ASR human decisions for Irvine F0/source speed candidates.",
     "Retry iPhone Config F runner only after the physical device is unlocked.",
     "Run publishable Irvine timings only after mediaanalysisd/Spotlight load is idle.",
     "Create a new strict single-package or source/body formulation; existing strict probes do not close losses."

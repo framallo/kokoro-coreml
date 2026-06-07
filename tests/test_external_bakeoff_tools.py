@@ -1601,6 +1601,7 @@ def test_lower_end_mac_win_gate_tracks_pending_warmed_listening_wins(tmp_path):
 
     assert summary["pending_paper_listening_win_count"] == 1
     assert summary["pending_profile_listening_win_count"] == 2
+    assert summary["accepted_profile_win_count"] == 0
     assert summary["paper_blocked_row_count"] == 2
     assert summary["m2_air_rows"][0]["projected_full_ms"] == 136.0
     assert summary["m2_air_rows"][0]["would_win_paper_if_accepted"] is True
@@ -1612,10 +1613,32 @@ def test_lower_end_mac_win_gate_tracks_pending_warmed_listening_wins(tmp_path):
     assert "Warmed inference only" in markdown
     assert "Pending paper-frontier listening wins: `1`." in markdown
     assert "Pending profile-only listening wins: `2`." in markdown
+    assert "Accepted profile-only wins: `0`." in markdown
     assert "`7s`" in markdown
 
 
-def test_irvine_paper_frontier_path_combines_source_and_rewrite():
+def test_irvine_paper_frontier_path_combines_source_and_rewrite(tmp_path):
+    original = tmp_path / "original_15s.json"
+    rewritten = tmp_path / "rewritten_15s.json"
+    original.write_text(
+        json.dumps(
+            {
+                "tensor_dump": "outputs/generator_isolation/dumps/15s",
+                "report": "outputs/f0_noise_exact_shape/15s_fast/report.json",
+                "benchmark": {"warm_predict_median_ms": {"candidate_total": 109.0}},
+            }
+        )
+    )
+    rewritten.write_text(
+        json.dumps(
+            {
+                "tensor_dump": "outputs/generator_isolation/dumps/15s",
+                "report": "outputs/f0_noise_exact_shape/15s_fast_ups/report.json",
+                "export": {"rewritten_upsample_layers": 2},
+                "benchmark": {"warm_predict_median_ms": {"candidate_total": 105.0}},
+            }
+        )
+    )
     lower_end_gate = {
         "irvine_rows": [
             {
@@ -1625,6 +1648,7 @@ def test_irvine_paper_frontier_path_combines_source_and_rewrite():
                 "paper_competitor_ms": 176.0,
                 "projected_full_ms": 215.0,
                 "paper_margin_ms": -39.0,
+                "human_decision": "pass",
                 "corr": 0.81,
                 "snr_db": 5.0,
             },
@@ -1635,8 +1659,20 @@ def test_irvine_paper_frontier_path_combines_source_and_rewrite():
                 "paper_competitor_ms": 594.0,
                 "projected_full_ms": 609.0,
                 "paper_margin_ms": -15.0,
+                "human_decision": "pass",
                 "corr": 0.87,
                 "snr_db": 6.5,
+            },
+            {
+                "input_key": "15s",
+                "candidate": "15s_fast",
+                "paper_competitor": "laishere",
+                "paper_competitor_ms": 912.0,
+                "projected_full_ms": 936.0,
+                "paper_margin_ms": -24.0,
+                "human_decision": "pass",
+                "corr": 0.96,
+                "snr_db": 11.0,
             },
         ]
     }
@@ -1647,15 +1683,29 @@ def test_irvine_paper_frontier_path_combines_source_and_rewrite():
         ]
     }
 
-    summary = build_irvine_paper_frontier_path(lower_end_gate, rewrite_impact)
-    assert summary["paper_rows_closed_by_source_plus_rewrite"] == 1
-    assert summary["paper_rows_remaining_after_source_plus_rewrite"] == 1
+    summary = build_irvine_paper_frontier_path(
+        lower_end_gate,
+        rewrite_impact,
+        [(original, rewritten)],
+    )
+    assert summary["paper_rows_closed_by_independent_projection"] == 1
+    assert summary["paper_rows_remaining_after_independent_projection"] == 2
+    assert summary["paper_rows_with_direct_source_rewrite_measurement"] == 1
+    assert summary["paper_rows_closed_by_direct_source_rewrite"] == 0
     row_10s = next(row for row in summary["rows"] if row["bucket"] == "10s")
     assert row_10s["combined_projected_ms"] == 591.0
     assert row_10s["would_beat_paper_with_rewrite"] is True
+    assert row_10s["human_decision"] == "pass"
+    row_15s = next(row for row in summary["rows"] if row["bucket"] == "15s")
+    assert row_15s["direct_source_rewrite"]["local_direct_rewrite_save_ms"] == 4.0
+    assert row_15s["would_beat_paper_with_direct_source_rewrite"] is False
 
     markdown = render_irvine_paper_frontier_path_markdown(summary)
-    assert "Paper rows closed by source+rewrite: `1`." in markdown
+    assert "Paper rows closed by independent source+rewrite projection: `1`." in markdown
+    assert "Paper rows closed by direct measured source/body rewrite: `0`." in markdown
+    assert "| Bucket | Candidate | Human | Paper frontier |" in markdown
+    assert "| `10s` | `10s_fast` | pass |" in markdown
+    assert "4.0 ms local save" in markdown
     assert "`10s_fast`" in markdown
 
 
@@ -2979,6 +3029,22 @@ def test_source_contract_frontier_summarizes_body_counterfactuals():
             }
         ],
     }
+    irvine_listening_targets = {
+        "mapped_count": 2,
+        "exact_timing_report_listening_artifact_count": 2,
+        "rows": [
+            {
+                "bucket": "7s",
+                "waveform_gate_decision": "needs_listening",
+                "human_decision": "",
+            },
+            {
+                "bucket": "10s",
+                "waveform_gate_decision": "needs_listening",
+                "human_decision": "caveat",
+            },
+        ],
+    }
 
     summary = summarize_source_contract_frontier(
         source_variants,
@@ -2989,6 +3055,7 @@ def test_source_contract_frontier_summarizes_body_counterfactuals():
         xsource_feasibility,
         pre_noise_folding_surface,
         strict_folding_ceiling,
+        irvine_listening_targets,
     )
     markdown = render_source_contract_frontier_markdown(summary)
 
@@ -3007,7 +3074,12 @@ def test_source_contract_frontier_summarizes_body_counterfactuals():
     )
     assert summary["implementation_queue"][2]["track"] == "quality-changing"
     assert summary["implementation_queue"][2]["target_buckets"] == ["7s"]
+    assert "pending buckets: 7s" in summary["implementation_queue"][2]["promotion_gate"]
     assert summary["implementation_queue"][3]["track"] == "stop"
+    assert summary["quality_listening_status"]["accepted_count"] == 1
+    assert summary["quality_listening_status"]["pending_count"] == 1
+    assert summary["quality_listening_status"]["accepted_buckets"] == ["10s"]
+    assert summary["quality_listening_status"]["pending_buckets"] == ["7s"]
     assert summary["xsource_distillation_feasibility"]["decision"] == "promising_adapter"
     assert summary["xsource_distillation_feasibility"]["target_mode"] == "pre_noise_conv"
     assert summary["pre_noise_folding_surface"]["decision"] == "fold_for_memory_locality_not_frame_skipping"
@@ -3024,6 +3096,9 @@ def test_source_contract_frontier_summarizes_body_counterfactuals():
     assert "| `3s` | 1.21 MiB | 100.00% | 9.38 MiB | 7.76x |" in markdown
     assert "Strict Folding Ceiling" in markdown
     assert "| `3s` | 0.5 ms | 1.85% | 1.09% |" in markdown
+    assert "Quality-Branch Listening Status" in markdown
+    assert "- Accepted human decisions: `1`." in markdown
+    assert "| pending | `7s` |" in markdown
     assert "`7s`." in markdown
 
 

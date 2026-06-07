@@ -21,7 +21,7 @@
       "split_total_ms": 179.84014545800164
     }
   ],
-  "decision": "The Swift-like source equation is solved, but recomputed HAR/STFT is not. The body package is fast if x_source tensors are free, and quality-fail F0/source branches would close several warmed Irvine profile rows. The next useful work is a cheaper strict source/HAR contract or listening-accepted source replacement, not another exact HAR-post split.",
+  "decision": "The Swift-like source equation is solved, but recomputed HAR/STFT is not. The body package is fast if x_source tensors are free, and quality-fail F0/source branches would close several warmed Irvine profile rows only after no-ASR listening acceptance. The next useful work is a cheaper strict source/HAR contract or listening-accepted source replacement, not another exact HAR-post split.",
   "implementation_queue": [
     {
       "experiment": "algebraically fold STFT/HAR into first noise convolutions",
@@ -54,26 +54,22 @@
     {
       "experiment": "no-ASR human listening review for saved source/body speed branches",
       "priority": 3,
-      "promotion_gate": "filled no-ASR listening decisions plus waveform-health review; keep separate from strict paper claims unless the methodology explicitly accepts listening-equivalent quality",
+      "promotion_gate": "filled no-ASR listening decisions plus waveform-health review; pending buckets: none; keep separate from strict paper claims unless the methodology explicitly accepts listening-equivalent quality",
       "required_paper_save_ms": 0.0,
       "required_profile_save_ms": 0.0,
-      "target_buckets": [
-        "7s",
-        "10s",
-        "15s"
-      ],
+      "target_buckets": [],
       "track": "quality-changing",
       "why": "Saved source/body branches would beat warmed laishere profile on several buckets, but they are not strict waveform-parity candidates."
     },
     {
-      "experiment": "do not repeat exact HAR-post splits, sine-source variants, compact direct x_source or pre-noise adapters, or no-side-input phase+rewrite packages",
+      "experiment": "do not repeat exact HAR-post splits, sine-source variants, compact direct x_source or pre-noise adapters, direct source/body upsample-rewrite-only packages, or no-side-input phase+rewrite packages",
       "priority": 4,
       "promotion_gate": "n/a",
       "required_paper_save_ms": 0.0,
       "required_profile_save_ms": 0.0,
       "target_buckets": [],
       "track": "stop",
-      "why": "Exact split source/noise production is slower end-to-end, and Swift-like source generation already matches dumped har_source; compact direct x_source adapters fail on x_source_0; cheap pre-noise adapters fail before the first strided noise conv; no-side-input phase+rewrite is either fp16 quality-failing or fp32 slower. The remaining issue is HAR/STFT representation or boundary choice."
+      "why": "Exact split source/noise production is slower end-to-end, and Swift-like source generation already matches dumped har_source; compact direct x_source adapters fail on x_source_0; cheap pre-noise adapters fail before the first strided noise conv; direct source/body upsample rewrite saves only a few local milliseconds and closes zero Irvine paper rows; no-side-input phase+rewrite is either fp16 quality-failing or fp32 slower. The remaining issue is HAR/STFT representation or boundary choice."
     }
   ],
   "irvine_real_loss_count": 4,
@@ -170,6 +166,29 @@
     "15s"
   ],
   "quality_fail_warmed_profile_closers": 3,
+  "quality_listening_status": {
+    "accepted_buckets": [
+      "3s",
+      "7s",
+      "10s",
+      "15s"
+    ],
+    "accepted_count": 4,
+    "asr_used": false,
+    "decision_counts": {
+      "pass": 4
+    },
+    "exact_timing_report_listening_artifact_count": 4,
+    "failed_buckets": [],
+    "failed_count": 0,
+    "gate_counts": {
+      "needs_listening": 4
+    },
+    "mapped_count": 4,
+    "pending_buckets": [],
+    "pending_count": 0,
+    "rows": 4
+  },
   "recomputed_stft_har_is_solved": false,
   "source_equation_is_solved": true,
   "source_variant_rows": 5,

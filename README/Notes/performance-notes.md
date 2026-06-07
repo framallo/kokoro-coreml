@@ -1446,6 +1446,21 @@ Cross-machine and exact losing-bucket results:
 | m2-studio CPU+GPU, 10s | 81.3 ms | 87.6 ms | noise 30.7 ms, body 54.5 ms, tail 2.6 ms | corr 0.999990, SNR 47.49 dB | reject |
 | irvine-m1 CPU+GPU, 10s | 562.8 ms | 631.6 ms | noise 247.8 ms, body 371.5 ms, tail 11.4 ms | corr 0.999991, SNR 47.86 dB | reject; exact losing bucket also slows down |
 
+The same broader decoder+vocoder probe now accepts
+`--rewrite-ups-conv-transpose`, applying the strict HAR-post upsample rewrite
+inside the body before export. Local M2 Studio screening runs are strict and
+slightly reduce body time, but the three-package boundary still loses overall:
+`3s` measured `33.2 ms` baseline versus `36.1 ms` candidate (noise `11.4 ms`,
+body `23.1 ms`, tail `1.4 ms`, corr `0.999991`, SNR `47.67 dB`), and `10s`
+measured `86.0 ms` baseline versus `91.7 ms` candidate (noise `33.5 ms`, body
+`55.1 ms`, tail `2.8 ms`, corr `0.999990`, SNR `47.58 dB`). Decision: reject
+the laishere-style decoder+vocoder boundary plus upsample rewrite as a
+production split; the rewrite is only useful inside the fused HAR-post package
+or as part of a source/body quality branch. Reports:
+`outputs/decoder_vocoder_split/3s_har_cos_resblock_cos_rsqrt_ups_as_conv/report_laishere_boundary_ups_as_conv_local.json`
+and
+`outputs/decoder_vocoder_split/10s_har_cos_resblock_cos_rsqrt_ups_as_conv/report_laishere_boundary_ups_as_conv_local.json`.
+
 Local long-bucket `har_source -> STFT/noise_convs` split results:
 
 | Input | Baseline median | Candidate median | Speedup | Stage medians | Parity vs fused | Decision |
@@ -4722,6 +4737,43 @@ Irvine `3s` body-only would save `62.4 ms` if `x_source_*` tensors were free,
 but the strict full split loses `11.5 ms` once source/noise is included. Do not
 repeat another exact HAR-post split; the next strict implementation must make
 the source/HAR contract cheaper inside a runtime-positive boundary.
+
+The no-ASR Irvine exact-speed listening pack is now mapped into the same source
+contract frontier. The review page is
+`outputs/f0_source_listening/irvine_exact_speed_branch/review.html`, and the
+decision file is
+`outputs/f0_source_listening/irvine_exact_speed_branch/f0_source_listening_decisions.csv`.
+`scripts/external_bakeoff/summarize_irvine_listening_targets.py` maps all four
+rows (`3s`, `7s`, `10s`, `15s`) to same-report listening artifacts, and
+`scripts/validate_f0_source_listening_decisions.py --decisions
+outputs/f0_source_listening/irvine_exact_speed_branch/f0_source_listening_decisions.csv
+--json` now passes with `4` `pass` decisions after user no-ASR listening review
+reported that all four candidates sound great. Therefore the quality-changing
+speed branch has `4` accepted listening buckets and `0` pending buckets.
+This makes Irvine `7s`, `10s`, and `15s` quality-approved profile-only speed
+signals, but not paper-frontier wins: the lower-end Mac gate still shows those
+rows short of the stricter paper-facing laishere frontier. Whisper/ASR remains
+explicitly skipped for this gate.
+
+The first direct source/body + upsample-rewrite measurements reject the earlier
+independent "source plus production rewrite" projection as publishable evidence.
+`scripts/probe_f0_noise_exact_shape.py` now supports
+`--rewrite-ups-conv-transpose`, which rewrites the generator before exporting
+the F0-noise/body/tail source branch itself. Local M2 Studio direct-stack probes
+are speed-positive but much smaller than the production HAR-post rewrite
+projection: `10s_natural_asr_cos_resblock_natural_asr_cos_rsqrt` improves from
+`76.37 ms` to `71.87 ms` candidate median (`4.50 ms` local save), and
+`15s_padded_cos_resblock_cos_rsqrt` improves from `109.20 ms` to `105.62 ms`
+(`3.57 ms` local save). The short buckets are also too small: `3s` improves
+from `32.71 ms` to `29.36 ms` (`3.35 ms` local save), and `7s` improves from
+`56.52 ms` to `54.80 ms` (`1.72 ms` local save). The corrected
+`outputs/external_bakeoff/irvine_paper_frontier_path.md` therefore keeps the
+independent projection separate from direct measured source/body rewrite
+evidence: direct source/body rewrite closes `0` Irvine paper rows, leaving
+about `10.3 ms` extra for `10s` and `20.5 ms` extra for `15s` under the
+absolute-save projection, with even larger remaining gaps on `3s` and `7s`.
+Do not publish source+rewrite as a win until a direct quiet-host combined run
+proves it.
 
 First feasibility probes for direct `x_source_*` distillation:
 `scripts/probe_xsource_distillation_feasibility.py` fits bucket-local adapters

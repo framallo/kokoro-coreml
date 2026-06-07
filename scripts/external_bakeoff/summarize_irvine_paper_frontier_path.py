@@ -18,6 +18,36 @@ from typing import Any
 DEFAULT_OUTPUT_DIR = Path("outputs/external_bakeoff")
 DEFAULT_LOWER_END_GATE_JSON = DEFAULT_OUTPUT_DIR / "lower_end_mac_win_gate.json"
 DEFAULT_REWRITE_IMPACT_JSON = DEFAULT_OUTPUT_DIR / "rewrite_candidate_impact.json"
+DEFAULT_DIRECT_SOURCE_REWRITE_REPORTS = [
+    (
+        Path("outputs/f0_noise_exact_shape/3s_natural_asr_cos_rsqrt/report_f0_noise_exact_3s_local.json"),
+        Path(
+            "outputs/f0_noise_exact_shape/3s_natural_asr_cos_rsqrt_ups_as_conv_natural_asr_cos_rsqrt/"
+            "report_cos_resblock_ups_as_conv_local.json"
+        ),
+    ),
+    (
+        Path("outputs/f0_noise_exact_shape/7s_natural_asr_cos_rsqrt/report_f0_noise_exact_7s_local.json"),
+        Path(
+            "outputs/f0_noise_exact_shape/7s_natural_asr_cos_rsqrt_ups_as_conv_natural_asr_cos_rsqrt/"
+            "report_cos_resblock_ups_as_conv_local.json"
+        ),
+    ),
+    (
+        Path("outputs/f0_noise_exact_shape/10s_natural_asr_cos_resblock_natural_asr_cos_rsqrt/report_cos_resblock.json"),
+        Path(
+            "outputs/f0_noise_exact_shape/10s_natural_asr_cos_resblock_natural_asr_cos_rsqrt_ups_as_conv_natural_asr_cos_rsqrt/"
+            "report_cos_resblock_ups_as_conv_local.json"
+        ),
+    ),
+    (
+        Path("outputs/f0_noise_exact_shape/15s_padded_cos_resblock_cos_rsqrt/report_cos_resblock.json"),
+        Path(
+            "outputs/f0_noise_exact_shape/15s_padded_cos_resblock_cos_rsqrt_ups_as_conv_cos_rsqrt/"
+            "report_cos_resblock_ups_as_conv_local.json"
+        ),
+    )
+]
 DEFAULT_OUTPUT = DEFAULT_OUTPUT_DIR / "irvine_paper_frontier_path.md"
 DEFAULT_JSON_OUTPUT = DEFAULT_OUTPUT_DIR / "irvine_paper_frontier_path.json"
 
@@ -37,10 +67,54 @@ def _rewrite_save_by_bucket(rewrite_impact: dict[str, Any]) -> dict[str, float]:
     return saves
 
 
-def build_summary(lower_end_gate: dict[str, Any], rewrite_impact: dict[str, Any]) -> dict[str, Any]:
+def _report_label(report: dict[str, Any], path: Path) -> str:
+    report_path = str(report.get("report") or "")
+    return Path(report_path).parent.name if report_path else path.parent.name
+
+
+def _report_bucket(report: dict[str, Any]) -> str:
+    tensor_dump = str(report.get("tensor_dump") or "")
+    return Path(tensor_dump).name if tensor_dump else ""
+
+
+def _candidate_ms(report: dict[str, Any]) -> float:
+    return float(report["benchmark"]["warm_predict_median_ms"]["candidate_total"])
+
+
+def _direct_source_rewrite_by_bucket(pairs: list[tuple[Path, Path]]) -> dict[str, dict[str, Any]]:
+    direct: dict[str, dict[str, Any]] = {}
+    for original_path, rewritten_path in pairs:
+        if not original_path.exists() or not rewritten_path.exists():
+            continue
+        original = _load_json(original_path)
+        rewritten = _load_json(rewritten_path)
+        bucket = _report_bucket(original)
+        if not bucket:
+            continue
+        original_ms = _candidate_ms(original)
+        rewritten_ms = _candidate_ms(rewritten)
+        direct[bucket] = {
+            "original_label": _report_label(original, original_path),
+            "rewritten_label": _report_label(rewritten, rewritten_path),
+            "original_report": str(original_path),
+            "rewritten_report": str(rewritten_path),
+            "original_candidate_ms": original_ms,
+            "rewritten_candidate_ms": rewritten_ms,
+            "local_direct_rewrite_save_ms": original_ms - rewritten_ms,
+            "rewritten_upsample_layers": (rewritten.get("export") or {}).get("rewritten_upsample_layers"),
+        }
+    return direct
+
+
+def build_summary(
+    lower_end_gate: dict[str, Any],
+    rewrite_impact: dict[str, Any],
+    direct_source_rewrite_reports: list[tuple[Path, Path]] | None = None,
+) -> dict[str, Any]:
     """Build the Irvine paper-frontier combined-path summary."""
 
     rewrite_saves = _rewrite_save_by_bucket(rewrite_impact)
+    direct_rewrite = _direct_source_rewrite_by_bucket(direct_source_rewrite_reports or [])
     rows: list[dict[str, Any]] = []
     for row in lower_end_gate.get("irvine_rows") or []:
         bucket = str(row["input_key"])
@@ -49,6 +123,10 @@ def build_summary(lower_end_gate: dict[str, Any], rewrite_impact: dict[str, Any]
         combined_projected_ms = source_projected_ms - rewrite_save_ms
         paper_ms = float(row["paper_competitor_ms"])
         combined_margin_ms = paper_ms - combined_projected_ms
+        direct = direct_rewrite.get(bucket)
+        direct_save_ms = None if direct is None else float(direct["local_direct_rewrite_save_ms"])
+        direct_projected_ms = None if direct_save_ms is None else source_projected_ms - direct_save_ms
+        direct_margin_ms = None if direct_projected_ms is None else paper_ms - direct_projected_ms
         rows.append(
             {
                 "bucket": bucket,
@@ -63,6 +141,15 @@ def build_summary(lower_end_gate: dict[str, Any], rewrite_impact: dict[str, Any]
                 "combined_paper_margin_ms": combined_margin_ms,
                 "would_beat_paper_with_rewrite": combined_margin_ms > 0,
                 "additional_save_required_ms": max(0.0, -combined_margin_ms),
+                "direct_source_rewrite": direct,
+                "direct_source_rewrite_projected_ms": direct_projected_ms,
+                "direct_source_rewrite_paper_margin_ms": direct_margin_ms,
+                "would_beat_paper_with_direct_source_rewrite": bool(
+                    direct_margin_ms is not None and direct_margin_ms > 0
+                ),
+                "direct_source_rewrite_additional_save_required_ms": (
+                    None if direct_margin_ms is None else max(0.0, -direct_margin_ms)
+                ),
                 "corr": row.get("corr"),
                 "snr_db": row.get("snr_db"),
             }
@@ -70,17 +157,24 @@ def build_summary(lower_end_gate: dict[str, Any], rewrite_impact: dict[str, Any]
     rows.sort(key=lambda item: (item["additional_save_required_ms"], item["bucket"]))
     return {
         "rows": rows,
-        "paper_rows_closed_by_source_plus_rewrite": sum(
+        "paper_rows_closed_by_independent_projection": sum(
             1 for row in rows if row["would_beat_paper_with_rewrite"]
         ),
-        "paper_rows_remaining_after_source_plus_rewrite": sum(
+        "paper_rows_remaining_after_independent_projection": sum(
             1 for row in rows if not row["would_beat_paper_with_rewrite"]
         ),
+        "paper_rows_closed_by_direct_source_rewrite": sum(
+            1 for row in rows if row["would_beat_paper_with_direct_source_rewrite"]
+        ),
+        "paper_rows_with_direct_source_rewrite_measurement": sum(
+            1 for row in rows if row["direct_source_rewrite"] is not None
+        ),
         "decision": (
-            "On Irvine M1, source/body plus the HAR-post rewrite is enough for "
-            "the 10s paper row if listening accepts the source candidate. The "
-            "15s row is close, while 3s and 7s still need larger implementation "
-            "wins than the current saved probes provide."
+            "The independent source/body plus production-rewrite projection is "
+            "optimistic and must not be treated as a direct combined measurement. "
+            "Direct local source/body+upsample-rewrite probes on all accepted buckets are "
+            "speed-positive, but much smaller than the production-rewrite projection; "
+            "Irvine paper rows still require another implementation win."
         ),
     }
 
@@ -104,17 +198,29 @@ def render_markdown(summary: dict[str, Any]) -> str:
         "projection. It uses the stricter paper-facing `competitive_frontier`",
         "rows, not only newer stage-profile rows.",
         "",
-        f"Paper rows closed by source+rewrite: `{summary['paper_rows_closed_by_source_plus_rewrite']}`.",
-        f"Paper rows still open after source+rewrite: `{summary['paper_rows_remaining_after_source_plus_rewrite']}`.",
+        f"Paper rows closed by independent source+rewrite projection: `{summary['paper_rows_closed_by_independent_projection']}`.",
+        f"Paper rows still open after independent projection: `{summary['paper_rows_remaining_after_independent_projection']}`.",
+        f"Paper rows closed by direct measured source/body rewrite: `{summary['paper_rows_closed_by_direct_source_rewrite']}`.",
+        f"Rows with direct source/body rewrite measurement: `{summary['paper_rows_with_direct_source_rewrite_measurement']}`.",
         "",
-        "| Bucket | Candidate | Paper frontier | Source projected | Rewrite save | Combined projected | Combined margin | Extra save needed | Quality |",
-        "| --- | --- | ---: | ---: | ---: | ---: | ---: | ---: | --- |",
+        "| Bucket | Candidate | Human | Paper frontier | Source projected | Independent rewrite save | Independent projected | Independent margin | Direct source rewrite | Direct margin | Quality |",
+        "| --- | --- | --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | --- |",
     ]
     for row in summary["rows"]:
         margin = row["combined_paper_margin_ms"]
         margin_text = _fmt_ms(margin)
         if margin > 0:
             margin_text = f"+{margin_text}"
+        direct = row.get("direct_source_rewrite") or {}
+        direct_margin = row.get("direct_source_rewrite_paper_margin_ms")
+        direct_margin_text = "n/a" if direct_margin is None else _fmt_ms(direct_margin)
+        if direct_margin is not None and direct_margin > 0:
+            direct_margin_text = f"+{direct_margin_text}"
+        direct_text = (
+            "n/a"
+            if not direct
+            else f"{_fmt_ms(direct['local_direct_rewrite_save_ms'])} local save"
+        )
         quality = f"corr {_fmt_num(row.get('corr'), 3)}, SNR {_fmt_num(row.get('snr_db'), 2)} dB"
         lines.append(
             "| "
@@ -122,12 +228,14 @@ def render_markdown(summary: dict[str, Any]) -> str:
                 [
                     f"`{row['bucket']}`",
                     f"`{row['candidate']}`",
+                    row.get("human_decision") or "blank",
                     f"{row['paper_competitor']}: {_fmt_ms(row['paper_competitor_ms'])}",
                     _fmt_ms(row["source_projected_ms"]),
                     _fmt_ms(row["rewrite_save_ms"]),
                     _fmt_ms(row["combined_projected_ms"]),
                     margin_text,
-                    _fmt_ms(row["additional_save_required_ms"]),
+                    direct_text,
+                    direct_margin_text,
                     quality,
                 ]
             )
@@ -142,10 +250,10 @@ def render_markdown(summary: dict[str, Any]) -> str:
             "",
             "## Immediate Work",
             "",
-            "- Promote the HAR-post rewrite into any publishable Irvine source/body rerun.",
-            "- If listening accepts `10s_natural_asr_cos_resblock_natural_asr_cos_rsqrt`, rerun Irvine `10s` on a quiet host because source+rewrite should beat the paper row.",
-            "- Find at least another `2.7 ms` for Irvine `15s` after source+rewrite, or prove a quieter rerun changes that margin.",
-            "- Treat Irvine `3s` and `7s` as unsolved implementation work; current source+rewrite projections remain far short of the paper frontier.",
+            "- Do not publish the independent source+rewrite projection as a win.",
+            "- Do not promote direct source/body+upsample-rewrite for Irvine; local direct saves are too small on all accepted buckets.",
+            "- Find another source/body implementation win of about `10 ms` for `10s`, `20 ms` for `15s`, and much larger wins for `3s`/`7s`, or prove a better direct stack on quiet Irvine.",
+            "- Treat Irvine `3s` and `7s` as unsolved implementation work; current saved source candidates remain far short of the paper frontier.",
         ]
     )
     return "\n".join(lines) + "\n"
@@ -162,6 +270,7 @@ def main() -> int:
     summary = build_summary(
         _load_json(args.lower_end_gate_json),
         _load_json(args.rewrite_impact_json),
+        DEFAULT_DIRECT_SOURCE_REWRITE_REPORTS,
     )
     args.output.parent.mkdir(parents=True, exist_ok=True)
     args.output.write_text(render_markdown(summary))
@@ -171,11 +280,11 @@ def main() -> int:
         json.dumps(
             {
                 "output": str(args.output),
-                "paper_rows_closed_by_source_plus_rewrite": summary[
-                    "paper_rows_closed_by_source_plus_rewrite"
+                "paper_rows_closed_by_independent_projection": summary[
+                    "paper_rows_closed_by_independent_projection"
                 ],
-                "paper_rows_remaining_after_source_plus_rewrite": summary[
-                    "paper_rows_remaining_after_source_plus_rewrite"
+                "paper_rows_remaining_after_independent_projection": summary[
+                    "paper_rows_remaining_after_independent_projection"
                 ],
             },
             indent=2,

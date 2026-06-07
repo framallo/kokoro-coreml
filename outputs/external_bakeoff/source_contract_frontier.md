@@ -35,8 +35,23 @@ and HAR-post upsample rewrite projection:
 | ---: | --- | --- | --- | --- |
 | 1 | strict | algebraically fold STFT/HAR into first noise convolutions | `3s`, `7s`, `10s` | same x_source_* or early activation parity first, then waveform parity and warmed lower-end timing |
 | 2 | strict | distill a different strict boundary, not compact direct x_source tensors | `3s`, `7s`, `10s` | activation or waveform parity first, then warmed end-to-end win on quiet Irvine M1; no new hot Core ML boundary unless it removes more cost than it adds |
-| 3 | quality-changing | no-ASR human listening review for saved source/body speed branches | `7s`, `10s`, `15s` | filled no-ASR listening decisions plus waveform-health review; keep separate from strict paper claims unless the methodology explicitly accepts listening-equivalent quality |
-| 4 | stop | do not repeat exact HAR-post splits, sine-source variants, compact direct x_source or pre-noise adapters, or no-side-input phase+rewrite packages | n/a | n/a |
+| 3 | quality-changing | no-ASR human listening review for saved source/body speed branches | n/a | filled no-ASR listening decisions plus waveform-health review; pending buckets: none; keep separate from strict paper claims unless the methodology explicitly accepts listening-equivalent quality |
+| 4 | stop | do not repeat exact HAR-post splits, sine-source variants, compact direct x_source or pre-noise adapters, direct source/body upsample-rewrite-only packages, or no-side-input phase+rewrite packages | n/a | n/a |
+
+## Quality-Branch Listening Status
+
+- No ASR/Whisper gate is used for this branch.
+- Listening rows: `4`.
+- Rows with listening artifacts: `4`.
+- Accepted human decisions: `4`.
+- Pending human decisions: `0`.
+- Failed human decisions: `0`.
+
+| Status | Buckets |
+| --- | --- |
+| accepted | `3s`, `7s`, `10s`, `15s` |
+| pending | none |
+| failed | none |
 
 ## Source-Side Feasibility Smoke
 
@@ -96,4 +111,4 @@ Quality-fail buckets that would beat the warmed laishere profile if accepted:
 
 ## Decision
 
-The Swift-like source equation is solved, but recomputed HAR/STFT is not. The body package is fast if x_source tensors are free, and quality-fail F0/source branches would close several warmed Irvine profile rows. The next useful work is a cheaper strict source/HAR contract or listening-accepted source replacement, not another exact HAR-post split.
+The Swift-like source equation is solved, but recomputed HAR/STFT is not. The body package is fast if x_source tensors are free, and quality-fail F0/source branches would close several warmed Irvine profile rows only after no-ASR listening acceptance. The next useful work is a cheaper strict source/HAR contract or listening-accepted source replacement, not another exact HAR-post split.

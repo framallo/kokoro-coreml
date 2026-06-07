@@ -12,6 +12,7 @@ from typing import Any
 
 
 DEFAULT_REPORT_GLOB = "outputs/f0_noise_exact_shape/**/report*.json"
+DEFAULT_DECISIONS_GLOB = "outputs/f0_source_listening/**/f0_source_listening_decisions.csv"
 DEFAULT_OUTPUT = Path("outputs/f0_source_listening/f0_source_candidate_summary.md")
 
 
@@ -210,7 +211,10 @@ def main() -> int:
     parser.add_argument("--top", type=int, default=0, help="Limit emitted rows; 0 keeps all rows.")
     args = parser.parse_args()
 
-    decisions = load_decisions(args.decisions)
+    decision_paths = args.decisions or [
+        Path(match) for match in glob.glob(DEFAULT_DECISIONS_GLOB, recursive=True)
+    ]
+    decisions = load_decisions(decision_paths)
     rows = collect_rows(args.report_glob, decisions)
     if args.top > 0:
         rows = rows[: args.top]
