@@ -170,6 +170,7 @@ struct BatchCommand: Decodable {
 /// scheduler to fall back to CPU.
 class ModelCache: KokoroModelProvider {
     let modelsDir: URL
+    let generatorModelsDir: URL
     let durationConfig: MLModelConfiguration
     let f0nConfig: MLModelConfiguration
     let decoderPreConfig: MLModelConfiguration
@@ -193,12 +194,14 @@ class ModelCache: KokoroModelProvider {
 
     init(
         modelsDir: URL,
+        generatorModelsDir: URL? = nil,
         computeUnits: MLComputeUnits = .all,
         stagedComputeUnits: Bool = false,
         stagePolicy: StageComputeUnitPolicy? = nil,
         reuseInputArrays: Bool = false
     ) {
         self.modelsDir = modelsDir
+        self.generatorModelsDir = generatorModelsDir ?? modelsDir
         let resolvedPolicy = stagePolicy ?? (stagedComputeUnits ? .staged : .single(computeUnits))
         self.durationConfig = Self.makeConfig(resolvedPolicy.duration)
         self.f0nConfig = Self.makeConfig(resolvedPolicy.f0n)
@@ -210,6 +213,9 @@ class ModelCache: KokoroModelProvider {
         fputs("  Compute units: \(resolvedPolicy.label)\n", stderr)
         if reuseInputArrays {
             fputs("  Reusing benchmark input arrays by shape\n", stderr)
+        }
+        if self.generatorModelsDir.standardizedFileURL.path != modelsDir.standardizedFileURL.path {
+            fputs("  Generator models dir: \(self.generatorModelsDir.path)\n", stderr)
         }
         fputs("  Duration choices: \(durationChoices.map { $0.cacheKey }.joined(separator: ", "))\n", stderr)
     }
@@ -289,7 +295,7 @@ class ModelCache: KokoroModelProvider {
 
     private func compiledGenURL(bucket: Int) throws -> URL {
         if let url = compiledGen[bucket] { return url }
-        let pkgURL = modelsDir.appendingPathComponent("kokoro_decoder_har_post_\(bucket)s.mlpackage")
+        let pkgURL = generatorModelsDir.appendingPathComponent("kokoro_decoder_har_post_\(bucket)s.mlpackage")
         fputs("  Compiling generator \(bucket)s...\n", stderr)
         let compiled = try MLModel.compileModel(at: pkgURL)
         compiledGen[bucket] = compiled
@@ -453,6 +459,7 @@ func runPipeline(
         "status": "ok",
         "error": NSNull(),
         "compute_unit_policy": cache.computeUnitPolicyLabel,
+        "generator_models_dir": cache.generatorModelsDir.path,
         "reuse_input_arrays": cache.reuseInputArrays,
         "wall_time_s": round(result.wallTimeSeconds * 1e6) / 1e6,
         "canonical_audio_duration_s": round(canonicalDur * 1e6) / 1e6,
@@ -521,6 +528,7 @@ func runPipeline(
 // MARK: - Single-shot mode
 
 func runSingleShot(modelsDir: String, inputsDir: String, hnsfWeightsPath: String,
+                    generatorModelsDir: String?,
                     inputKey: String, seed: UInt64, outputPath: String?, wavPath: String?,
                     tensorDumpPath: String?,
                     warmupCount: Int,
@@ -537,6 +545,7 @@ func runSingleShot(modelsDir: String, inputsDir: String, hnsfWeightsPath: String
 
     let cache = ModelCache(
         modelsDir: URL(fileURLWithPath: modelsDir),
+        generatorModelsDir: generatorModelsDir.map { URL(fileURLWithPath: $0) },
         computeUnits: computeUnits,
         stagedComputeUnits: stagedComputeUnits,
         stagePolicy: stagePolicy,
@@ -563,7 +572,7 @@ func runSingleShot(modelsDir: String, inputsDir: String, hnsfWeightsPath: String
     }
 }
 
-func runGeneratorInputDump(modelsDir: String, tensorInputDumpPath: String,
+func runGeneratorInputDump(modelsDir: String, generatorModelsDir: String?, tensorInputDumpPath: String,
                            outputPath: String?, tensorDumpPath: String?,
                            warmupCount: Int, iterations: Int,
                            useGeneratorOutputBacking: Bool,
@@ -577,6 +586,7 @@ func runGeneratorInputDump(modelsDir: String, tensorInputDumpPath: String,
     let trimLen = reader.metadata["trim_len"] as? Int
     let cache = ModelCache(
         modelsDir: URL(fileURLWithPath: modelsDir),
+        generatorModelsDir: generatorModelsDir.map { URL(fileURLWithPath: $0) },
         computeUnits: computeUnits,
         stagedComputeUnits: stagedComputeUnits,
         stagePolicy: stagePolicy
@@ -691,6 +701,7 @@ func runGeneratorInputDump(modelsDir: String, tensorInputDumpPath: String,
 // MARK: - Batch mode
 
 func runBatch(modelsDir: String, inputsDir: String, hnsfWeightsPath: String,
+              generatorModelsDir: String?,
               computeUnits: MLComputeUnits = .all,
               stagedComputeUnits: Bool = false,
               stagePolicy: StageComputeUnitPolicy? = nil,
@@ -699,6 +710,7 @@ func runBatch(modelsDir: String, inputsDir: String, hnsfWeightsPath: String,
     let weights = try JSONDecoder().decode(HnsfWeights.self, from: weightsData)
     let cache = ModelCache(
         modelsDir: URL(fileURLWithPath: modelsDir),
+        generatorModelsDir: generatorModelsDir.map { URL(fileURLWithPath: $0) },
         computeUnits: computeUnits,
         stagedComputeUnits: stagedComputeUnits,
         stagePolicy: stagePolicy,
@@ -777,6 +789,7 @@ func runBatch(modelsDir: String, inputsDir: String, hnsfWeightsPath: String,
 func main() throws {
     let args = CommandLine.arguments
     var modelsDir: String?
+    var generatorModelsDir: String?
     var inputsDir: String?
     var hnsfWeightsPath: String?
     var inputKey: String?
@@ -801,6 +814,8 @@ func main() throws {
         switch args[i] {
         case "--models-dir":
             i += 1; modelsDir = args[i]
+        case "--generator-models-dir":
+            i += 1; generatorModelsDir = args[i]
         case "--inputs-dir":
             i += 1; inputsDir = args[i]
         case "--hnsf-weights":
@@ -846,7 +861,7 @@ func main() throws {
     guard let modelsDir = modelsDir,
           let inputsDir = inputsDir,
           let hnsfWeightsPath = hnsfWeightsPath else {
-        fputs("Usage: kokoro-bench --models-dir DIR --inputs-dir DIR --hnsf-weights FILE [--input-key KEY | --batch]\n", stderr)
+        fputs("Usage: kokoro-bench --models-dir DIR [--generator-models-dir DIR] --inputs-dir DIR --hnsf-weights FILE [--input-key KEY | --batch]\n", stderr)
         exit(1)
     }
 
@@ -880,6 +895,7 @@ func main() throws {
 
     if batchMode {
         try runBatch(modelsDir: modelsDir, inputsDir: inputsDir, hnsfWeightsPath: hnsfWeightsPath,
+                     generatorModelsDir: generatorModelsDir,
                      computeUnits: computeUnits,
                      stagedComputeUnits: stagedComputeUnits,
                      stagePolicy: stagePolicy,
@@ -887,6 +903,7 @@ func main() throws {
     } else if let generatorInputDumpPath {
         try runGeneratorInputDump(
             modelsDir: modelsDir,
+            generatorModelsDir: generatorModelsDir,
             tensorInputDumpPath: generatorInputDumpPath,
             outputPath: outputPath,
             tensorDumpPath: tensorDumpPath,
@@ -903,6 +920,7 @@ func main() throws {
             exit(1)
         }
         try runSingleShot(modelsDir: modelsDir, inputsDir: inputsDir, hnsfWeightsPath: hnsfWeightsPath,
+                          generatorModelsDir: generatorModelsDir,
                           inputKey: inputKey, seed: seed, outputPath: outputPath, wavPath: wavPath,
                           tensorDumpPath: tensorDumpPath,
                           warmupCount: warmupCount,

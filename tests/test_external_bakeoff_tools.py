@@ -7,7 +7,9 @@ from pathlib import Path
 
 from scripts.create_f0_source_listening_pack import _natural_asr_enabled
 from scripts.external_bakeoff import check_remote_host_quiet
+from scripts.external_bakeoff import run_config_f_reference
 from scripts.external_bakeoff import run_config_f_ios_when_unlocked
+from scripts.external_bakeoff import run_rewrite_promotion_when_quiet
 from scripts.external_bakeoff.create_listening_review import _write_decisions_csv
 from scripts.external_bakeoff.ingest_ios_runner_result import _ingest_records
 from scripts.external_bakeoff.run_laishere_kokoro_coreml import (
@@ -2308,9 +2310,9 @@ def test_candidate_frontier_matrix_records_successes_failures_and_blockers(tmp_p
     families = {row["family"] for row in payload["candidates"]}
 
     assert payload["summary"] == {
-        "candidate_count": 21,
+        "candidate_count": 22,
         "production_ready_strict_candidates": 2,
-        "strict_rejected_or_too_small": 15,
+        "strict_rejected_or_too_small": 16,
         "non_strict_candidates": 4,
         "profile_rows_remaining_after_rewrite": 4,
         "iphone_launch_blocker": "device_locked",
@@ -2323,10 +2325,167 @@ def test_candidate_frontier_matrix_records_successes_failures_and_blockers(tmp_p
     assert "Style-specialized generator plus upsample rewrite" in families
     assert "LUT-palettized full surface plus upsample rewrite" in families
     assert "Reusable Swift input MLMultiArrays" in families
+    assert "DecoderPre + Generator merged package" in families
     assert "Fast F0/source simplification" in families
     assert "Per-stage prefix compute-unit overrides" in families
-    assert "Candidates recorded: `21`" in markdown
+    assert "Candidates recorded: `22`" in markdown
     assert "Run scripts/external_bakeoff/check_remote_host_quiet.py" in markdown
+
+
+def test_config_f_runner_can_override_generator_models_dir(monkeypatch, tmp_path):
+    captured = {}
+
+    class FakeStdin:
+        def close(self):
+            pass
+
+    class FakeStdout:
+        def __init__(self):
+            self.lines = iter(["READY\n"])
+
+        def readline(self):
+            return next(self.lines, "")
+
+    class FakeProcess:
+        def __init__(self, cmd, stdin, stdout, text, env):
+            captured["cmd"] = cmd
+            captured["stdin"] = stdin
+            captured["stdout"] = stdout
+            captured["text"] = text
+            captured["env"] = env
+            self.stdin = FakeStdin()
+            self.stdout = FakeStdout()
+
+        def wait(self, timeout):
+            captured["wait_timeout"] = timeout
+            return 0
+
+    monkeypatch.setattr(run_config_f_reference.subprocess, "Popen", FakeProcess)
+
+    runner = run_config_f_reference.ConfigFBatchRunner(
+        binary=tmp_path / "kokoro-bench",
+        compute_units="staged",
+        stage_compute_units={
+            "duration": None,
+            "f0n": None,
+            "decoder_pre": None,
+            "generator": None,
+        },
+        models_dir=tmp_path / "coreml",
+        generator_models_dir=tmp_path / "rewrite",
+        inputs_dir=tmp_path / "inputs",
+        hnsf_weights=tmp_path / "hnsf.json",
+        use_exact_duration_models=True,
+        reuse_input_arrays=False,
+    )
+    runner.close()
+
+    assert "--models-dir" in captured["cmd"]
+    assert str(tmp_path / "coreml") in captured["cmd"]
+    assert "--generator-models-dir" in captured["cmd"]
+    assert str(tmp_path / "rewrite") in captured["cmd"]
+    assert captured["env"]["KOKORO_USE_EXACT_DURATION_MODELS"] == "1"
+
+
+def test_rewrite_promotion_skips_noisy_hosts(monkeypatch, tmp_path):
+    def fake_quiet_payload(args):
+        return {
+            "checked_at_local": "2026-06-06T18:28:40-07:00",
+            "publishable_timing_allowed": False,
+            "rows": [
+                {
+                    "machine_id": "irvine-m1",
+                    "target": "mattmireles@irvine-m1.local",
+                    "ok": True,
+                    "quiet": False,
+                    "blockers": ["mediaanalysisd at 83.4% CPU"],
+                }
+            ],
+        }
+
+    def fail_ssh(*args, **kwargs):
+        raise AssertionError("noisy hosts must not run remote benchmark")
+
+    monkeypatch.setattr(run_rewrite_promotion_when_quiet.check_remote_host_quiet, "build_payload", fake_quiet_payload)
+    monkeypatch.setattr(run_rewrite_promotion_when_quiet, "_run_ssh", fail_ssh)
+
+    payload = run_rewrite_promotion_when_quiet.run(
+        argparse.Namespace(
+            host=["irvine-m1=mattmireles@irvine-m1.local"],
+            repo_path=tmp_path / "repo",
+            generator_models_dir=Path("outputs/export_rewrite_smoke"),
+            input_key=["3s"],
+            iterations=5,
+            preflight_runs=3,
+            compute_units="staged",
+            max_load_1=1.5,
+            max_noisy_cpu_pct=5.0,
+            max_swap_used_mb=0.0,
+            min_memory_free_pct=10,
+            allow_battery=False,
+            quiet_timeout=5,
+            run_timeout=7200,
+            dry_run=False,
+            output=tmp_path / "summary.md",
+            json_output=tmp_path / "summary.json",
+        )
+    )
+
+    assert payload["summary"]["skipped_noisy_hosts"] == 1
+    assert payload["rows"][0]["status"] == "skipped_noisy_host"
+    assert "mediaanalysisd" in (tmp_path / "summary.md").read_text()
+
+
+def test_rewrite_promotion_dry_run_builds_generator_override_command(monkeypatch, tmp_path):
+    def fake_quiet_payload(args):
+        return {
+            "checked_at_local": "2026-06-06T18:28:40-07:00",
+            "publishable_timing_allowed": True,
+            "rows": [
+                {
+                    "machine_id": "m2-air",
+                    "target": "mattmireles@m2-air.local",
+                    "ok": True,
+                    "quiet": True,
+                    "blockers": [],
+                }
+            ],
+        }
+
+    def fail_ssh(*args, **kwargs):
+        raise AssertionError("dry-run should not run remote benchmark")
+
+    monkeypatch.setattr(run_rewrite_promotion_when_quiet.check_remote_host_quiet, "build_payload", fake_quiet_payload)
+    monkeypatch.setattr(run_rewrite_promotion_when_quiet, "_run_ssh", fail_ssh)
+
+    payload = run_rewrite_promotion_when_quiet.run(
+        argparse.Namespace(
+            host=["m2-air=mattmireles@m2-air.local"],
+            repo_path=tmp_path / "repo",
+            generator_models_dir=Path("outputs/export_rewrite_smoke"),
+            input_key=["3s", "7s"],
+            iterations=7,
+            preflight_runs=4,
+            compute_units="staged",
+            max_load_1=1.5,
+            max_noisy_cpu_pct=5.0,
+            max_swap_used_mb=0.0,
+            min_memory_free_pct=10,
+            allow_battery=False,
+            quiet_timeout=5,
+            run_timeout=7200,
+            dry_run=True,
+            output=tmp_path / "summary.md",
+            json_output=tmp_path / "summary.json",
+        )
+    )
+
+    row = payload["rows"][0]
+    assert row["status"] == "dry_run"
+    assert "--generator-models-dir outputs/export_rewrite_smoke" in row["command"]
+    assert "--input-key 3s --input-key 7s" in row["command"]
+    assert "--iterations 7" in row["command"]
+    assert "--preflight-runs 4" in row["command"]
 
 
 def test_remote_host_quiet_parser_and_status(monkeypatch):

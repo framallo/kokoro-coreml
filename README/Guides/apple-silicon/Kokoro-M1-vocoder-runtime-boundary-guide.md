@@ -37,7 +37,9 @@ then combined with independent savings.
 
 The next boundary candidates should be lower risk:
 
-- single-package body reshaping;
+- single-package body reshaping only inside the existing GeneratorFromHar
+  surface; the measured DecoderPre+Generator merge made `3s` slower and failed
+  CPU+NE scheduling;
 - source/body compact representation only inside a runtime-positive boundary;
 - HAR/STFT learned adapter only after PyTorch parity evidence.
 
@@ -53,6 +55,7 @@ as a harness option for future device checks, not as the current fastest path.
 | Make one graph-surface change at a time and preserve strict metrics. | Combining boundary, dtype, layout, and quality changes in one branch. |
 | Promote local wins to Irvine only with quiet-host proof. | Treating local M2 Studio deltas as lower-end Mac proof. |
 | Track `3s` fixed cost separately from duration-scaled cost. | Optimizing only the `30s` path and expecting a short-bucket paper win. |
+| Keep DecoderPre separate unless a new graph surface changes the scheduler result. | Merging DecoderPre into GeneratorFromHar just to remove one Swift-visible prediction call. |
 
 ## Related Documentation
 

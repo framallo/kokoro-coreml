@@ -20,6 +20,12 @@ reflects **current** library and platform facts where Context7 can verify them,
 and sits correctly in the **bidirectional** web of `README/Guides/` and
 `README/Notes/`.
 
+`README/Guides/` is the shelf for externally created reference manuals: Deep
+Research / external-agent output that has already landed as raw source material.
+`README/Notes/` is for this repo's own learnings, experiment logs, decisions,
+and provenance. Do not invent new guide material from local analysis alone; put
+local analysis in `README/Notes/` and link to existing guides when useful.
+
 This skill **subsumes** the older mechanical-only `ingest-guide` flow: use
 **guide-ingest** for all guide imports here.
 
@@ -44,20 +50,26 @@ This skill **subsumes** the older mechanical-only `ingest-guide` flow: use
 
 - **Context7 MCP** available for library/tool docs when verification is in
   scope. Read the tool schema in the MCP descriptors **before** calling tools.
-- Raw source: path or pasted content the user downloaded from the browser.
+- Raw source: path or pasted content from an externally generated research
+  artifact, usually `raw-report.md` under `llm-workflows/outputs/create-guide`.
+  If no external source exists, stop and ask whether to run `create-guide`
+  instead of creating a guide from scratch.
 
 ## Procedure
 
 ### 1. Normalize to proper markdown
 
-1. Read the **`markdown`** skill and
+1. Confirm the source is an externally generated guide/report. Record the source
+   path in the guide. If the content is only repo-local investigation, write a
+   note, not a guide.
+2. Read the **`markdown`** skill and
    [markdown-authoring-guide.md](../../../README/Guides/content/markdown-authoring-guide.md).
-2. Produce guide-shaped markdown:
+3. Produce guide-shaped markdown:
    - real markdown links, not bare URLs
    - blank lines around headings and lists
    - language-tagged fences where applicable
    - single trailing newline; no unnecessary HTML
-3. Match the tone and optional top-of-file blurb of sibling guides in the same
+4. Match the tone and optional top-of-file blurb of sibling guides in the same
    folder (e.g. `README/Guides/apple-silicon/`).
 
 ### 2. Mechanical cleanup (exports from Docs, PDF, chat)
@@ -117,7 +129,8 @@ both directions.
    relevant paragraph—**minimal** diff, no drive-by rewrites.
 3. If a high-level notes file covers the same subsystem, add a short bullet or
    sentence there with a link to the new guide (see **`write-notes`** for
-   consolidation habits).
+   consolidation habits). Notes may also record ingest provenance, verification
+   decisions, rejected claims, and experiment outcomes derived from the guide.
 
 ### 6. Close the loop
 

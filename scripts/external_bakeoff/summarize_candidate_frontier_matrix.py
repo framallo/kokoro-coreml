@@ -84,6 +84,17 @@ CANDIDATES: tuple[Candidate, ...] = (
         next_gate="only revisit if a lower-end Mac shows a contradictory material win; do not enable by default",
     ),
     Candidate(
+        family="DecoderPre + Generator merged package",
+        scope="single-package DecoderPre plus GeneratorFromHar while preserving Swift HAR/STFT boundary",
+        best_signal="local M2 Studio 3s merged CPU+GPU is slower than two predictions: 31.929 -> 33.589 ms (-5.20%); .all is also slower (-4.70%); CPU+NE hard-rejects at 1568.424 ms with ANE compiler failure",
+        quality="strict-like versus current two-prediction baseline: SNR 47.90 dB, corr 0.999991, max abs 0.002686",
+        strict=True,
+        production_ready=False,
+        decision="reject; removing this boundary makes the MLProgram larger and less schedulable than the cheap separate DecoderPre call plus GPU generator",
+        evidence="README/Notes/performance-notes.md; outputs/decoder_pre_generator_merge/3s/report.json; outputs/decoder_pre_generator_merge/3s/report_all.json; outputs/decoder_pre_generator_merge/3s/report_cpune.json",
+        next_gate="do not promote; only revisit if a graph rewrite removes the handoff without absorbing DecoderPre into the generator scheduling surface",
+    ),
+    Candidate(
         family="Full visible surface rewrite",
         scope="single-package GeneratorFromHar",
         best_signal="local E2E only wins 3s (49.532 ms vs production rewrite 49.669 ms) and noise-ties 10s",
@@ -325,6 +336,7 @@ def build_payload(args: argparse.Namespace) -> dict[str, Any]:
         "next_actions": [
             "Run scripts/external_bakeoff/check_remote_host_quiet.py before any lower-end Mac promotion run.",
             "Retest the HAR-post upsample rewrite on Irvine M1 and M2 Air only when outputs/external_bakeoff/remote_host_quiet_latest.md reports quiet=yes.",
+            "Use scripts/external_bakeoff/run_rewrite_promotion_when_quiet.py for lower-end rewrite promotion runs; it wraps the quiet gate and passes --generator-models-dir outputs/export_rewrite_smoke.",
             "Do not use cold compile/cache timings; every frontier update must use warmed medians.",
             "Use README/Notes/fixed-cost-latency-fit.md to separate fixed-boundary overhead from duration-scaled generator cost before promoting a new optimization family.",
             "Use README/Notes/har-stft-phase-contract.md and scripts/external_bakeoff/summarize_hnsf_source_boundary.py before revisiting any har_source boundary; exact Swift Nyquist atan2 solves parity, but tail padding trim saves <1% of HAR frames and Swift STFT credit alone does not make the strict padded/Nyquist path win.",

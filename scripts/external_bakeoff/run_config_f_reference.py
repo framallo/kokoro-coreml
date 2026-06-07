@@ -35,6 +35,7 @@ class ConfigFBatchRunner:
         compute_units: str,
         stage_compute_units: dict[str, str | None],
         models_dir: Path,
+        generator_models_dir: Path | None,
         inputs_dir: Path,
         hnsf_weights: Path,
         use_exact_duration_models: bool,
@@ -51,6 +52,8 @@ class ConfigFBatchRunner:
             "--batch",
             "--compute-units", compute_units,
         ]
+        if generator_models_dir is not None:
+            cmd.extend(["--generator-models-dir", str(generator_models_dir)])
         if reuse_input_arrays:
             cmd.append("--reuse-input-arrays")
         for flag, value in (
@@ -141,6 +144,15 @@ def main() -> None:
     parser.add_argument("--machine-id", required=True)
     parser.add_argument("--binary", type=Path, default=Path("swift/.build/release/kokoro-bench"))
     parser.add_argument("--models-dir", type=Path, default=Path("coreml"))
+    parser.add_argument(
+        "--generator-models-dir",
+        type=Path,
+        default=None,
+        help=(
+            "Optional directory containing kokoro_decoder_har_post_<bucket>s.mlpackage "
+            "generator packages. Other models still load from --models-dir."
+        ),
+    )
     parser.add_argument("--inputs-dir", type=Path, default=Path("outputs/swift_bench_inputs"))
     parser.add_argument(
         "--hnsf-weights",
@@ -212,6 +224,7 @@ def main() -> None:
                 "generator": args.generator_compute_units,
             },
             args.models_dir,
+            args.generator_models_dir,
             args.inputs_dir,
             args.hnsf_weights,
             args.use_exact_duration_models,
@@ -247,6 +260,7 @@ def main() -> None:
                         provenance={
                             "binary": str(args.binary),
                             "models_dir": str(args.models_dir),
+                            "generator_models_dir": str(args.generator_models_dir) if args.generator_models_dir else None,
                             "inputs_dir": str(args.inputs_dir),
                             "hnsf_weights": str(args.hnsf_weights),
                             "compute_units": args.compute_units,
@@ -283,6 +297,7 @@ def main() -> None:
                         provenance={
                             "binary": str(args.binary),
                             "models_dir": str(args.models_dir),
+                            "generator_models_dir": str(args.generator_models_dir) if args.generator_models_dir else None,
                             "inputs_dir": str(args.inputs_dir),
                             "hnsf_weights": str(args.hnsf_weights),
                             "compute_units": args.compute_units,
@@ -311,6 +326,7 @@ def main() -> None:
         provenance={
             "binary": str(args.binary),
             "models_dir": str(args.models_dir),
+            "generator_models_dir": str(args.generator_models_dir) if args.generator_models_dir else None,
             "inputs_dir": str(args.inputs_dir),
             "hnsf_weights": str(args.hnsf_weights),
             "compute_units": args.compute_units,

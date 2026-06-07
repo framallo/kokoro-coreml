@@ -64,6 +64,20 @@ cleanliness. It is not automatically a short-bucket latency win. Only use it as
 a speed candidate if it removes package load churn, deduplicates real constants,
 or keeps a hot sequence inside one runtime-positive call boundary.
 
+### DecoderPre + Generator Merge
+
+The direct DecoderPre+Generator boundary-collapse probe is rejected. Local 3s
+M2 Studio timing showed the merged CPU+GPU package slower than the current
+two-prediction path (`33.589 ms` vs `31.929 ms`), `.all` was also slower, and
+`cpuAndNeuralEngine` produced an ANE compiler failure with `1568.424 ms`
+median latency. The waveform stayed close to the current baseline, so the loss
+is scheduler/runtime behavior, not a gross correctness failure.
+
+Do not retry this exact merge as a promotion path. Future boundary work needs
+either a smaller generator-internal graph surface, a source/HAR representation
+change, or a removed handoff that does not absorb DecoderPre into the generator
+MLProgram.
+
 ### Layout And Rank Changes
 
 Rank-4 `[B, C, 1, T]`, `[B, C, T]`, and packed time-major variants should be

@@ -132,6 +132,23 @@ By default, each adapter writes the last warm output for each successful input
 to `outputs/external_bakeoff/spotcheck_wavs/<impl>_<machine_id>/<bucket>.wav`.
 Pass `--spotcheck-dir` to use an explicit collection directory.
 
+For the HAR-post upsample rewrite promotion run, do not hand-build a symlink
+overlay. Use the generator-package override so every non-generator package still
+comes from `coreml/`:
+
+```bash
+python scripts/external_bakeoff/run_config_f_reference.py \
+  --machine-id m2-studio-local_rewrite_ups_as_conv \
+  --generator-models-dir outputs/export_rewrite_smoke
+```
+
+For lower-end Macs, run the quiet-gated wrapper instead. It writes skip records
+for noisy hosts and only runs timing on `quiet=yes` hosts:
+
+```bash
+python scripts/external_bakeoff/run_rewrite_promotion_when_quiet.py
+```
+
 ## Summarize
 
 ```bash

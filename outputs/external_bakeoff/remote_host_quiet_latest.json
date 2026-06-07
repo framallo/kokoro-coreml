@@ -1,24 +1,23 @@
 {
-  "checked_at_local": "2026-06-06T18:07:11-07:00",
+  "checked_at_local": "2026-06-06T18:28:40-07:00",
   "publishable_timing_allowed": false,
   "rows": [
     {
       "blockers": [
-        "load1 3.27 exceeds 1.50",
-        "/System/Library/Frameworks/CoreServices.framework/Frameworks/Metadata.framework/Versions/A/Support/mds_stores at 117.6% CPU",
-        "/System/Library/PrivateFrameworks/MediaAnalysis.framework/Versions/A/mediaanalysisd at 67.9% CPU",
-        "/System/Library/PrivateFrameworks/MediaAnalysisAccess.framework/Versions/A/XPCServices/mediaanalysisd-access.xpc/Contents/MacOS/mediaanalysisd-access at 7.7% CPU",
+        "load1 2.04 exceeds 1.50",
+        "/System/Library/PrivateFrameworks/MediaAnalysis.framework/Versions/A/mediaanalysisd at 83.4% CPU",
+        "/System/Library/Frameworks/CoreServices.framework/Frameworks/Metadata.framework/Versions/A/Support/mds_stores at 18.7% CPU",
         "swap used 270.12 MB exceeds 0.0 MB"
       ],
       "load": {
-        "fifteen_minutes": 2.59,
-        "five_minutes": 2.7,
-        "one_minute": 3.27
+        "fifteen_minutes": 2.53,
+        "five_minutes": 2.45,
+        "one_minute": 2.04
       },
       "machine_id": "irvine-m1",
       "memory_pressure": {
         "free_pct": 75,
-        "raw": "The system has 17179869184 (1048576 pages with a page size of 16384).\n\nStats: \nPages free: 4226 \nPages purgeable: 18999 \nPages purged: 71547597 \n\nSwap I/O:\nSwapins: 132860 \nSwapouts: 793805 \n\nPage Q counts:\nPages active: 375311 \nPages inactive: 372050 \nPages speculative: 2995 \nPages throttled: 0 \nPages wired down: 153470 \n\nCompressor Stats:\nPages used by compressor: 94643 \nPages decompressed: 700320700 \nPages compressed: 787252555 \n\nFile I/O:\nPageins: 1022939879 \nPageouts: 3907356 \n\nSystem-wide memory free percentage: 75%"
+        "raw": "The system has 17179869184 (1048576 pages with a page size of 16384).\n\nStats: \nPages free: 3879 \nPages purgeable: 19245 \nPages purged: 71553741 \n\nSwap I/O:\nSwapins: 132860 \nSwapouts: 793805 \n\nPage Q counts:\nPages active: 374590 \nPages inactive: 368768 \nPages speculative: 6029 \nPages throttled: 0 \nPages wired down: 154001 \n\nCompressor Stats:\nPages used by compressor: 95333 \nPages decompressed: 700322465 \nPages compressed: 787258401 \n\nFile I/O:\nPageins: 1022964437 \nPageouts: 3911124 \n\nSystem-wide memory free percentage: 75%"
       },
       "ok": true,
       "power": {
@@ -27,63 +26,63 @@
       },
       "processes": [
         {
-          "command": "/System/Library/Frameworks/CoreServices.framework/Frameworks/Metadata.framework/Versions/A/Support/mds_stores",
-          "cpu_pct": 117.6,
+          "command": "/System/Library/PrivateFrameworks/MediaAnalysis.framework/Versions/A/mediaanalysisd",
+          "cpu_pct": 83.4,
           "noisy": true
         },
         {
-          "command": "/System/Library/PrivateFrameworks/MediaAnalysis.framework/Versions/A/mediaanalysisd",
-          "cpu_pct": 67.9,
+          "command": "/System/Library/Frameworks/CoreServices.framework/Frameworks/Metadata.framework/Versions/A/Support/mds_stores",
+          "cpu_pct": 18.7,
           "noisy": true
         },
         {
           "command": "sshd-session: mattmireles [priv]",
-          "cpu_pct": 10.6,
-          "noisy": false
-        },
-        {
-          "command": "/System/Library/PrivateFrameworks/MediaAnalysisAccess.framework/Versions/A/XPCServices/mediaanalysisd-access.xpc/Contents/MacOS/mediaanalysisd-access",
-          "cpu_pct": 7.7,
-          "noisy": true
-        },
-        {
-          "command": "/usr/libexec/opendirectoryd",
-          "cpu_pct": 3.8,
+          "cpu_pct": 16.2,
           "noisy": false
         },
         {
           "command": "/System/Library/PrivateFrameworks/SkyLight.framework/Resources/WindowServer",
-          "cpu_pct": 2.4,
+          "cpu_pct": 4.1,
           "noisy": false
         },
         {
-          "command": "/System/Library/Frameworks/CoreServices.framework/Frameworks/Metadata.framework/Support/mds",
-          "cpu_pct": 2.1,
+          "command": "/usr/libexec/opendirectoryd",
+          "cpu_pct": 3.9,
+          "noisy": false
+        },
+        {
+          "command": "/System/Library/PrivateFrameworks/MediaAnalysisAccess.framework/Versions/A/XPCServices/mediaanalysisd-access.xpc/Contents/MacOS/mediaanalysisd-access",
+          "cpu_pct": 3.5,
           "noisy": true
         },
         {
-          "command": "/Users/mattmireles/Library/Application Support/web-scraper-worker/kokoro-current/bin/kokoro-worker",
-          "cpu_pct": 1.5,
+          "command": "/Users/mattmireles/Library/Application Support/Usage Helper/Usage Helper.app/Contents/MacOS/Usage Helper",
+          "cpu_pct": 2.1,
           "noisy": false
         },
         {
-          "command": "/Applications/Botnet.app/Contents/Frameworks/Brave Browser Framework.framework/Versions/147.1.89.132/Helpers/Brave Browser Helper.app/Contents/MacOS/Brave Browser Helper",
+          "command": "/usr/libexec/runningboardd",
+          "cpu_pct": 1.4,
+          "noisy": false
+        },
+        {
+          "command": "/Applications/Botnet.app/Contents/MacOS/Brave Browser",
+          "cpu_pct": 1.4,
+          "noisy": false
+        },
+        {
+          "command": "/Applications/Usage.app/Contents/MacOS/Usage Background Service.app/Contents/MacOS/Usage Background Service",
           "cpu_pct": 1.3,
           "noisy": false
         },
         {
-          "command": "zsh",
-          "cpu_pct": 1.2,
+          "command": "/System/Library/DriverExtensions/com.apple.DriverKit-AppleBCMWLAN.dext/com.apple.DriverKit-AppleBCMWLAN",
+          "cpu_pct": 1.1,
           "noisy": false
         },
         {
-          "command": "/sbin/launchd",
-          "cpu_pct": 1.2,
-          "noisy": false
-        },
-        {
-          "command": "/Users/mattmireles/Library/Application Support/Usage Helper/Usage Helper.app/Contents/MacOS/Usage Helper",
-          "cpu_pct": 1.2,
+          "command": "/usr/libexec/logd",
+          "cpu_pct": 0.9,
           "noisy": false
         }
       ],
@@ -111,24 +110,25 @@
         ],
         "require_ac_power": true
       },
-      "uptime": "18:07  up 7 days,  3:07, 1 user, load averages: 3.27 2.70 2.59"
+      "uptime": "18:28  up 7 days,  3:28, 1 user, load averages: 2.04 2.45 2.53"
     },
     {
       "blockers": [
-        "load1 2.53 exceeds 1.50",
-        "/System/Library/PrivateFrameworks/MediaAnalysis.framework/Versions/A/mediaanalysisd at 96.5% CPU",
-        "/System/Library/Frameworks/CoreServices.framework/Frameworks/Metadata.framework/Versions/A/Support/mds_stores at 28.2% CPU",
+        "load1 3.03 exceeds 1.50",
+        "/System/Library/PrivateFrameworks/MediaAnalysis.framework/Versions/A/mediaanalysisd at 63.5% CPU",
+        "/System/Library/Frameworks/CoreServices.framework/Frameworks/Metadata.framework/Versions/A/Support/mds_stores at 48.5% CPU",
+        "/System/Library/PrivateFrameworks/MediaAnalysisAccess.framework/Versions/A/XPCServices/mediaanalysisd-access.xpc/Contents/MacOS/mediaanalysisd-access at 8.3% CPU",
         "swap used 266.94 MB exceeds 0.0 MB"
       ],
       "load": {
-        "fifteen_minutes": 2.82,
-        "five_minutes": 2.8,
-        "one_minute": 2.53
+        "fifteen_minutes": 2.92,
+        "five_minutes": 2.98,
+        "one_minute": 3.03
       },
       "machine_id": "m2-air",
       "memory_pressure": {
         "free_pct": 76,
-        "raw": "The system has 25769803776 (1572864 pages with a page size of 16384).\n\nStats: \nPages free: 263278 \nPages purgeable: 15190 \nPages purged: 21930598 \n\nSwap I/O:\nSwapins: 12035187 \nSwapouts: 12997454 \n\nPage Q counts:\nPages active: 456273 \nPages inactive: 427872 \nPages speculative: 29871 \nPages throttled: 0 \nPages wired down: 213430 \n\nCompressor Stats:\nPages used by compressor: 144733 \nPages decompressed: 285147052 \nPages compressed: 345888813 \n\nFile I/O:\nPageins: 511189982 \nPageouts: 1716705 \n\nSystem-wide memory free percentage: 76%"
+        "raw": "The system has 25769803776 (1572864 pages with a page size of 16384).\n\nStats: \nPages free: 195134 \nPages purgeable: 15982 \nPages purged: 21936202 \n\nSwap I/O:\nSwapins: 12035187 \nSwapouts: 12997454 \n\nPage Q counts:\nPages active: 486937 \nPages inactive: 429566 \nPages speculative: 70417 \nPages throttled: 0 \nPages wired down: 212439 \n\nCompressor Stats:\nPages used by compressor: 140979 \nPages decompressed: 285156392 \nPages compressed: 345888813 \n\nFile I/O:\nPageins: 511220164 \nPageouts: 1716705 \n\nSystem-wide memory free percentage: 76%"
       },
       "ok": true,
       "power": {
@@ -138,62 +138,62 @@
       "processes": [
         {
           "command": "/System/Library/PrivateFrameworks/MediaAnalysis.framework/Versions/A/mediaanalysisd",
-          "cpu_pct": 96.5,
+          "cpu_pct": 63.5,
           "noisy": true
         },
         {
           "command": "/System/Library/Frameworks/CoreServices.framework/Frameworks/Metadata.framework/Versions/A/Support/mds_stores",
-          "cpu_pct": 28.2,
+          "cpu_pct": 48.5,
           "noisy": true
         },
         {
-          "command": "/usr/sbin/system_profiler",
-          "cpu_pct": 22.0,
-          "noisy": false
-        },
-        {
-          "command": "/System/Library/PrivateFrameworks/TCC.framework/Support/tccd",
-          "cpu_pct": 13.8,
+          "command": "/usr/libexec/signpost_reporter",
+          "cpu_pct": 29.5,
           "noisy": false
         },
         {
           "command": "sshd-session: mattmireles [priv]",
-          "cpu_pct": 10.8,
+          "cpu_pct": 13.9,
           "noisy": false
+        },
+        {
+          "command": "/System/Library/PrivateFrameworks/MediaAnalysisAccess.framework/Versions/A/XPCServices/mediaanalysisd-access.xpc/Contents/MacOS/mediaanalysisd-access",
+          "cpu_pct": 8.3,
+          "noisy": true
         },
         {
           "command": "/usr/libexec/dasd",
-          "cpu_pct": 6.8,
-          "noisy": false
-        },
-        {
-          "command": "/usr/libexec/trustd",
-          "cpu_pct": 6.3,
-          "noisy": false
-        },
-        {
-          "command": "/usr/libexec/runningboardd",
-          "cpu_pct": 5.8,
-          "noisy": false
-        },
-        {
-          "command": "/usr/sbin/system_profiler",
-          "cpu_pct": 4.5,
+          "cpu_pct": 6.9,
           "noisy": false
         },
         {
           "command": "/Users/mattmireles/Library/Application Support/Usage/Usage Helper.app/Contents/MacOS/Usage Helper",
-          "cpu_pct": 3.7,
+          "cpu_pct": 6.5,
           "noisy": false
         },
         {
+          "command": "/Applications/Usage.app/Contents/MacOS/Usage Background Service.app/Contents/MacOS/Usage Background Service",
+          "cpu_pct": 5.1,
+          "noisy": false
+        },
+        {
+          "command": "/usr/libexec/runningboardd",
+          "cpu_pct": 2.9,
+          "noisy": false
+        },
+        {
+          "command": "/System/Library/Frameworks/CoreServices.framework/Frameworks/Metadata.framework/Support/mds",
+          "cpu_pct": 2.3,
+          "noisy": true
+        },
+        {
           "command": "/Applications/Botnet.app/Contents/MacOS/Brave Browser",
-          "cpu_pct": 2.5,
+          "cpu_pct": 2.3,
           "noisy": false
         },
         {
           "command": "/usr/libexec/UserEventAgent",
-          "cpu_pct": 2.2,
+          "cpu_pct": 2.1,
           "noisy": false
         }
       ],
@@ -221,7 +221,7 @@
         ],
         "require_ac_power": true
       },
-      "uptime": "18:07  up 8 days, 19:44, 1 user, load averages: 2.53 2.80 2.82"
+      "uptime": "18:28  up 8 days, 20:05, 1 user, load averages: 3.03 2.98 2.92"
     }
   ]
 }

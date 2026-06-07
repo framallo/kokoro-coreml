@@ -4593,12 +4593,14 @@ Irvine M1 warmed timing when the host is quiet; only then should the checked-in
 five runtime bucket packages be regenerated.
 
 The same five rewrite packages also survive an end-to-end Config F local
-overlay run: `outputs/export_rewrite_smoke/coreml_overlay` symlinks every
-non-generator package back to `coreml/` and redirects only
+overlay run. The preferred current harness path is now
+`run_config_f_reference.py --generator-models-dir outputs/export_rewrite_smoke`,
+which loads duration/F0N/decoder-pre packages from `coreml/` and only redirects
 `kokoro_decoder_har_post_{3s,7s,10s,15s,30s}.mlpackage` to the rewrite export.
-This preserves the staged compute policy and exact-duration package path. Against
-the current best local Config F `vector_noise_batch` result, warmed end-to-end
-medians improve by `1.2-2.6%`:
+This replaces the older manual symlink overlay, while preserving the staged
+compute policy and exact-duration package path. Against the current best local
+Config F `vector_noise_batch` result, warmed end-to-end medians improve by
+`1.2-2.6%`:
 
 | Bucket | Current best local | Rewrite overlay | Speedup |
 | --- | ---: | ---: | ---: |
@@ -4614,6 +4616,16 @@ Spotcheck WAVs versus `vector_noise_batch` remain strict-like: corr
 `outputs/external_bakeoff/results_config_f_reference_m2-studio-local_rewrite_ups_as_conv.json`.
 Do not promote this to the paper-facing frontier until Irvine M1 warmed timing
 confirms the same direction on the lower-end loss platform.
+
+For quiet-host promotion, use:
+
+```bash
+uv run --no-sync python scripts/external_bakeoff/run_config_f_reference.py \
+  --machine-id <host>-rewrite-ups-as-conv \
+  --output outputs/external_bakeoff/results_config_f_reference_<host>_rewrite_ups_as_conv.json \
+  --compute-units staged \
+  --generator-models-dir outputs/export_rewrite_smoke
+```
 
 `scripts/external_bakeoff/summarize_rewrite_candidate_impact.py` turns the
 rewrite evidence into a frontier-impact table at
@@ -4681,19 +4693,29 @@ placement.
 `scripts/external_bakeoff/summarize_candidate_frontier_matrix.py` now records
 the current optimization frontier at
 `outputs/external_bakeoff/candidate_frontier_matrix.md`. The matrix separates
-the single production-ready strict win (HAR-post upsample rewrite), nine
-strict but rejected or too-small families, and three non-strict or
-quality-changing families. The ledger explicitly includes HAR trim, CT8/CT9
-toolchain-only rebuilds, RangeDim/flexible inputs, linear quantization, and the
+the two production-ready strict wins (DecoderPre/HnSF runtime overlap and the
+HAR-post upsample rewrite), strict but rejected or too-small families, and
+non-strict or quality-changing families. The ledger explicitly includes HAR
+trim, CT8/CT9 toolchain-only rebuilds, RangeDim/flexible inputs, linear
+quantization, reusable input arrays, the DecoderPre+Generator merge, and the
 style-specialized upsample rewrite combination so those measured dead ends are
-not rediscovered as open hypotheses. It also
-carries the current iPhone Config F launch blocker from
+not rediscovered as open hypotheses. It also carries the current iPhone Config F
+launch blocker from
 `outputs/external_bakeoff/config_f_ios_manual_install_latest.json`, so the
 next pass has one machine-readable place to check what is worth rerunning. As
 of the latest local check on 2026-06-06 at 07:06, the iPhone remains visible
 and paired, but launching `com.kokoro.externalbakeoff.ConfigFIOSRunnerManual`
 still fails with `RequestDenied ... Locked`; Config F iPhone warmed timing is
 therefore still blocked only by the physical lock state.
+
+`scripts/external_bakeoff/run_rewrite_promotion_when_quiet.py` is now the
+preferred lower-end Mac promotion entrypoint for the HAR-post rewrite. It checks
+the quiet-host gate first, then runs
+`run_config_f_reference.py --generator-models-dir outputs/export_rewrite_smoke`
+only for quiet hosts. The 2026-06-06 dry-run wrote
+`outputs/external_bakeoff/rewrite_promotion_when_quiet_latest.md` with both
+`irvine-m1` and `m2-air` skipped for host noise, so no polluted rewrite timing
+was recorded.
 
 `scripts/external_bakeoff/check_remote_host_quiet.py` now records the lower-end
 Mac timing gate at `outputs/external_bakeoff/remote_host_quiet_latest.md`.
@@ -4719,6 +4741,42 @@ manual runner when the physical device is unlocked, polls up to two hours for
 competitive frontier. The 2026-06-06 07:23 local live launch attempt still
 failed with `device_locked`, so iPhone timing remains blocked only by the
 physical lock state.
+
+### DecoderPre + Generator merged package probe
+
+On 2026-06-06, tested a strict single-package boundary-collapse probe for the
+current short-bucket hypothesis: remove the hot DecoderPre -> Generator Core ML
+handoff while preserving the exact Swift HAR/STFT boundary. The probe exports a
+temporary package with the same Swift-facing inputs as the two current packages:
+`asr`, `f0`, `n_input`, `ref_s`, and padded `har`, then emits `waveform`.
+
+Local 3s M2 Studio result from
+`scripts/probe_decoder_pre_generator_merge.py`, warmed `3`, iterations `8`:
+
+| Compute path | Baseline two predictions | Merged package | Delta | Decision |
+| --- | ---: | ---: | ---: | --- |
+| baseline `decoder_pre=cpuAndNeuralEngine`, `generator=cpuAndGPU`; merged `cpuAndGPU` | `31.929 ms` | `33.589 ms` | `-5.20%` | Reject. |
+| same baseline; merged `.all` | `33.476 ms` | `35.048 ms` | `-4.70%` | Reject. |
+| same baseline; merged `cpuAndNeuralEngine` | `47.173 ms` | `1568.424 ms` | `-3224.86%` | Hard reject; ANE compiler failure. |
+
+The CPU+GPU merged waveform is close to the current two-prediction baseline
+(`SNR 47.90 dB`, correlation `0.999991`, max abs `0.002686`), so this is a
+runtime/scheduling loss rather than a gross parity failure.
+
+Decision: do not promote the merged DecoderPre+Generator package. Removing the
+Swift-visible prediction boundary makes the MLProgram larger and less
+schedulable; the current small DecoderPre package remains cheap enough that its
+separate Core ML call is better than dragging the decoder-pre body into the
+GPU generator package. Future boundary work must remove a handoff without
+making the generator graph less schedulable, or change the source/HAR contract
+inside a runtime-positive package.
+
+Artifacts:
+
+- `scripts/probe_decoder_pre_generator_merge.py`
+- `outputs/decoder_pre_generator_merge/3s/report.json`
+- `outputs/decoder_pre_generator_merge/3s/report_all.json`
+- `outputs/decoder_pre_generator_merge/3s/report_cpune.json`
 
 ---
 

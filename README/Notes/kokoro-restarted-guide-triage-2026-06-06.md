@@ -2,15 +2,18 @@
 
 June 6, 2026
 
-> **Scope:** Six restarted create-guide reports landed after the workflow reset.
-> Treat them as draft research input. This note records the implementation
-> triage and points to the repo-native guides produced by guide-ingest.
+> **Scope:** Eighteen create-guide raw reports landed across twelve distinct
+> topics after the workflow reset. Treat them as draft research input. This
+> note records the implementation triage and points to the repo-native guides
+> produced by guide-ingest.
 
 ## Status
 
 All six restarted runs completed on the second attempt and have been folded
-into repo-native guides. The 15-minute heartbeat was deleted after all reports
-landed.
+into repo-native guides. Six older same-topic runs were superseded by the
+restart outputs and are tracked below for auditability, not imported as
+separate canonical guides. The 15-minute heartbeat was deleted after all
+reports landed.
 
 ## Raw Reports
 
@@ -27,9 +30,18 @@ landed.
 - `/Users/mm/Documents/GitHub/llm-workflows/outputs/create-guide/iphone-core-ml-device-lab-runbook-for-signing-profiling-and-evidence-capture-ret/2026-06-06T23-25-36-950Z/raw-report.md`
 - `/Users/mm/Documents/GitHub/llm-workflows/outputs/create-guide/core-ml-ane-temporal-escape-hatches-for-stateful-streaming-transformers-on-iphon/2026-06-06T22-48-22-802Z/raw-report.md`
 
+## Superseded Duplicate Raw Reports
+
 Older duplicate runs also landed for several restarted topics. Their
 same-topic drafts were superseded by the restarted raw reports above and were
-not imported as separate canonical guides.
+not imported as separate canonical guides:
+
+- `/Users/mm/Documents/GitHub/llm-workflows/outputs/create-guide/core-ml-m1-partition-and-boundary-mechanics-for-strict-1d-kokoro-vocoder-bodies/2026-06-06T23-26-24-084Z/raw-report.md`
+- `/Users/mm/Documents/GitHub/llm-workflows/outputs/create-guide/kokoro-irvine-m1-3s-and-7s-paper-frontier-optimization/2026-06-06T23-26-28-193Z/raw-report.md`
+- `/Users/mm/Documents/GitHub/llm-workflows/outputs/create-guide/kokoro-m1-source-body-core-ml-implementation-path-against-laishere/2026-06-06T23-26-32-266Z/raw-report.md`
+- `/Users/mm/Documents/GitHub/llm-workflows/outputs/create-guide/apple-silicon-warmed-inference-benchmark-hygiene-for-kokoro-core-ml-and-mlx/2026-06-06T23-26-36-396Z/raw-report.md`
+- `/Users/mm/Documents/GitHub/llm-workflows/outputs/create-guide/kokoro-har-stft-strict-repair-and-lightweight-distillation-for-core-ml-source-bo/2026-06-06T23-26-40-384Z/raw-report.md`
+- `/Users/mm/Documents/GitHub/llm-workflows/outputs/create-guide/kokoro-m1-vocoder-runtime-boundary-strategies-for-lower-end-apple-silicon/2026-06-06T23-26-44-290Z/raw-report.md`
 
 ## Immediate Decisions
 
