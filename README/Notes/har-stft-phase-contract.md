@@ -38,6 +38,7 @@ strict waveform-parity proof for this trained generator.
 | natural `har_source -> fused generator` | quality fail, about `16-17 dB` SNR | speed-positive vs generator-only | reject for strict paper claim |
 | `har_source + dumped Nyquist + padded HAR` fused generator | replacement quality good versus current generator: SNR `48-50 dB` | after crediting removed Swift STFT, still no net win: `+0.051 ms` 3s, `+1.326 ms` 7s, `+2.231 ms` 10s, `+14.977 ms` 30s | reject as direct replacement |
 | `har_source + dumped Nyquist + padded HAR` source/noise split | quality good: corr `0.999986975`, SNR `46.25 dB` | slower than decoder-pre+generator: `34.4 ms` vs `30.4 ms` 3s, `-13.0%` | reject |
+| oracle-fitted affine Nyquist repair | padded waveform SNR only `26.46/27.69/27.64/27.04/26.36 dB` for `3s/7s/10s/15s/30s` versus `50.06/49.14/49.87/49.21/48.42 dB` with dumped Nyquist | PyTorch-only sensitivity probe; no production timing because quality fails | reject scalar/affine calibration |
 
 ## Net Source-Boundary Timing
 
@@ -59,6 +60,7 @@ Generated artifacts:
 - `outputs/external_bakeoff/hnsf_source_stft_timing_local.json`
 - `outputs/external_bakeoff/hnsf_source_boundary_net.md`
 - `outputs/external_bakeoff/nyquist_formula_candidate_probe.json`
+- `outputs/nyquist_phase_contribution/summary.md`
 - `scripts/external_bakeoff/summarize_hnsf_source_boundary.py`
 
 ## Decision
@@ -72,6 +74,9 @@ Generated artifacts:
   `(pi / 2) * ((mag - real) / (mag + 1e-7))`. It is phase-equivalent modulo
   wrap, but raw-branch wrong: `3s/7s/10s` produced `2548/5323/7687` raw branch
   errors and natural-geometry waveform SNR only `16.21/15.41/15.06 dB`.
+- Do not promote scalar, negated, or affine Nyquist calibration. Even
+  oracle-fitted affine repair on padded geometry remains around `26-28 dB`
+  SNR, far below the `48-50 dB` dumped-Nyquist repair.
 - The remaining researchable path is phase reparameterization or weight folding:
   make the generator consume a phase-wrap-invariant representation such as
   `sin/cos`, or analytically fold Nyquist branch corrections into the first

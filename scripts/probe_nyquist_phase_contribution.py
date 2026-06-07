@@ -163,6 +163,7 @@ def _make_variants(tensors: dict[str, np.ndarray], recomputed_har: Any, pad_har_
     dumped_har = torch.from_numpy(tensors["har"].astype(np.float32))
     dumped_phase = torch.from_numpy(tensors["har_phase"].astype(np.float32))
     dumped_nyquist = dumped_phase[:, NYQUIST_BIN, :]
+    recomputed_nyquist = recomputed_har[:, NYQUIST_HAR_CHANNEL, :]
     mean_nyquist = float(dumped_nyquist.mean().item())
 
     variants: dict[str, Any] = {}
@@ -185,6 +186,21 @@ def _make_variants(tensors: dict[str, np.ndarray], recomputed_har: Any, pad_har_
     variants["recomputed_manual_pos_pi_nyquist"][:, NYQUIST_HAR_CHANNEL, :] = math.pi
     variants["recomputed_manual_neg_pi_nyquist"] = recomputed_har.clone()
     variants["recomputed_manual_neg_pi_nyquist"][:, NYQUIST_HAR_CHANNEL, :] = -math.pi
+
+    # Oracle-fitted scalar/affine repairs are not deployable by themselves, but
+    # they cheaply falsify the tempting idea that one global calibration can
+    # replace the branch-sensitive Nyquist convention.
+    x = recomputed_nyquist.detach().cpu().numpy().reshape(-1).astype(np.float64)
+    y = dumped_nyquist.detach().cpu().numpy().reshape(-1).astype(np.float64)
+    x_var = float(np.var(x))
+    scale = float(np.cov(x, y, bias=True)[0, 1] / x_var) if x_var > 0.0 else 0.0
+    bias = float(np.mean(y) - scale * np.mean(x))
+    variants["recomputed_manual_affine_nyquist"] = recomputed_har.clone()
+    variants["recomputed_manual_affine_nyquist"][:, NYQUIST_HAR_CHANNEL, :] = (
+        recomputed_nyquist * scale + bias
+    )
+    variants["recomputed_manual_negated_nyquist"] = recomputed_har.clone()
+    variants["recomputed_manual_negated_nyquist"][:, NYQUIST_HAR_CHANNEL, :] = -recomputed_nyquist
     return {name: _pad_or_trim_har(har, pad_har_to) for name, har in variants.items()}
 
 

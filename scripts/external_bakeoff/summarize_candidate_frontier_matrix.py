@@ -183,6 +183,17 @@ CANDIDATES: tuple[Candidate, ...] = (
         next_gate="new representation only: phase reparameterization, weight folding, or a no-extra-boundary Nyquist side input",
     ),
     Candidate(
+        family="Oracle affine Nyquist phase repair",
+        scope="PyTorch-only source/HAR sensitivity probe",
+        best_signal="padded buckets with oracle-fitted affine Nyquist repair reach only 26.46/27.69/27.64/27.04/26.36 dB SNR versus 50.06/49.14/49.87/49.21/48.42 dB with dumped Nyquist",
+        quality="not strict; affine/negated scalar repairs fail the 45 dB padded waveform gate across all buckets",
+        strict=True,
+        production_ready=False,
+        decision="reject; a scalar or affine Nyquist calibration cannot replace the branch-sensitive Nyquist phase contract",
+        evidence="outputs/nyquist_phase_contribution/summary.md",
+        next_gate="skip scalar Nyquist calibration; use branch-side input, phase reparameterization, weight folding, or learned adapter repair",
+    ),
+    Candidate(
         family="RangeDim/flexible input generator",
         scope="single-package GeneratorFromHar with bounded dynamic time axes",
         best_signal="local 3s 343-1561 ms candidate latency versus 31-50 ms fused baseline",

@@ -75,6 +75,10 @@ def summarize_reports(paths: list[Path]) -> dict[str, Any]:
             ),
             "zero_nyquist_corr": _metric(report, "dumped_har_zero_nyquist", "correlation"),
             "zero_nyquist_snr_db": _metric(report, "dumped_har_zero_nyquist", "snr_db"),
+            "affine_nyquist_corr": _metric(report, "recomputed_manual_affine_nyquist", "correlation"),
+            "affine_nyquist_snr_db": _metric(report, "recomputed_manual_affine_nyquist", "snr_db"),
+            "negated_nyquist_corr": _metric(report, "recomputed_manual_negated_nyquist", "correlation"),
+            "negated_nyquist_snr_db": _metric(report, "recomputed_manual_negated_nyquist", "snr_db"),
             "nyquist_wrapped_max_abs_error": _feature_metric(
                 report, "recomputed_nyquist_phase_vs_dumped", "wrapped_max_abs_error"
             ),
@@ -107,9 +111,10 @@ def summarize_reports(paths: list[Path]) -> dict[str, Any]:
             "Using the raw trimmed waveform reference, dumped Nyquist phase plus "
             "padded shipping HAR geometry repairs the source-boundary path across "
             "3s/7s/10s/15s/30s. Natural HAR geometry still fails strict waveform "
-            "parity, and prior fused-source timing shows padded geometry removes "
-            "the speed edge, so Nyquist splicing is evidence for the blocker rather "
-            "than a production win."
+            "parity, and oracle-fitted affine/negated Nyquist repairs still do "
+            "not reach the dumped-Nyquist strict gate. Prior fused-source timing "
+            "shows padded geometry removes the speed edge, so Nyquist splicing is "
+            "evidence for the blocker rather than a production win."
         ),
     }
 
@@ -125,7 +130,7 @@ def render_markdown(summary: dict[str, Any]) -> str:
         f"Rows: `{summary['row_count']}`.",
         f"Strict waveform gate pass rows: `{summary['strict_waveform_gate_pass_count']}`.",
         "",
-        "| Bucket | Geometry | Dumped HAR SNR | Recomputed SNR | + dumped Nyquist SNR | + dumped Nyquist corr | Delta SNR | Zero-Nyquist SNR | Nyquist wrapped max | 2pi errors | Report |",
+        "| Bucket | Geometry | Dumped HAR SNR | Recomputed SNR | + dumped Nyquist SNR | Affine Nyquist SNR | Negated Nyquist SNR | Zero-Nyquist SNR | Nyquist wrapped max | 2pi errors | Report |",
         "| --- | --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | --- |",
     ]
     for row in summary["rows"]:
@@ -138,8 +143,8 @@ def render_markdown(summary: dict[str, Any]) -> str:
                     _fmt(row["dumped_har_snr_db"]),
                     _fmt(row["recomputed_manual_snr_db"]),
                     _fmt(row["recomputed_manual_dumped_nyquist_snr_db"]),
-                    _fmt_corr(row["recomputed_manual_dumped_nyquist_corr"]),
-                    _fmt(row["dumped_nyquist_delta_snr_db"]),
+                    _fmt(row["affine_nyquist_snr_db"]),
+                    _fmt(row["negated_nyquist_snr_db"]),
                     _fmt(row["zero_nyquist_snr_db"]),
                     _fmt(row["nyquist_wrapped_max_abs_error"], 4),
                     "n/a" if row["nyquist_two_pi_branch_errors"] is None else str(row["nyquist_two_pi_branch_errors"]),

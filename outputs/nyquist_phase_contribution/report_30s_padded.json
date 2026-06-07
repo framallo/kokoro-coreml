@@ -251,6 +251,17 @@
       "samples_compared": 657000,
       "snr_db": 24.792965588706373
     },
+    "recomputed_manual_affine_nyquist": {
+      "candidate_samples": 720000,
+      "correlation": 0.998688456854794,
+      "cosine_similarity": 0.998843593150761,
+      "max_abs_error": 0.07208641432225704,
+      "mean_abs_error": 0.0014592449171360298,
+      "reference_samples": 657000,
+      "rmse": 0.002841399306809593,
+      "samples_compared": 657000,
+      "snr_db": 26.361080619671256
+    },
     "recomputed_manual_dumped_nyquist": {
       "candidate_samples": 720000,
       "correlation": 0.9999919965797786,
@@ -283,6 +294,17 @@
       "rmse": 0.0076590330589101,
       "samples_compared": 657000,
       "snr_db": 17.748247141436096
+    },
+    "recomputed_manual_negated_nyquist": {
+      "candidate_samples": 720000,
+      "correlation": 0.9960802840026244,
+      "cosine_similarity": 0.9965443993206786,
+      "max_abs_error": 0.12698838114738464,
+      "mean_abs_error": 0.002483860368943485,
+      "reference_samples": 657000,
+      "rmse": 0.004920520812247093,
+      "samples_compared": 657000,
+      "snr_db": 21.5915045616537
     },
     "recomputed_manual_pos_pi_nyquist": {
       "candidate_samples": 720000,

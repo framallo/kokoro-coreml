@@ -6,9 +6,9 @@ candidates from non-strict or quality-changing branches.
 
 ## Summary
 
-- Candidates recorded: `17`.
+- Candidates recorded: `18`.
 - Production-ready strict candidates: `2`.
-- Strict rejected or too-small candidates: `11`.
+- Strict rejected or too-small candidates: `12`.
 - Non-strict or quality-changing candidates: `4`.
 - Irvine profile rows remaining after current projection: `3`.
 - iPhone Config F launch blocker: `device_locked`.
@@ -28,6 +28,7 @@ candidates from non-strict or quality-changing branches.
 | HAR-source fused strict path | source/STFT/HAR fused path | natural har_source is speed-positive but quality-failing; strict padded/Nyquist fused path has replacement-quality versus the current generator but no net win after Swift STFT credit (+0.051 ms 3s, +1.326 ms 7s, +2.231 ms 10s, +14.977 ms 30s); atan_swift fp32 raw phase is worse (-0.89 dB) | `yes` | `no` | reject; preserving strict source contract loses the speed edge | new representation only: phase reparameterization, weight folding, or a no-extra-boundary Nyquist side input |
 | LUT-palettized full surface plus upsample rewrite | single-package GeneratorFromHar with native-IN, broadcast AdaIN, fp16 inputs, pal8 weights, and zero-insert upsample rewrite | local 3s -2.78% versus production upsample rewrite; CPU+NE still CPU-preferred after ANE compile failure | `yes` | `no` | reject; reproduces laishere-like LUT surface but is slower and does not fix placement | do not repeat palettized final-waveform packages unless compression is moved behind a separate strict tail or changes placement |
 | Native-IN/broadcast/cos/fp16 fused surface without upsample rewrite | single-package GeneratorFromHar | local 3s roughly +0.08-0.26%; .all/CPU+NE remains harmful | `yes` | `no` | reject as too small; graph-surface parity alone is not enough | do not repeat without a new layout, fusion, or partitioning mechanism |
+| Oracle affine Nyquist phase repair | PyTorch-only source/HAR sensitivity probe | padded buckets with oracle-fitted affine Nyquist repair reach only 26.46/27.69/27.64/27.04/26.36 dB SNR versus 50.06/49.14/49.87/49.21/48.42 dB with dumped Nyquist | `yes` | `no` | reject; a scalar or affine Nyquist calibration cannot replace the branch-sensitive Nyquist phase contract | skip scalar Nyquist calibration; use branch-side input, phase reparameterization, weight folding, or learned adapter repair |
 | Style-specialized fused generator | single-package GeneratorFromHar with fixed af_heart projections | Irvine 3s -3.0 ms; M2 Air 3s -2.2 ms; local native-IN variant only +0.07 ms | `yes` | `no` | reject; freezing style is not a speed path | none unless combined with a material new operator rewrite |
 | Style-specialized generator plus upsample rewrite | single-package fixed-voice GeneratorFromHar with native-IN and zero-insert upsample rewrite | local 3s +4.54% vs shipped fused, only +0.17% versus production upsample rewrite at N=30; CPU+NE still CPU-preferred after ANE compile failure | `yes` | `no` | reject; noise-sized over the simpler rewrite and does not fix partitioning | do not promote unless multi-bucket local evidence beats production rewrite by a material margin |
 | Fast F0/source simplification | laishere-like source/body branch | Irvine 3s +10.9 to +18.7 ms depending branch | `no` | `no` | not paper-strict; only useful with source recovery or no-ASR listening acceptance | human listening decisions or source/STFT representation repair |
@@ -48,6 +49,7 @@ candidates from non-strict or quality-changing branches.
 - HAR-source fused strict path: `README/Notes/har-stft-phase-contract.md; scripts/external_bakeoff/summarize_hnsf_source_boundary.py`.
 - LUT-palettized full surface plus upsample rewrite: `outputs/generator_cos_snake/3s_native_broadcast_fp16_pal8_ups_as_conv_vs_rewrite_plain_broadcast_adain_native_in_pal8_fp16_inputs_ups_as_conv_ios17/report_cpu_gpu_vs_rewrite.json`.
 - Native-IN/broadcast/cos/fp16 fused surface without upsample rewrite: `README/Notes/performance-notes.md`.
+- Oracle affine Nyquist phase repair: `outputs/nyquist_phase_contribution/summary.md`.
 - Style-specialized fused generator: `README/Notes/performance-notes.md`.
 - Style-specialized generator plus upsample rewrite: `outputs/generator_style_specialization/3s_style_native_in_ups_as_conv_ios17/report_cpu_gpu_vs_rewrite_n30.json`.
 - Fast F0/source simplification: `outputs/f0_source_listening/cos_resblock_speed_branch/README.md`.
