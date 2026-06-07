@@ -62,6 +62,17 @@ CANDIDATES: tuple[Candidate, ...] = (
         next_gate="quiet Irvine M1 warmed run; quiet M2 Air rerun for fresh lower-end rows",
     ),
     Candidate(
+        family="Generator outputBackings",
+        scope="Swift generator-isolation harness using MLPredictionOptions.outputBackings",
+        best_signal="local M2 Studio CPU+GPU generator-only: 3s -0.077 ms, 7s +0.414 ms versus plain prediction(from:)",
+        quality="strict; 3s waveform_full and trimmed waveform dumps were bit-identical, max_abs 0.0",
+        strict=True,
+        production_ready=False,
+        decision="reject as current production win; keep --generator-output-backing as a device-check harness flag",
+        evidence="README/Notes/kokoro-restarted-guide-triage-2026-06-06.md; outputs/generator_output_backing/",
+        next_gate="only revisit if a lower-end Mac or iPhone shows a material >1 ms warmed median gain",
+    ),
+    Candidate(
         family="Full visible surface rewrite",
         scope="single-package GeneratorFromHar",
         best_signal="local E2E only wins 3s (49.532 ms vs production rewrite 49.669 ms) and noise-ties 10s",

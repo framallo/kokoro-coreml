@@ -58,6 +58,7 @@ Generated artifacts:
 
 - `outputs/external_bakeoff/hnsf_source_stft_timing_local.json`
 - `outputs/external_bakeoff/hnsf_source_boundary_net.md`
+- `outputs/external_bakeoff/nyquist_formula_candidate_probe.json`
 - `scripts/external_bakeoff/summarize_hnsf_source_boundary.py`
 
 ## Decision
@@ -67,10 +68,17 @@ Generated artifacts:
 - Do not promote padded/Nyquist source-boundary packages unless a future change
   removes a Core ML prediction boundary or materially reduces the generator
   body cost.
+- Do not promote the branch-free Nyquist formula
+  `(pi / 2) * ((mag - real) / (mag + 1e-7))`. It is phase-equivalent modulo
+  wrap, but raw-branch wrong: `3s/7s/10s` produced `2548/5323/7687` raw branch
+  errors and natural-geometry waveform SNR only `16.21/15.41/15.06 dB`.
 - The remaining researchable path is phase reparameterization or weight folding:
   make the generator consume a phase-wrap-invariant representation such as
   `sin/cos`, or analytically fold Nyquist branch corrections into the first
   noise-conv surface without retraining.
+
+The first ingested external research report is summarized in
+[Kokoro M1 HAR/STFT contract repair guide](../Guides/apple-silicon/Kokoro-M1-HAR-STFT-contract-repair-guide.md).
 
 ## Repro Commands
 

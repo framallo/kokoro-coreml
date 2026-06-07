@@ -6,9 +6,9 @@ candidates from non-strict or quality-changing branches.
 
 ## Summary
 
-- Candidates recorded: `16`.
+- Candidates recorded: `17`.
 - Production-ready strict candidates: `2`.
-- Strict rejected or too-small candidates: `10`.
+- Strict rejected or too-small candidates: `11`.
 - Non-strict or quality-changing candidates: `4`.
 - Irvine profile rows remaining after current projection: `3`.
 - iPhone Config F launch blocker: `device_locked`.
@@ -23,6 +23,7 @@ candidates from non-strict or quality-changing branches.
 | Exact decoder+vocoder split | multi-package exact Swift HAR contract | Irvine 3s CPU+GPU -24.8 ms; CPU+NE -138.3 ms | `yes` | `no` | reject; split boundary/sync overhead exceeds body savings | do not repeat broad exact split; only try if a Core ML call boundary is removed |
 | Exact generator noise/body split | multi-package exact HAR-post generator split | body-only is faster if x_source tensors are free (M2 17.6 vs 26.4 ms; Irvine 105.9 vs 168.3 ms), but full strict split loses once noise/source is included; decoderPre overlap cannot hide noise because noise waits for HAR and HnSF already exceeds decoderPre on measured 3s hosts; padded/Nyquist 3s source-noise split is quality-good but slower (34.4 vs 30.4 ms, -13.0%) | `yes` | `no` | reject; x_source body package is promising only with a cheaper strict source contract | only revisit if x_source is produced without a separate Core ML noise call or with a new source representation |
 | Full visible surface rewrite | single-package GeneratorFromHar | local E2E only wins 3s (49.532 ms vs production rewrite 49.669 ms) and noise-ties 10s | `yes` | `no` | reject as production replacement; simpler rewrite wins more buckets | none unless a new operator rewrite changes runtime behavior beyond surface matching |
+| Generator outputBackings | Swift generator-isolation harness using MLPredictionOptions.outputBackings | local M2 Studio CPU+GPU generator-only: 3s -0.077 ms, 7s +0.414 ms versus plain prediction(from:) | `yes` | `no` | reject as current production win; keep --generator-output-backing as a device-check harness flag | only revisit if a lower-end Mac or iPhone shows a material >1 ms warmed median gain |
 | HAR input trim | single-package GeneratorFromHar with shorter strict HAR axis | Irvine 3s +0.43%; M2 Studio strict point is slower (-1.15%) | `yes` | `no` | reject; less than one millisecond on M1 cannot close laishere gap | do not repeat tail trim unless a new source/HAR representation removes much more padding |
 | HAR-source fused strict path | source/STFT/HAR fused path | natural har_source is speed-positive but quality-failing; strict padded/Nyquist fused path has replacement-quality versus the current generator but no net win after Swift STFT credit (+0.051 ms 3s, +1.326 ms 7s, +2.231 ms 10s, +14.977 ms 30s); atan_swift fp32 raw phase is worse (-0.89 dB) | `yes` | `no` | reject; preserving strict source contract loses the speed edge | new representation only: phase reparameterization, weight folding, or a no-extra-boundary Nyquist side input |
 | LUT-palettized full surface plus upsample rewrite | single-package GeneratorFromHar with native-IN, broadcast AdaIN, fp16 inputs, pal8 weights, and zero-insert upsample rewrite | local 3s -2.78% versus production upsample rewrite; CPU+NE still CPU-preferred after ANE compile failure | `yes` | `no` | reject; reproduces laishere-like LUT surface but is slower and does not fix placement | do not repeat palettized final-waveform packages unless compression is moved behind a separate strict tail or changes placement |
@@ -42,6 +43,7 @@ candidates from non-strict or quality-changing branches.
 - Exact decoder+vocoder split: `README/Kokoro-M1-vocoder-boundary-research-brief.md`.
 - Exact generator noise/body split: `outputs/external_bakeoff/lower_end_mac_win_attempts.md`.
 - Full visible surface rewrite: `outputs/external_bakeoff/results_config_f_reference_m2-studio-local_full_surface_ups_as_conv.json`.
+- Generator outputBackings: `README/Notes/kokoro-restarted-guide-triage-2026-06-06.md; outputs/generator_output_backing/`.
 - HAR input trim: `README/Notes/performance-notes.md`.
 - HAR-source fused strict path: `README/Notes/har-stft-phase-contract.md; scripts/external_bakeoff/summarize_hnsf_source_boundary.py`.
 - LUT-palettized full surface plus upsample rewrite: `outputs/generator_cos_snake/3s_native_broadcast_fp16_pal8_ups_as_conv_vs_rewrite_plain_broadcast_adain_native_in_pal8_fp16_inputs_ups_as_conv_ios17/report_cpu_gpu_vs_rewrite.json`.

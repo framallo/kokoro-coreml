@@ -67,6 +67,17 @@
       "strict": true
     },
     {
+      "best_signal": "local M2 Studio CPU+GPU generator-only: 3s -0.077 ms, 7s +0.414 ms versus plain prediction(from:)",
+      "decision": "reject as current production win; keep --generator-output-backing as a device-check harness flag",
+      "evidence": "README/Notes/kokoro-restarted-guide-triage-2026-06-06.md; outputs/generator_output_backing/",
+      "family": "Generator outputBackings",
+      "next_gate": "only revisit if a lower-end Mac or iPhone shows a material >1 ms warmed median gain",
+      "production_ready": false,
+      "quality": "strict; 3s waveform_full and trimmed waveform dumps were bit-identical, max_abs 0.0",
+      "scope": "Swift generator-isolation harness using MLPredictionOptions.outputBackings",
+      "strict": true
+    },
+    {
       "best_signal": "Irvine 3s +0.43%; M2 Studio strict point is slower (-1.15%)",
       "decision": "reject; less than one millisecond on M1 cannot close laishere gap",
       "evidence": "README/Notes/performance-notes.md",
@@ -191,11 +202,11 @@
   ],
   "strict_budget": "outputs/external_bakeoff/strict_win_budget_after_overlap_rewrite.json",
   "summary": {
-    "candidate_count": 16,
+    "candidate_count": 17,
     "iphone_launch_blocker": "device_locked",
     "non_strict_candidates": 4,
     "production_ready_strict_candidates": 2,
     "profile_rows_remaining_after_rewrite": 3,
-    "strict_rejected_or_too_small": 10
+    "strict_rejected_or_too_small": 11
   }
 }

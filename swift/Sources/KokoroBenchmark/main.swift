@@ -12,6 +12,7 @@
 ///
 ///     kokoro-bench --models-dir DIR --inputs-dir DIR --hnsf-weights FILE \
 ///                  --generator-input-dump DIR [--warmup 3] [--iterations 10] \
+///                  [--generator-output-backing] \
 ///                  [--output metrics.json]
 ///
 /// **Batch mode** (persistent subprocess — models compiled once):
@@ -544,6 +545,7 @@ func runSingleShot(modelsDir: String, inputsDir: String, hnsfWeightsPath: String
 func runGeneratorInputDump(modelsDir: String, tensorInputDumpPath: String,
                            outputPath: String?, tensorDumpPath: String?,
                            warmupCount: Int, iterations: Int,
+                           useGeneratorOutputBacking: Bool,
                            computeUnits: MLComputeUnits = .all,
                            stagedComputeUnits: Bool = false,
                            stagePolicy: StageComputeUnitPolicy? = nil) throws {
@@ -572,9 +574,26 @@ func runGeneratorInputDump(modelsDir: String, tensorInputDumpPath: String,
         "ref_s": MLFeatureValue(multiArray: refSArray),
         "har": MLFeatureValue(multiArray: harArray),
     ])
+    let predictionOptions = MLPredictionOptions()
+    var outputBacking: MLMultiArray? = nil
+    if useGeneratorOutputBacking {
+        guard let waveformDescription = genModel.modelDescription.outputDescriptionsByName["waveform"],
+              let waveformConstraint = waveformDescription.multiArrayConstraint else {
+            throw PipelineError.modelNotLoaded("generator waveform output description")
+        }
+        outputBacking = try MLMultiArray(
+            shape: waveformConstraint.shape,
+            dataType: waveformConstraint.dataType
+        )
+        predictionOptions.outputBackings = ["waveform": outputBacking as Any]
+    }
 
     for _ in 0..<discardedWarmups {
-        _ = try genModel.prediction(from: inputProvider)
+        if useGeneratorOutputBacking {
+            _ = try genModel.prediction(from: inputProvider, options: predictionOptions)
+        } else {
+            _ = try genModel.prediction(from: inputProvider)
+        }
     }
 
     var predictTimes: [Double] = []
@@ -582,7 +601,11 @@ func runGeneratorInputDump(modelsDir: String, tensorInputDumpPath: String,
     var output: MLFeatureProvider?
     for _ in 0..<measuredIterations {
         let t0 = CFAbsoluteTimeGetCurrent()
-        output = try genModel.prediction(from: inputProvider)
+        if useGeneratorOutputBacking {
+            output = try genModel.prediction(from: inputProvider, options: predictionOptions)
+        } else {
+            output = try genModel.prediction(from: inputProvider)
+        }
         let t1 = CFAbsoluteTimeGetCurrent()
         predictTimes.append(t1 - t0)
     }
@@ -607,6 +630,7 @@ func runGeneratorInputDump(modelsDir: String, tensorInputDumpPath: String,
             "producer": "swift",
             "executable": "kokoro-bench",
             "mode": "generator-input-dump",
+            "generator_output_backing": useGeneratorOutputBacking,
             "source_tensor_dump": tensorInputDumpPath,
             "bucket_seconds": bucketSec,
             "trim_len": outputTrimLen,
@@ -622,6 +646,8 @@ func runGeneratorInputDump(modelsDir: String, tensorInputDumpPath: String,
         "status": "ok",
         "bucket_used": "\(bucketSec)s",
         "compute_unit_policy": cache.computeUnitPolicyLabel,
+        "generator_output_backing": useGeneratorOutputBacking,
+        "generator_output_backing_key": useGeneratorOutputBacking ? "waveform" : NSNull(),
         "source_tensor_dump": tensorInputDumpPath,
         "observed_audio_duration_s": round((Double(outputTrimLen) / 24000.0) * 1e6) / 1e6,
         "warmup_count": discardedWarmups,
@@ -735,6 +761,7 @@ func main() throws {
     var wavPath: String?
     var tensorDumpPath: String?
     var generatorInputDumpPath: String?
+    var useGeneratorOutputBacking = false
     var warmupCount = 1
     var iterations = 1
     var seed: UInt64 = 42
@@ -770,6 +797,8 @@ func main() throws {
             i += 1; tensorDumpPath = args[i]
         case "--generator-input-dump":
             i += 1; generatorInputDumpPath = args[i]
+        case "--generator-output-backing":
+            useGeneratorOutputBacking = true
         case "--batch":
             batchMode = true
         case "--compute-units":
@@ -836,6 +865,7 @@ func main() throws {
             tensorDumpPath: tensorDumpPath,
             warmupCount: warmupCount,
             iterations: iterations,
+            useGeneratorOutputBacking: useGeneratorOutputBacking,
             computeUnits: computeUnits,
             stagedComputeUnits: stagedComputeUnits,
             stagePolicy: stagePolicy

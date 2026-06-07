@@ -23,9 +23,16 @@ laishere on Irvine M1 short and medium buckets. The live frontier is tracked by:
 - `outputs/external_bakeoff/remote_host_quiet_latest.md`
 - `README/Kokoro-M1-graph-surface-target.md`
 - `README/Kokoro-M1-kernel-partition-deep-research-prompt.md`
-- [Core ML vs MLX vocoder scheduling (ConvTranspose / iSTFT)](Core%20ML-MLX-Scheduling-1D-ConvTranspose-ISTFTNet-vocoders-guide.md) —
+- [Core ML vs MLX vocoder scheduling (ConvTranspose / iSTFT)](../Guides/apple-silicon/Core%20ML-MLX-Scheduling-1D-ConvTranspose-ISTFTNet-vocoders-guide.md) —
   synthesized field guide: fixed-cost diagnosis, handoff collapse, dual-output
   anchor, and staged recommendations for Irvine M1 short buckets.
+- [Apple Silicon warmed-inference benchmark hygiene](../Guides/apple-silicon/Apple-Silicon-warmed-inference-benchmark-hygiene-guide.md) —
+  publishable warmed-only methodology and quiet-host gate.
+- [Kokoro M1 vocoder runtime boundary guide](../Guides/apple-silicon/Kokoro-M1-vocoder-runtime-boundary-guide.md) —
+  runtime boundary strategy distilled from the restarted guide run.
+- [Kokoro M1 vocoder partition and boundary guide](../Guides/apple-silicon/Kokoro-M1-vocoder-partition-boundary-guide.md) —
+  output-backing, multi-function, and placement claims filtered against current
+  Core ML API facts.
 
 For `irvine-m1/3s`, the warmed profile gap is:
 
@@ -92,6 +99,7 @@ Saved Irvine M1 `3s` strict-equivalent results:
 | Fused native-IN + broadcast + fp16 inputs | local `3s +0.08%`; `88 -> 0` reductions, `96 -> 0` tiles, `44` instance_norm | Near-surface match but no material speed win. |
 | Fused native-IN + broadcast + fp16 + pal8 | local `3s -2.83%`; `101` LUT ops, no reductions/tiles | Full visible surface match still loses and reduces quality margin. |
 | Fused cos-Snake + native-IN + broadcast + fp16 + upsample ConvT rewrite | local `3s +4.45%`, `7s +3.42%`, `10s +3.56%`, `15s +3.52%`, `30s +3.24%` | Strict local win; promote to Irvine when quiet. |
+| Generator output-backed prediction | local CPU+GPU `3s -0.077 ms`, `7s +0.414 ms`; waveform dump bit-identical | Harness is valid, but below `1 ms` promotion gate; do not productionize. |
 | HAR-source fused strict path | after Swift STFT credit: `+0.051 ms` 3s, `+1.326 ms` 7s, `+2.231 ms` 10s, `+14.977 ms` 30s | Source/STFT boundary is not a net win unless a Core ML call boundary or body cost is also removed. |
 
 Do not spend research budget on another broad split of the current

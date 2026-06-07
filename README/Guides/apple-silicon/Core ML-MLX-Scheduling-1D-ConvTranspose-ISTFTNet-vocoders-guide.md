@@ -14,10 +14,10 @@ June 6, 2026
 - **[Core ML compute unit scheduling](CoreML-Compute-Unit-Scheduling-guide.md)**:
   `MLComputeUnits`, silent fallback, powermetrics, Instruments, and LLDB — the
   generic scheduling layer this guide applies to vocoders.
-- **[Kokoro M1 vocoder boundary research brief](Kokoro-M1-vocoder-boundary-research-brief.md)**:
+- **[Kokoro M1 vocoder boundary research brief](../../Notes/Kokoro-M1-vocoder-boundary-research-brief.md)**:
   Live Irvine M1 gap, falsified placement paths, and frontier artifacts for
   beating laishere without repeating failed probes.
-- **[Kokoro → Core ML conversion](../../Kokoro-to-CoreML-conversion.md)**:
+- **[Kokoro to Core ML conversion](Kokoro-to-CoreML-conversion.md)**:
   Two-stage pipeline architecture, bucketing, and `(B, C, 1, S)` layout context.
 - **[PyTorch MPS and Core ML field guide](pytorch-mps.md)**: MLX/MPS training and
   conversion context; MLX graph-batching dispatch lessons mirror Core ML handoff cost.

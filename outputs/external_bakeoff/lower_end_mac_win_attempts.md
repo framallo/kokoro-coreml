@@ -135,6 +135,46 @@ Decision:
   for the timing environment, not candidate performance.
 - Do not update `competitive_frontier.md` from these smoke rows.
 
+## 2026-06-06 Irvine M1 HAR-Post Rewrite Overlay Readiness
+
+Remote overlay setup:
+
+- Refreshed `/tmp/kokoro-coreml-fastpath-run/swift` on `irvine-m1` from the
+  current local Swift sources and rebuilt `swift/.build/release/kokoro-bench`.
+- Synced the five rewritten HAR-post packages from
+  `outputs/export_rewrite_smoke/kokoro_decoder_har_post_{3,7,10,15,30}s.mlpackage`
+  to the Irvine run tree.
+- Recreated `outputs/export_rewrite_smoke/coreml_overlay` on Irvine with the
+  rewritten HAR-post packages and symlinks to the existing remote `coreml/`
+  package set.
+
+Quiet gate:
+
+- Latest combined lower-end quiet check:
+  `outputs/external_bakeoff/remote_host_quiet_latest.md`.
+- Result: not publishable. Irvine M1 had load1 `2.19`,
+  `mediaanalysisd` at `90.3%`, `mds_stores` at `35.5%`, and
+  `270.12 MB` swap used. M2 Air was also noisy.
+
+Path smoke:
+
+| Bucket | Warm wall | Generator | Status |
+| --- | ---: | ---: | --- |
+| `3s` | `222.6 ms` | `163.4 ms` | path-valid, non-publishable |
+
+Raw artifact:
+
+- `outputs/external_bakeoff/results_config_f_reference_irvine-m1_rewrite_overlay_path_smoke.json`
+
+Decision:
+
+- The Irvine rewrite-overlay path is staged and runnable when the host clears.
+- Do not update `competitive_frontier.md`, `irvine_next_targets.md`, or paper
+  tables from this row. It was collected only to verify the remote overlay path
+  after the quiet gate failed.
+- Next publishable action is a quiet-gated Irvine run for all five buckets using
+  `outputs/export_rewrite_smoke/coreml_overlay`.
+
 ## 2026-06-06 HnSF Per-Harmonic Merge Smoke
 
 Candidate:

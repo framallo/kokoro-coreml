@@ -82,7 +82,7 @@ The Swift logic executes the following sequence:
 
 ### **Stage 2: The HAR Decoder Models (ANE Bound)**
 
-The second stage encapsulates the vocoder—the neural network responsible for converting the stretched acoustic features into a high-fidelity 24kHz audio waveform.6 The vocoder utilizes an ISTFTNet architecture, which consists heavily of 1-dimensional convolutions (Conv1d) and transposed convolutions (ConvTranspose1d), alongside element-wise activations like LeakyReLU.5 Because it lacks recurrent loops, the vocoder is perfectly suited for ANE acceleration.6 For placement, handoff cost, iSTFT tail boundaries, and MLX comparison, see [Core ML vs MLX vocoder scheduling](../Guides/apple-silicon/Core%20ML-MLX-Scheduling-1D-ConvTranspose-ISTFTNet-vocoders-guide.md).
+The second stage encapsulates the vocoder—the neural network responsible for converting the stretched acoustic features into a high-fidelity 24kHz audio waveform.6 The vocoder utilizes an ISTFTNet architecture, which consists heavily of 1-dimensional convolutions (Conv1d) and transposed convolutions (ConvTranspose1d), alongside element-wise activations like LeakyReLU.5 Because it lacks recurrent loops, the vocoder is perfectly suited for ANE acceleration.6 For placement, handoff cost, iSTFT tail boundaries, and MLX comparison, see [Core ML vs MLX vocoder scheduling](Core%20ML-MLX-Scheduling-1D-ConvTranspose-ISTFTNet-vocoders-guide.md).
 
 However, because the ANE requires strictly pre-compiled tensor sizes to prevent the non\_zero\_0\_classic\_cpu failure mode, a "Fixed-Size Bucketing" strategy is employed.6 Rather than exporting a single vocoder capable of any length, the compiler exports several identical vocoders, each hardcoded to output a specific duration of audio.6
 
