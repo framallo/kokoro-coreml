@@ -1,6 +1,6 @@
 # Kokoro 82M TTS - Surgically Optimized for Apple Silicon
 
-**15 seconds of speech in 691ms on an M1 Mac Mini. 2.8x faster than Metal. Using Apple Neural Engine.**
+**30 seconds of speech in 379 ms on a Mac Studio. 2x faster than MLX on the same hardware. Running on the Apple Neural Engine.**
 
 [Kokoro-82M](https://huggingface.co/hexgrad/Kokoro-82M) running natively on the Apple Neural Engine via CoreML. Five compiled models, one Swift pipeline, zero Python at inference time. Every Mac with Apple Silicon is a TTS server.
 
@@ -39,7 +39,7 @@ This repo dissects the Kokoro TTS pipeline and makes deliberate cuts:
                            24 kHz Audio
 ```
 
-**Redesign the inference pipeline, not the model.** Give the ANE clean static tensors. Let the CPU handle the messy parts. That's where the 2.8x over Metal comes from — not by fighting the GPU, but by routing around it.
+**Redesign the inference pipeline, not the model.** Give the ANE clean static tensors. Let the CPU handle the messy parts. That's where the 2x over MLX comes from — not by fighting the GPU, but by routing around it.
 
 ## Why not just use PyTorch MPS?
 
@@ -52,18 +52,34 @@ Swift+CoreML eliminates both: models run on the ANE with no fallback, orchestrat
 
 ## Performance
 
-An M1 Mac Mini with 16 GB of RAM — the cheapest Apple Silicon Mac you can buy — synthesizes 30 seconds of speech in 1.2 seconds. That's 22x realtime.
+An M1 Mac Mini with 16 GB of RAM — the cheapest Apple Silicon Mac you can buy — synthesizes 30 seconds of speech in under two seconds. That's 15x realtime.
 
-| Audio | M1 Mini (16 GB) | M2 Air (24 GB) | M2 Ultra (64 GB) |
+Median warm wall time for one full synthesize call (tokenize in, 24 kHz PCM out), June 2026 external bakeoff:
+
+| Audio | M1 Mini (16 GB) | M2 Air (24 GB) | M2 Ultra Studio (64 GB) |
 | --- | --- | --- | --- |
-| 3s | 157 ms | 200 ms | **59 ms** |
-| 7s | 511 ms | 326 ms | **136 ms** |
-| 15s | 691 ms | 783 ms | **278 ms** |
-| 30s | **1,229 ms** | 1,829 ms | **422 ms** |
+| 3s | 234 ms | 148 ms | **51 ms** |
+| 7s | 493 ms | 331 ms | **96 ms** |
+| 10s | 686 ms | 466 ms | **126 ms** |
+| 15s | 1,015 ms | 694 ms | **186 ms** |
+| 30s | 1,959 ms | 1,405 ms | **379 ms** |
 
-13-70x realtime across the lineup. The M2 Ultra finishes 30s of audio in 422 ms (70x RT), but the M1 Mini is the number that matters — it proves the pipeline ships on hardware people already own.
+12-79x realtime across the lineup. The M2 Ultra finishes 30s of audio in 379 ms (79x RT), but the M1 Mini is the number that matters — it proves the pipeline ships on hardware people already own.
 
-### vs alternatives
+### vs MLX
+
+Same machines, same utterances, same voice, same timing boundary, median of warm calls. Comparator: [Blaizzy/mlx-audio](https://github.com/Blaizzy/mlx-audio) 0.4.3 at commit `862dfbe`, running `mlx-community/Kokoro-82M-bf16`.
+
+| Audio | M2 Ultra Studio | M2 Air | M1 Mini |
+| --- | --- | --- | --- |
+| 3s | 51 ms vs *error* | 148 ms vs *error* | 234 ms vs *error* |
+| 7s | 96 vs 224 ms — **2.3x** | 331 vs 686 ms — **2.1x** | 493 vs 824 ms — **1.7x** |
+| 10s | 126 vs 289 ms — **2.3x** | 466 vs 836 ms — **1.8x** | 686 vs 1,124 ms — **1.6x** |
+| 30s | 379 vs 763 ms — **2.0x** | 1,405 vs 2,600 ms — **1.9x** | 1,959 vs 3,078 ms — **1.6x** |
+
+**Faster on every bucket, on every machine** — and the gap is widest on the newest silicon. (The pinned MLX version fails 3-second clips with a broadcast-shape error; no time to report.) Full cross-implementation matrix, including Soniqo and laishere Core ML ports: [performance-notes.md](README/Notes/performance-notes.md).
+
+### vs PyTorch
 
 | Baseline | Speedup |
 | --- | --- |
@@ -71,7 +87,7 @@ An M1 Mac Mini with 16 GB of RAM — the cheapest Apple Silicon Mac you can buy 
 | PyTorch CPU | **3.5-7.3x** faster |
 | Python+CoreML hybrid | **1.1-2.0x** faster |
 
-Counterbalanced ordering, 5 iterations, warm median. Full data: [bakeoff-results.md](README/Notes/bakeoff-results.md).
+Counterbalanced ordering, 5 iterations, warm median (earlier internal bakeoff; different harness boundary than the table above). Full data: [bakeoff-results.md](README/Notes/bakeoff-results.md).
 
 ## Architecture
 
@@ -131,7 +147,7 @@ Trim (Swift) --> final audio
 | Model | Sizes | Input | Output | Role |
 | --- | --- | --- | --- | --- |
 | `kokoro_duration_t{N}` | T=32, 64, 128, 256, 320, 384, 512 | input_ids, attention_mask, ref_s, speed | pred_dur, d, t_en, s, ref_s_out | BERT + prosody prediction |
-| `kokoro_f0ntrain_t{N}` | T=120, 400, 560, 1200, 2400 | en, s | F0_pred, N_pred | Pitch/noise from aligned features |
+| `kokoro_f0ntrain_t{N}` | T=120, 280, 400, 600, 1200 | en, s | F0_pred, N_pred | Pitch/noise from aligned features |
 | `kokoro_decoder_pre_{N}s` | 3s, 7s, 10s, 15s, 30s | asr, f0, n_input, ref_s | x_pre | Decoder stack (Conv + AdaIN) |
 | `kokoro_decoder_har_post_{N}s` | 3s, 7s, 10s, 15s, 30s | x_pre, ref_s, har | waveform | Generator (0 linear ops, all Conv1d for ANE) |
 
@@ -164,7 +180,7 @@ uv run python scripts/bakeoff_harness.py run \
 uv sync
 uv run python scripts/download_models.py --coreml
 uv run python export_duration.py
-uv run python export_f0ntrain.py --t-frames 120 400 560 1200 2400
+uv run python export_f0ntrain.py --t-frames 120 280 400 600 1200
 uv run python export_decoder_pre.py --buckets 3 7 10 15 30
 uv run python -m export_synth.main --buckets "3s,7s,10s,15s,30s" --mode decoder-har --output_dir coreml
 cd swift && swift build -c release --product kokoro-bench && cd ..
