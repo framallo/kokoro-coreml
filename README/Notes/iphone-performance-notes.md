@@ -9,11 +9,59 @@ iPhone debugging trails (failure modes, not timings) live in
 Newest entries first. Warmed inference only — first-load compile/cache effects
 are excluded from every table, per the runbook.
 
+## iPhone Bench v2: Release-build Config F ladder (supersedes v1 absolute timings)
+
+**Collected:** 2026-06-10
+**Status:** Complete for the staged policy on both phones. These are the
+numbers to cite for absolute iPhone latency; the v1 tables below were Debug
+(`-Onone`) builds and overstate wall time ~1.4–1.7x.
+
+### Why v1 is superseded
+
+The v1 bench app was built with the Xcode `Debug` configuration. Unoptimized
+Swift inflated the CPU-side HnSF stage ~37x (the Core ML stage times were
+barely affected — the distortion is all in Swift-side compute), which
+overstated total wall ~1.7x on the A17 Pro and ~1.4x on the A14. The v1
+tables remain valid for *arm-vs-arm comparison* (both arms paid the same
+Debug tax) and for the jetsam/failure findings, but not for absolute
+latency. All v2 rows are `Release` builds of the same `ios-bench` app, same
+frozen inputs, same warmup discipline (2 warmups discarded, 5 warm calls,
+median reported).
+
+### Warm medians — Release, staged policy
+
+Staged = decoder-pre on `.cpuAndNeuralEngine`; duration, f0n, generator on
+`.cpuAndGPU` — the production Mac Config F policy. `.all` still hard-fails
+on both phones with Core ML error -9 at the duration stage
+(`last_vended_stage: "duration"`), identical to v1; see
+[iphone-debug-notes.md](iphone-debug-notes.md).
+
+| Bucket | 15 Pro Max median | 15 Pro Max RTF | 12 Pro median | 12 Pro RTF |
+| --- | ---: | ---: | ---: | ---: |
+| 3s  | 0.426 s | 0.152 | 0.864 s | 0.308 |
+| 7s  | 0.865 s | 0.128 | 1.625 s | 0.241 |
+| 15s | 1.860 s | 0.134 | 3.727 s | 0.268 |
+| 30s | 3.742 s | 0.137 | 8.551 s | 0.312 |
+
+The A17 Pro runs the 30s bucket ~7.3x realtime; the A14 ~3.5x realtime. The
+padded-duration stage is the largest single line item at 30s: 0.799 s of
+3.742 s (21%) on the A17 Pro, 1.558 s of 8.551 s (18%) on the A14 — the
+motivation for the exact-duration experiment in
+[kokoro-iphone-performance-v1.md](../Plans/kokoro-iphone-performance-v1.md).
+
+Raw artifacts: `outputs/iphone_bench/results_15pm_ladder_release.json` and
+`results_12pro_ladder_release.json` (gitignored; hardware `iPhone16,2` /
+`iPhone13,3`, both iOS 26.5). A 15 Pro Max single-stage compute-unit matrix
+run (`--mode matrix`) and the exact-duration A/B were still in flight when
+this entry was written; results land here when pulled.
+
 ## iPhone Bench v1: Config F vs MLX Swift (kokoro-ios) on two iPhones
 
 **Collected:** 2026-06-09
-**Status:** Complete. First Config F warmed timings on physical iPhones; the
-external-bakeoff gap ("Config F iPhone timings remain absent") is closed.
+**Status:** Superseded for absolute timings by v2 above (these tables are
+Debug builds — see "Why v1 is superseded"). Still the reference for the
+MLX-arm comparison and the A14 jetsam finding; the external-bakeoff gap
+("Config F iPhone timings remain absent") is closed.
 
 ### Setup and provenance
 
