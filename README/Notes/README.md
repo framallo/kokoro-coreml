@@ -11,6 +11,8 @@ top-level `README/*.md` files; link from notes instead of duplicating.
 
 ## Index
 
+- [iPhone performance notes](iphone-performance-notes.md) - Physical-iPhone warmed timings: Config F vs MLX Swift (kokoro-ios), per-device raw warm arrays, compute-policy disclosure.
+- [iPhone debug notes](iphone-debug-notes.md) - iPhone-domain failure modes: ANECCompile `.all` rejection, jetsam memory budget, dyld dynamic-framework abort, locked-device launch gate, host xcodebuild stall reaper.
 - [Core ML compute-unit ablation](coreml-compute-unit-ablation.md) - F/G/G-prime/G-double-prime benchmark logic for isolating `.all`, ANE, GPU, and CPU behavior in the Swift pipeline.
 - [Restarted Kokoro guide triage](kokoro-restarted-guide-triage-2026-06-06.md) - Ingested Deep Research guide triage for warmed lower-end Mac optimization, benchmark hygiene, and source/body candidate priority.
 - [Apple Silicon warmed-inference benchmark hygiene](../Guides/apple-silicon/Apple-Silicon-warmed-inference-benchmark-hygiene-guide.md) - Warmed-only benchmark contract, quiet-host gating, and Core ML compile/cache separation.

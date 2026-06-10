@@ -23,6 +23,18 @@ These numbers do **not** include:
 - model download
 - application-level audio playback
 
+## iPhone benchmarks moved
+
+iPhone timing evidence lives in
+[iphone-performance-notes.md](iphone-performance-notes.md) (first entry:
+2026-06-09, Config F vs MLX Swift `mlalma/kokoro-ios` on iPhone 12 Pro and
+iPhone 15 Pro Max — closes this file's "Config F iPhone timings remain
+absent" gap). iPhone failure modes live in
+[iphone-debug-notes.md](iphone-debug-notes.md). This file stays Mac-only;
+do not merge iPhone rows into Mac tables — the iPhone rows run a different
+compute-unit policy (`staged`, because the iPhone ANE compiler rejects the
+Mac `.all` plan).
+
 ## External Bakeoff: surgical Core ML vs MLX and iOS/Core ML Kokoro
 
 **Collected:** 2026-06-05

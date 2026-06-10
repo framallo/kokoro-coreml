@@ -50,6 +50,19 @@ Same machines, same utterances, same voice (`af_heart`), same timing boundary, m
 
 This is not a knock on MLX -- it's a fine framework. It's the surgery. A monolithic port runs wherever the scheduler drops it. A dissected pipeline runs each stage where it belongs.
 
+## On iPhone
+
+Same `.mlpackage` files, deployed to phones (June 2026, iOS 26.5, median of 5 warm calls). Comparator: [mlalma/kokoro-ios](https://github.com/mlalma/kokoro-ios) 1.0.8, the MLX Swift port of Kokoro -- the Python mlx-audio above doesn't run on iOS. Its timing includes its Misaki G2P pass; ours starts from token IDs.
+
+| Audio | iPhone 15 Pro Max | iPhone 12 Pro |
+|---|---|---|
+| 3s  | 702 vs 919 ms -- **1.3x** | 1,383 vs 1,624 ms -- **1.2x** |
+| 7s  | 1,492 vs 1,875 ms -- **1.3x** | 2,966 vs 2,405 ms -- 0.8x |
+| 15s | 3,272 vs 3,805 ms -- **1.2x** | 6,250 vs 5,022 ms -- 0.8x |
+| 30s | 6,374 vs 7,792 ms -- **1.2x** | 12,301 ms vs *OOM* |
+
+Faster on every bucket on the A17 Pro (4-4.5x realtime). On the 4 GB iPhone 12 Pro it's split: MLX takes the middle buckets, but the memory watchdog kills it on 30-second clips -- this pipeline synthesizes them in 12.3 s. One disclosure: the iPhone ANE compiler (A14 **and** A17 Pro) rejects the full-ANE plan that every M-series Mac runs (`ANECCompile() FAILED`), so iPhone rows use the staged policy -- decoder-pre on the ANE, the other stages on CPU+GPU.
+
 Cold start takes a few seconds (Core ML compiles on first load); everything after is steady-state. Benchmarks drift with macOS and hardware -- rerun them on your target machine with the harness in the GitHub repo before you ship a claim of your own.
 
 ## Why surgery?

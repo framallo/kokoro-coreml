@@ -79,6 +79,19 @@ Same machines, same utterances, same voice, same timing boundary, median of warm
 
 **Faster on every bucket, on every machine** — and the gap is widest on the newest silicon. (The pinned MLX version fails 3-second clips with a broadcast-shape error; no time to report.) Full cross-implementation matrix, including Soniqo and laishere Core ML ports: [performance-notes.md](README/Notes/performance-notes.md).
 
+### On iPhone
+
+Same `.mlpackage` files, deployed to phones (June 2026, iOS 26.5, median of 5 warm calls). Comparator: [mlalma/kokoro-ios](https://github.com/mlalma/kokoro-ios) 1.0.8, the MLX Swift port of Kokoro — the Python mlx-audio above doesn't run on iOS. Its timing includes its Misaki G2P pass; ours starts from token IDs.
+
+| Audio | iPhone 15 Pro Max | iPhone 12 Pro |
+| --- | --- | --- |
+| 3s | 702 vs 919 ms — **1.3x** | 1,383 vs 1,624 ms — **1.2x** |
+| 7s | 1,492 vs 1,875 ms — **1.3x** | 2,966 vs 2,405 ms — 0.8x |
+| 15s | 3,272 vs 3,805 ms — **1.2x** | 6,250 vs 5,022 ms — 0.8x |
+| 30s | 6,374 vs 7,792 ms — **1.2x** | 12,301 ms vs *OOM* |
+
+Faster on every bucket on the A17 Pro (4-4.5x realtime). On the 4 GB iPhone 12 Pro it's split: MLX takes the middle buckets, but the memory watchdog kills it on 30-second clips — our pipeline synthesizes them in 12.3 s. One disclosure: the iPhone ANE compiler (A14 **and** A17 Pro) rejects the full-ANE plan that every M-series Mac runs (`ANECCompile() FAILED`), so iPhone rows use the staged policy — decoder-pre on the ANE, the other stages on CPU+GPU. Bench app: [ios-bench/](ios-bench/); raw data and method: [iphone-performance-notes.md](README/Notes/iphone-performance-notes.md).
+
 ### vs PyTorch
 
 | Baseline | Speedup |
@@ -284,7 +297,9 @@ kokoro-coreml/
 <summary>Documentation index</summary>
 
 - [bakeoff-results.md](README/Notes/bakeoff-results.md) -- v5 cross-machine comparison (M2 Ultra, M2 Air, M1 Mini)
-- [performance-notes.md](README/Notes/performance-notes.md) -- full bakeoff history, stage breakdowns
+- [performance-notes.md](README/Notes/performance-notes.md) -- full Mac bakeoff history, stage breakdowns
+- [iphone-performance-notes.md](README/Notes/iphone-performance-notes.md) -- physical-iPhone timings (Config F vs MLX Swift)
+- [iphone-debug-notes.md](README/Notes/iphone-debug-notes.md) -- iPhone device failure modes and workarounds
 - [ane-optimization-v1.md](README/Plans/ane-optimization-v1.md) -- Linear→Conv1d swap (48→0 MIL linear ops)
 - [swift-prefix-rewrite-v1.md](README/Plans/swift-prefix-rewrite-v1.md) -- Swift pipeline architecture
 - [debug-notes.md](README/Notes/debug-notes.md) -- active issues and resolved investigations
