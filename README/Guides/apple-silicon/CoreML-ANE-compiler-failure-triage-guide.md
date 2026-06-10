@@ -61,6 +61,7 @@ device-version hypotheses until reproduced against the actual Kokoro packages.
 
 ## Related Documentation
 
+- [Kokoro A14 iPhone generator execution guide](Kokoro-A14-iPhone-generator-execution-guide.md)
 - [Core ML compute unit scheduling](CoreML-Compute-Unit-Scheduling-guide.md)
 - [iPhone Core ML device lab runbook](iPhone-CoreML-device-lab-runbook.md)
 - [Apple Silicon warmed-inference benchmark hygiene](Apple-Silicon-warmed-inference-benchmark-hygiene-guide.md)
