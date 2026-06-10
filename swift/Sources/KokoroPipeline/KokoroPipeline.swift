@@ -143,6 +143,23 @@ public struct DurationModelChoice {
     public let packageURL: URL
     public let requiresAttentionMask: Bool
     public let allowsPadding: Bool
+
+    /// Public memberwise init so app integrators (e.g. ios-bench) can build
+    /// choices for precompiled .mlmodelc bundles instead of discovering
+    /// .mlpackage files on disk via ``discoverDurationChoices``.
+    public init(
+        cacheKey: String,
+        tokenLength: Int,
+        packageURL: URL,
+        requiresAttentionMask: Bool,
+        allowsPadding: Bool
+    ) {
+        self.cacheKey = cacheKey
+        self.tokenLength = tokenLength
+        self.packageURL = packageURL
+        self.requiresAttentionMask = requiresAttentionMask
+        self.allowsPadding = allowsPadding
+    }
 }
 
 // MARK: - Pipeline

@@ -171,27 +171,32 @@ single-stage compute-unit flips, and uses exact-native duration models.
 
 **Tasks:**
 
-- [ ] `ios-bench/Sources/BenchApp.swift`: serialize `result.timings` per
-      iteration into the record dict (per-stage arrays + medians:
-      durationCoreML, alignment+matrixOps+padding, f0ntrainCoreML, decoderPre,
-      hnsfSwift, decoderPreHnsfOverlap, generatorCoreML, trim) plus
-      `bucketSeconds` and `ProcessInfo.processInfo.thermalState` per
-      iteration.
-- [ ] `BenchApp.swift`: on every failed ladder rung, persist a record with
-      the failing policy name, NSError domain/code/localizedDescription, and
-      the full error chain — never just the surviving policy.
-- [ ] `BenchApp.swift`: add `--matrix` mode — staged baseline plus exactly
-      one stage flipped to `.cpuAndNeuralEngine` (duration, f0n, decoderPre,
-      generator in turn) and a `.cpuOnly` reference; 3s bucket for all
-      stages, 30s additionally for the generator (tests 16,384 enforcement
-      granularity: the 3s post-upsample body axis 14,401 fits).
-- [ ] Bundle `kokoro_duration_exact_t{44,105,219,476}` in
-      `ios-bench/project.yml` and add a `--exact-duration` launch flag that
-      builds `DurationModelChoice` entries for them
-      (`allowsPadding: false`); keep padded packages as the default so the
-      A/B is explicit.
-- [ ] Keep jetsam-safety invariants: flush after every record, `--arms` /
-      `--keys` process splitting untouched.
+- [x] `ios-bench/Sources/BenchApp.swift`: serialize `result.timings` per
+      iteration into the record dict (per-stage arrays + medians for every
+      `StageTimings` field) plus `bucketSeconds`, `duration_cache_key`, and
+      `ProcessInfo.processInfo.thermalState` per iteration.
+- [x] `BenchApp.swift`: on every failed ladder rung, persist a record with
+      the failing policy name, NSError domain/code/localizedDescription, the
+      full error chain, and a `last_vended_stage` attribution hint from
+      `BundleModelCache` — never just the surviving policy.
+- [x] `BenchApp.swift`: add `--mode matrix` — staged baseline plus exactly
+      one stage flipped per cell (`duration=ne`, `f0n=ne`, `decoderPre=gpu`
+      inverse probe, `generator=ne`) and a `cpuOnly` reference; 3s bucket
+      for all cells, 30s additionally for `generator=ne` (tests 16,384
+      enforcement granularity: the 3s post-upsample body axis 14,401 fits).
+      No ladder fallback in matrix mode — a failed cell is the data point.
+- [x] Bundle `kokoro_duration_exact_t{44,105,219,476}` (via
+      `ios-bench/prepare_resources.sh`, which populates the gitignored
+      `Resources/coreml`) and add a `--exact-duration 1` launch flag that
+      builds `DurationModelChoice` entries for them (`allowsPadding: false`);
+      padded packages remain the default so the A/B is explicit.
+- [x] Keep jetsam-safety invariants: flush after every record, `--arms` /
+      `--keys` process splitting untouched, fresh cache per matrix cell.
+
+2026-06-10: iOS build SUCCEEDED with the instrumented BenchApp (compile is
+the field-coverage check — `stageDict` names every `StageTimings` field).
+One SwiftBuild `CreateBuildDescription` stall hit during verification and was
+cleared with the documented probe-reaper workaround.
 
 **Verification:** iOS build green; a macOS unit or compile-level check that
 the record dict serializes all `StageTimings` fields (no device needed);
