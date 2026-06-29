@@ -8,7 +8,7 @@ do not put local-only analysis in `README/Guides/`.
 
 ---
 
-## Issue: HF SDK Metadata Payload Prepared - Upload Needs Credentials
+## Issue: HF SDK Metadata Published and Verified
 
 ### Context
 
@@ -62,12 +62,84 @@ The script refuses to write inside the repo checkout, verifies each profile's
 payload with `--upload` using env, repo `.env`, or Hugging Face cache
 credentials.
 
+### Upload and Final Verification
+
+After the helper landed, the SDK quickstart was adjusted to avoid hard-coding a
+stale HF revision. The final metadata payload was then regenerated from
+validated starter/full bundles and uploaded with:
+
+```bash
+python3 scripts/prepare_hf_sdk_metadata.py \
+  --repo-id mattmireles/kokoro-coreml \
+  --starter-bundle /tmp/kokoro-sdk-starter-compiled \
+  --full-bundle /tmp/kokoro-sdk-full-compiled \
+  --output /tmp/kokoro-hf-sdk-metadata \
+  --upload
+```
+
+Upload result:
+
+```text
+prepared HF SDK metadata payload at /private/tmp/kokoro-hf-sdk-metadata
+  sdk_commit=ec2412b32931034c3ec6dbf5cbb6a00175f75c39
+  starter: models=10 voices=1 hosted=starter-ec2412b32931
+  full: models=22 voices=54 hosted=full-ec2412b32931
+uploaded HF SDK metadata payload to mattmireles/kokoro-coreml
+```
+
+Live HF verification:
+
+```text
+resolved_revision: 272dca12ba29d956dae5e4a0841789f99131fb40
+last_modified: 2026-06-29T05:35:38.000Z
+missing_sdk_metadata: []
+model_packages: 23
+voices: 54
+```
+
+`sdk/SDKReleaseManifest.json` on that live revision reports:
+
+```text
+sdk_commit: ec2412b32931034c3ec6dbf5cbb6a00175f75c39
+starter: starter-ec2412b32931, 10 models, 1 voice
+full: full-ec2412b32931, 22 models, 54 voices
+model_card_sha256: 24e869ed0e9c2682e46030fcc53824d2f882ef542defe203542c7558fbacf9f9
+```
+
+Final consumer-path verification from the live HF revision:
+
+```bash
+python3 scripts/download_models.py \
+  --repo-id mattmireles/kokoro-coreml \
+  --revision 272dca12ba29d956dae5e4a0841789f99131fb40 \
+  --sdk-profile starter \
+  --manifest-out /tmp/kokoro-download-manifest-final.json
+
+node scripts/build_sdk_bundle.mjs \
+  --profile starter \
+  --compile-models 1 \
+  --output /tmp/kokoro-sdk-starter-hf-final \
+  --repo-id mattmireles/kokoro-coreml \
+  --revision 272dca12ba29d956dae5e4a0841789f99131fb40 \
+  --download-manifest /tmp/kokoro-download-manifest-final.json
+
+node scripts/validate_sdk_bundle.mjs /tmp/kokoro-sdk-starter-hf-final
+```
+
+Result:
+
+```text
+built starter SDK bundle at /tmp/kokoro-sdk-starter-hf-final
+  models=10 voices=1 files=34
+SDK bundle verified: /tmp/kokoro-sdk-starter-hf-final
+```
+
 ### Decision
 
-Do not mark the Phase 7 HF upload checkbox complete until the payload is
-actually uploaded and `scripts/inspect_hf_artifacts.py` confirms the live repo
-has the SDK metadata. Local payload preparation is progress, not a substitute
-for the remote update.
+The Phase 7 HF upload checkbox can be marked complete. The live repo has the
+model-card README, starter top-level manifests, starter/full profile manifests,
+release manifest, checksums, and a verified starter consumer path from the
+final live HF revision.
 
 ---
 

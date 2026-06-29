@@ -769,7 +769,7 @@ runs above.
       metadata payload from validated starter/full SDK bundles, including the
       top-level starter manifests, profile manifests, release manifest,
       checksums, and model-card README.
-- [ ] Update the HF repo only after the public SDK API compiles: upload the SDK
+- [x] Update the HF repo only after the public SDK API compiles: upload the SDK
       manifest, bundle-profile metadata, checksums, and model-card README that
       match the released SDK commit.
 - [x] Add a rollback/deprecation note for the old model card snippet until a
@@ -786,10 +786,16 @@ artifact. `README/hf-model-card.md` now points app developers at `KokoroTTS`
 and marks old `KokoroPipeline` snippets as low-level. Remote HF upload remains
 pending until the final release commit and final artifact checks are ready.
 The physical iOS readiness gate is now closed by iPhone 15 Pro Max evidence.
-The HF metadata payload helper is ready and shares the downloader's env,
-repo `.env`, and Hugging Face cache token lookup. The actual upload remains
-pending until the final payload is regenerated for the current SDK commit and
-the live HF repo verifies.
+The HF metadata payload helper shares the downloader's env, repo `.env`, and
+Hugging Face cache token lookup. The final HF metadata upload succeeded. Live
+HF revision `272dca12ba29d956dae5e4a0841789f99131fb40` has no missing SDK
+metadata, keeps 23 model packages and 54 voices, and publishes
+`sdk/SDKReleaseManifest.json` for SDK commit
+`ec2412b32931034c3ec6dbf5cbb6a00175f75c39`. The release manifest records
+starter `starter-ec2412b32931` with 10 models / 1 voice and full
+`full-ec2412b32931` with 22 models / 54 voices. A final starter download,
+bundle build, compile, and validation from HF revision
+`272dca12ba29d956dae5e4a0841789f99131fb40` passed.
 Verification after the docs/drift slice: `node
 scripts/check_sdk_drift.mjs`, `swift test --package-path swift-tts`, `swift
 test --package-path swift`, `node scripts/compare_botnet_prepare_input.mjs
