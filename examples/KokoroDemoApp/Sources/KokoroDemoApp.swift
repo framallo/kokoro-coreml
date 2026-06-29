@@ -2,6 +2,7 @@ import AVFoundation
 import Darwin
 import SwiftUI
 import KokoroTTS
+import UIKit
 
 @main
 struct KokoroDemoApp: App {
@@ -59,6 +60,8 @@ final class DemoModel: ObservableObject {
     private let engine = AVAudioEngine()
     private let player = AVAudioPlayerNode()
     private var didAutoRun = false
+    private var memoryWarningObserver: NSObjectProtocol?
+    private static let validScenarios: Set<String> = ["smoke", "warm", "long", "cancel", "all"]
 
     init() {
         let args = CommandLine.arguments
@@ -69,6 +72,19 @@ final class DemoModel: ObservableObject {
             self.text = text
         }
         scenario = Self.value(after: "--scenario", in: args) ?? "smoke"
+        memoryWarningObserver = NotificationCenter.default.addObserver(
+            forName: UIApplication.didReceiveMemoryWarningNotification,
+            object: nil,
+            queue: .main
+        ) { _ in
+            print("KOKORO_DEMO_MEMORY_WARNING")
+        }
+    }
+
+    deinit {
+        if let memoryWarningObserver {
+            NotificationCenter.default.removeObserver(memoryWarningObserver)
+        }
     }
 
     func runLaunchAutomationIfRequested() async {
@@ -114,6 +130,10 @@ final class DemoModel: ObservableObject {
         guard !isRunning else {
             return
         }
+        guard Self.validScenarios.contains(scenario) else {
+            print("KOKORO_DEMO_ERROR scenario=\(scenario) \(DemoScenarioError.unsupportedScenario(scenario))")
+            return
+        }
         guard let manifestURL = URL(string: manifestURLString), !manifestURLString.isEmpty else {
             status = "Missing manifest URL"
             print("KOKORO_DEMO_ERROR scenario=\(scenario) missing-manifest-url")
@@ -121,6 +141,7 @@ final class DemoModel: ObservableObject {
         }
         isRunning = true
         do {
+            print("KOKORO_DEMO_PID pid=\(getpid()) scenario=\(scenario)")
             status = "Hydrating resources..."
             let resources = try await KokoroDownloadedModelStore(
                 manifestURL: manifestURL,
@@ -146,9 +167,9 @@ final class DemoModel: ObservableObject {
                 _ = try await runSynthesis(tts: tts, text: text, label: "all-warm")
                 _ = try await runSynthesis(tts: tts, text: Self.longText, label: "all-long")
                 try await runCancellation(tts: tts)
-                print("KOKORO_DEMO_MEMORY physicalFootprintBytes=\(Self.physicalFootprintBytes())")
+                print("KOKORO_DEMO_MEMORY physicalFootprintBytes=\(try Self.physicalFootprintBytes())")
             default:
-                throw DemoScenarioError.unsupportedScenario(scenario)
+                preconditionFailure("Scenario validation drifted for \(scenario)")
             }
             status = "Scenario \(scenario) complete"
             print("KOKORO_DEMO_SCENARIO_DONE scenario=\(scenario)")
@@ -171,12 +192,15 @@ final class DemoModel: ObservableObject {
         let task = Task {
             try await tts.synthesize(Self.longText, voice: KokoroVoiceID(voice))
         }
+        try await Task.sleep(nanoseconds: 500_000_000)
         task.cancel()
         do {
             _ = try await task.value
             throw DemoScenarioError.cancellationDidNotThrow
         } catch is CancellationError {
             print("KOKORO_DEMO_CANCELLED error=CancellationError()")
+        } catch KokoroError.synthesisCancelled {
+            print("KOKORO_DEMO_CANCELLED error=KokoroError.synthesisCancelled")
         } catch {
             throw error
         }
@@ -214,7 +238,7 @@ final class DemoModel: ObservableObject {
             .joined(separator: " ")
     }
 
-    private static func physicalFootprintBytes() -> UInt64 {
+    private static func physicalFootprintBytes() throws -> UInt64 {
         var info = task_vm_info_data_t()
         var count = mach_msg_type_number_t(MemoryLayout<task_vm_info_data_t>.size / MemoryLayout<natural_t>.size)
         let result = withUnsafeMutablePointer(to: &info) { pointer in
@@ -223,7 +247,7 @@ final class DemoModel: ObservableObject {
             }
         }
         guard result == KERN_SUCCESS else {
-            return 0
+            throw DemoScenarioError.memoryFootprintUnavailable(result)
         }
         return info.phys_footprint
     }
@@ -239,13 +263,16 @@ final class DemoModel: ObservableObject {
 enum DemoScenarioError: Error, LocalizedError {
     case unsupportedScenario(String)
     case cancellationDidNotThrow
+    case memoryFootprintUnavailable(kern_return_t)
 
     var errorDescription: String? {
         switch self {
         case .unsupportedScenario(let scenario):
             return "Unsupported scenario: \(scenario)"
         case .cancellationDidNotThrow:
-            return "Cancellation scenario completed without throwing CancellationError."
+            return "Cancellation scenario completed without throwing a known cancellation error."
+        case .memoryFootprintUnavailable(let result):
+            return "Unable to read task_vm_info.phys_footprint: \(result)"
         }
     }
 }

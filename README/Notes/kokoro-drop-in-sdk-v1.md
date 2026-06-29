@@ -81,23 +81,30 @@ xcodebuild -quiet \
   build
 xcodebuild -quiet \
   -scheme KokoroDemoApp \
-  -destination 'id=8A12AEE8-0136-50BE-8EB3-91650E467F15' \
+  -destination 'id=<physical-device-udid>' \
   -derivedDataPath /tmp/kokoro-demo-device-dd \
-  KOKORO_DEMO_DEVELOPMENT_TEAM=6ETYBAJKY8 \
+  KOKORO_DEMO_DEVELOPMENT_TEAM=<apple-development-team-id> \
+  KOKORO_DEMO_BUNDLE_ID=<unique-demo-bundle-id> \
   build
 xcrun devicectl device install app \
-  --device 8A12AEE8-0136-50BE-8EB3-91650E467F15 \
+  --device <physical-device-udid> \
   /tmp/kokoro-demo-device-dd/Build/Products/Debug-iphoneos/KokoroDemoApp.app
 xcrun devicectl device process launch \
-  --device 8A12AEE8-0136-50BE-8EB3-91650E467F15 \
+  --device <physical-device-udid> \
   --terminate-existing \
   --console \
   --timeout 120 \
-  com.mattmireles.KokoroDemoApp \
+  <unique-demo-bundle-id> \
   --auto-run \
-  --manifest-url http://192.168.4.47:8766/HostedManifest.json \
+  --manifest-url http://<mac-lan-ip>:8766/HostedManifest.json \
   --text 'Hello world.'
 ```
+
+The local evidence below used iPhone 15 Pro Max
+`8A12AEE8-0136-50BE-8EB3-91650E467F15`, development team `6ETYBAJKY8`, bundle
+ID `com.mattmireles.KokoroDemoApp`, and Mac LAN URL
+`http://192.168.4.47:8766/HostedManifest.json`. Those are evidence values,
+not SDK defaults.
 
 First device run failed with `NSURLErrorDomain Code=-1009` and
 `Local network prohibited`. Adding `NSLocalNetworkUsageDescription` to the
@@ -125,6 +132,14 @@ After Phase 6 audit, the demo app was tightened:
   a single hardcoded host-IP exception.
 - `AVAudioSession` is configured with `.playback` / `.spokenAudio` before
   scheduling the synthesized buffer.
+- The launch scenario harness now rejects unsupported scenario names before any
+  manifest hydration or SDK load and before printing
+  `KOKORO_DEMO_SCENARIO_DONE`.
+- The cancellation scenario now waits briefly before cancelling so it exercises
+  an in-flight synthesis task; it only passes when the SDK task throws
+  `CancellationError` or the SDK's public `KokoroError.synthesisCancelled`.
+- Memory-footprint sampling now throws instead of printing
+  `KOKORO_DEMO_MEMORY physicalFootprintBytes=0` when `task_info` fails.
 - The plan no longer marks the two-resource-mode demo task complete. The CLI
   and consumer fixture cover bundle and downloaded modes; the iOS demo app
   currently covers downloaded-manifest mode.
@@ -148,7 +163,46 @@ KOKORO_DEMO_SCENARIO_DONE scenario=all
 
 This covers first call, warm call, long text chunking, cancellation, and a
 memory-footprint sample. Background/foreground transition and prepared-input
-parity remain open Phase 6 tasks.
+parity remain open Phase 6 tasks. This run predates the final in-flight
+cancellation delay and memory-footprint failure hardening, so rerun the `all`
+scenario before using it as final Phase 6 release evidence.
+
+A later run after the stricter scenario sentinel fixes emitted:
+
+```text
+KOKORO_DEMO_PID pid=4330 scenario=all
+KOKORO_DEMO_DONE label=all-first samples=37800 sampleRate=24000 duration=1.575 elapsedSeconds=7.4418089389801025
+KOKORO_DEMO_DONE label=all-warm samples=37800 sampleRate=24000 duration=1.575 elapsedSeconds=2.0442559719085693
+KOKORO_DEMO_DONE label=all-long samples=2000280 sampleRate=24000 duration=83.345 elapsedSeconds=78.32158303260803
+KOKORO_DEMO_CANCELLED error=CancellationError()
+KOKORO_DEMO_MEMORY physicalFootprintBytes=1197197336
+KOKORO_DEMO_SCENARIO_DONE scenario=all
+```
+
+`devicectl device process suspend --pid 4330` and `resume --pid 4330`
+succeeded during that run. `devicectl device process sendMemoryWarning --pid
+4330` failed with `NSPOSIXErrorDomain error 2`, so the memory-warning observer
+is present in the app but this command is not counted as successful memory
+pressure evidence.
+
+After the focused cross-agent audit findings were fixed, the final hardened
+`all` scenario was rerun on the same iPhone:
+
+```text
+KOKORO_DEMO_PID pid=4372 scenario=all
+KOKORO_DEMO_DONE label=all-first samples=37800 sampleRate=24000 duration=1.575 elapsedSeconds=7.487910985946655
+KOKORO_DEMO_DONE label=all-warm samples=37800 sampleRate=24000 duration=1.575 elapsedSeconds=2.0750770568847656
+KOKORO_DEMO_DONE label=all-long samples=2000280 sampleRate=24000 duration=83.345 elapsedSeconds=71.88779497146606
+KOKORO_DEMO_CANCELLED error=KokoroError.synthesisCancelled
+KOKORO_DEMO_MEMORY physicalFootprintBytes=976439296
+KOKORO_DEMO_SCENARIO_DONE scenario=all
+```
+
+`devicectl device process suspend --pid 4372` and `resume --pid 4372`
+succeeded after that final scenario. This is process suspend/resume evidence,
+not a full app background/foreground UI transition. Memory evidence is a
+successful `task_vm_info.phys_footprint` sample, not a memory-warning or memory
+pressure event.
 
 The local HTTP server observed the phone at `192.168.4.32` downloading
 `HostedManifest.json`, `KokoroRuntimeManifest.json`, all starter duration

@@ -660,7 +660,7 @@ British Misaki phonemizer for `b*` voices.
       cancellation, and memory pressure behavior.
 - [ ] Compare output from `KokoroTTS.synthesize("Hello world", .afHeart)` against
       the JS-prepared + old `KokoroPipeline` path for matching prepared inputs.
-- [ ] Record device and Mac validation evidence in `README/Notes/`, not
+- [x] Record device and Mac validation evidence in `README/Notes/`, not
       `README/Guides/`.
 
 **Verification:** macOS fixture green; iOS app build green; physical-device
@@ -678,12 +678,17 @@ iOS Simulator builds for `KokoroConsumerFixture` and `KokoroDemoApp` pass.
 `8A12AEE8-0136-50BE-8EB3-91650E467F15`; first-call downloaded-manifest
 synthesis completed with
 `KOKORO_DEMO_DONE samples=37800 sampleRate=24000 duration=1.575`. Physical
-device scenario `all` also completed first call, warm call, long text,
-cancellation, and memory-footprint logging after the audit fixes:
-`all-first elapsedSeconds=7.4487`, `all-warm elapsedSeconds=2.0499`,
-`all-long duration=83.345 elapsedSeconds=72.2640`, `CancellationError()`, and
-`physicalFootprintBytes=1221429320`. Physical readiness remains open until
-background/foreground and prepared-input parity checks run.
+device scenario `all` completed on the final hardened harness with first call,
+warm call, long text, typed SDK cancellation, and memory-footprint logging:
+`KOKORO_DEMO_PID pid=4372 scenario=all`,
+`all-first elapsedSeconds=7.4879`, `all-warm elapsedSeconds=2.0751`,
+`all-long duration=83.345 elapsedSeconds=71.8878`,
+`KokoroError.synthesisCancelled`, and
+`physicalFootprintBytes=976439296`. `devicectl` suspend/resume succeeded for
+PID 4372, but `sendMemoryWarning` failed in an earlier attempt with
+`NSPOSIXErrorDomain 2`, so it is not counted as memory-pressure evidence.
+Physical readiness remains open until a real background/foreground transition,
+memory-pressure proof, and prepared-input parity check run.
 
 ---
 
@@ -1100,10 +1105,10 @@ command or script; SDK constants/docs/model-card drift check passes.
 
 ### Phase 6: Examples and macOS/iOS Validation
 
-- [ ] Add fresh consumer fixture.
-- [ ] Add example app and smoke executable.
-- [ ] Run macOS smoke.
-- [ ] Build iOS simulator app.
+- [x] Add fresh consumer fixture.
+- [x] Add example app and smoke executable.
+- [x] Run macOS smoke.
+- [x] Build iOS simulator app.
 - [ ] Run mandatory physical-device smoke or mark iOS release blocked.
 
 ### Phase 7: Release Artifact and Documentation Pass

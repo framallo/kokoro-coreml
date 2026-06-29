@@ -1,6 +1,6 @@
 name: KokoroDemoApp
 options:
-  bundleIdPrefix: com.mattmireles
+  bundleIdPrefix: dev.kokoro
   deploymentTarget:
     iOS: "18.0"
 packages:
@@ -24,7 +24,7 @@ targets:
         INFOPLIST_KEY_UILaunchScreen_Generation: YES
         INFOPLIST_KEY_NSAppTransportSecurity_NSAllowsLocalNetworking: YES
         INFOPLIST_KEY_NSLocalNetworkUsageDescription: KokoroDemoApp downloads a local development model manifest from this Mac during SDK validation.
-        KOKORO_DEMO_BUNDLE_ID: com.mattmireles.KokoroDemoApp
+        KOKORO_DEMO_BUNDLE_ID: dev.kokoro.KokoroDemoApp
         KOKORO_DEMO_DEVELOPMENT_TEAM: ""
         SWIFT_VERSION: "5.9"
         IPHONEOS_DEPLOYMENT_TARGET: "18.0"

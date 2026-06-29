@@ -201,7 +201,7 @@
 				INFOPLIST_KEY_NSLocalNetworkUsageDescription = "KokoroDemoApp downloads a local development model manifest from this Mac during SDK validation.";
 				INFOPLIST_KEY_UILaunchScreen_Generation = YES;
 				IPHONEOS_DEPLOYMENT_TARGET = 18.0;
-				KOKORO_DEMO_BUNDLE_ID = com.mattmireles.KokoroDemoApp;
+				KOKORO_DEMO_BUNDLE_ID = dev.kokoro.KokoroDemoApp;
 				KOKORO_DEMO_DEVELOPMENT_TEAM = "";
 				LD_RUNPATH_SEARCH_PATHS = (
 					"$(inherited)",
@@ -226,7 +226,7 @@
 				INFOPLIST_KEY_NSLocalNetworkUsageDescription = "KokoroDemoApp downloads a local development model manifest from this Mac during SDK validation.";
 				INFOPLIST_KEY_UILaunchScreen_Generation = YES;
 				IPHONEOS_DEPLOYMENT_TARGET = 18.0;
-				KOKORO_DEMO_BUNDLE_ID = com.mattmireles.KokoroDemoApp;
+				KOKORO_DEMO_BUNDLE_ID = dev.kokoro.KokoroDemoApp;
 				KOKORO_DEMO_DEVELOPMENT_TEAM = "";
 				LD_RUNPATH_SEARCH_PATHS = (
 					"$(inherited)",
