@@ -714,6 +714,10 @@ The demo app also now exposes both resource modes: `--resource-mode downloaded
 --manifest-url ...` for hosted-manifest validation and `--resource-mode bundled
 --bundle-subdirectory KokoroRuntime` for apps that embed a generated runtime
 directory. Generic iOS build passed after this UI/automation change.
+A later physical-device retry still found iPhone 12 Pro
+`F383FC46-FD64-5346-AEC6-59E3E2F8C9CA` locked; the signed device build timed out
+waiting for that destination, so the physical lifecycle/memory gate remains
+externally blocked.
 
 ---
 

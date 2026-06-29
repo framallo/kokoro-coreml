@@ -309,6 +309,35 @@ xcodebuild: error: Timed out waiting for all destinations matching the provided 
 Webcam may need to be unlocked to recover from previously reported preparation errors
 ```
 
+After the startup-safety and demo-resource-mode fixes landed, the same device
+was checked again. `xcrun devicectl device info details --device
+F383FC46-FD64-5346-AEC6-59E3E2F8C9CA` still reported:
+
+```text
+WARNING: Unable to retrieve complete information for this device.
+Error: The operation failed because the device was still locked.
+```
+
+The signed device build was retried with the same team and bundle ID:
+
+```bash
+xcodebuild -quiet \
+  -project examples/KokoroDemoApp/KokoroDemoApp.xcodeproj \
+  -scheme KokoroDemoApp \
+  -destination 'id=F383FC46-FD64-5346-AEC6-59E3E2F8C9CA' \
+  -derivedDataPath /tmp/kokoro-demo-webcam-dd \
+  KOKORO_DEMO_DEVELOPMENT_TEAM=6ETYBAJKY8 \
+  KOKORO_DEMO_BUNDLE_ID=com.mattmireles.KokoroDemoApp \
+  build
+```
+
+It failed the same way:
+
+```text
+xcodebuild: error: Timed out waiting for all destinations matching the provided destination specifier to become available
+Webcam may need to be unlocked to recover from previously reported preparation errors
+```
+
 Do not mark iOS release readiness complete from this attempt. The release gate
 is intentionally blocked until an unlocked physical iPhone records
 `KOKORO_DEMO_SCENE_PHASE` background/foreground logs and a real memory-pressure
