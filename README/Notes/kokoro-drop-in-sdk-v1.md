@@ -135,6 +135,21 @@ The rebuilt app was reinstalled and relaunched on `Commas?` after those fixes:
 KOKORO_DEMO_DONE samples=37800 sampleRate=24000 duration=1.575
 ```
 
+The app then ran the repeatable `--scenario all` path on the same device:
+
+```text
+KOKORO_DEMO_DONE label=all-first samples=37800 sampleRate=24000 duration=1.575 elapsedSeconds=7.647611975669861
+KOKORO_DEMO_DONE label=all-warm samples=37800 sampleRate=24000 duration=1.575 elapsedSeconds=2.1253479719161987
+KOKORO_DEMO_DONE label=all-long samples=2000280 sampleRate=24000 duration=83.345 elapsedSeconds=81.14714300632477
+KOKORO_DEMO_CANCELLED error=CancellationError()
+KOKORO_DEMO_MEMORY physicalFootprintBytes=1243220112
+KOKORO_DEMO_SCENARIO_DONE scenario=all
+```
+
+This covers first call, warm call, long text chunking, cancellation, and a
+memory-footprint sample. Background/foreground transition and prepared-input
+parity remain open Phase 6 tasks.
+
 The local HTTP server observed the phone at `192.168.4.32` downloading
 `HostedManifest.json`, `KokoroRuntimeManifest.json`, all starter duration
 packages, `kokoro_f0ntrain_t600`, 15-second decoder-pre/HAR-post packages,

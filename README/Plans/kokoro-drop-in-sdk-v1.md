@@ -678,8 +678,12 @@ iOS Simulator builds for `KokoroConsumerFixture` and `KokoroDemoApp` pass.
 `8A12AEE8-0136-50BE-8EB3-91650E467F15`; first-call downloaded-manifest
 synthesis completed with
 `KOKORO_DEMO_DONE samples=37800 sampleRate=24000 duration=1.575`. Physical
-readiness remains open until warm-call, long-text, cancellation,
-background/foreground, and memory-pressure checks run.
+device scenario `all` also completed first call, warm call, long text,
+cancellation, and memory-footprint logging:
+`all-first elapsedSeconds=7.6476`, `all-warm elapsedSeconds=2.1253`,
+`all-long duration=83.345 elapsedSeconds=81.1471`, `CancellationError()`, and
+`physicalFootprintBytes=1243220112`. Physical readiness remains open until
+background/foreground and prepared-input parity checks run.
 
 ---
 
