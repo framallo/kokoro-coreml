@@ -1,7 +1,7 @@
 # MoE SSD/DRAM Expert Prefetch Experiment Plan
 
 **Date:** 2026-06-29
-**Status:** Planned
+**Status:** In-Progress
 
 > This plan is intentionally gate-heavy. The goal is not to build an impressive
 > prefetcher. The goal is to cheaply decide whether learned expert prefetching
@@ -153,15 +153,15 @@ README/Notes/moe-ssd-dram-prefetch-results.md
 
 **Tasks:**
 
-- [ ] Add `scripts/moe_prefetch/schema.py` with dataclasses or typed dicts for
+- [x] Add `scripts/moe_prefetch/schema.py` with dataclasses or typed dicts for
       machine info, model inventory, Stage 0 measurements, and gate decisions.
-- [ ] Add `scripts/moe_prefetch/model_inventory.py` to record candidate model,
+- [x] Add `scripts/moe_prefetch/model_inventory.py` to record candidate model,
       expert count, active experts per token, quantization assumption, estimated
       expert bytes, target tokens/sec, and target device.
-- [ ] Write `outputs/moe_prefetch/stage0/thresholds.json` from CLI arguments;
+- [x] Write `outputs/moe_prefetch/stage0/thresholds.json` from CLI arguments;
       default provisional thresholds are `speed_win_percent=25`,
       `trivial_margin_percent=10`, and `energy_regression_allowed=false`.
-- [ ] Add `README/Notes/moe-ssd-dram-prefetch-results.md` with a Stage 0 section
+- [x] Add `README/Notes/moe-ssd-dram-prefetch-results.md` with a Stage 0 section
       and links back to this plan.
 
 **Verification:**
