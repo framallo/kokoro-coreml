@@ -148,7 +148,7 @@ final class DemoModel: ObservableObject {
                 try await runCancellation(tts: tts)
                 print("KOKORO_DEMO_MEMORY physicalFootprintBytes=\(Self.physicalFootprintBytes())")
             default:
-                print("KOKORO_DEMO_ERROR scenario=\(scenario) unsupported-scenario")
+                throw DemoScenarioError.unsupportedScenario(scenario)
             }
             status = "Scenario \(scenario) complete"
             print("KOKORO_DEMO_SCENARIO_DONE scenario=\(scenario)")
@@ -174,9 +174,11 @@ final class DemoModel: ObservableObject {
         task.cancel()
         do {
             _ = try await task.value
-            print("KOKORO_DEMO_ERROR scenario=cancel cancellation-did-not-throw")
+            throw DemoScenarioError.cancellationDidNotThrow
+        } catch is CancellationError {
+            print("KOKORO_DEMO_CANCELLED error=CancellationError()")
         } catch {
-            print("KOKORO_DEMO_CANCELLED error=\(error)")
+            throw error
         }
     }
 
@@ -231,5 +233,19 @@ final class DemoModel: ObservableObject {
             return nil
         }
         return args[index + 1]
+    }
+}
+
+enum DemoScenarioError: Error, LocalizedError {
+    case unsupportedScenario(String)
+    case cancellationDidNotThrow
+
+    var errorDescription: String? {
+        switch self {
+        case .unsupportedScenario(let scenario):
+            return "Unsupported scenario: \(scenario)"
+        case .cancellationDidNotThrow:
+            return "Cancellation scenario completed without throwing CancellationError."
+        }
     }
 }

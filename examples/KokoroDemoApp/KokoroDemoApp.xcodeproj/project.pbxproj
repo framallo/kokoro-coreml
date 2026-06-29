@@ -197,8 +197,7 @@
 				CODE_SIGN_STYLE = Automatic;
 				DEVELOPMENT_TEAM = "$(KOKORO_DEMO_DEVELOPMENT_TEAM)";
 				GENERATE_INFOPLIST_FILE = YES;
-				INFOPLIST_KEY_NSAppTransportSecurity_NSExceptionDomains_192.168.4.47_NSExceptionAllowsInsecureHTTPLoads = YES;
-				INFOPLIST_KEY_NSAppTransportSecurity_NSExceptionDomains_192.168.4.47_NSIncludesSubdomains = NO;
+				INFOPLIST_KEY_NSAppTransportSecurity_NSAllowsLocalNetworking = YES;
 				INFOPLIST_KEY_NSLocalNetworkUsageDescription = "KokoroDemoApp downloads a local development model manifest from this Mac during SDK validation.";
 				INFOPLIST_KEY_UILaunchScreen_Generation = YES;
 				IPHONEOS_DEPLOYMENT_TARGET = 18.0;
@@ -223,8 +222,7 @@
 				CODE_SIGN_STYLE = Automatic;
 				DEVELOPMENT_TEAM = "$(KOKORO_DEMO_DEVELOPMENT_TEAM)";
 				GENERATE_INFOPLIST_FILE = YES;
-				INFOPLIST_KEY_NSAppTransportSecurity_NSExceptionDomains_192.168.4.47_NSExceptionAllowsInsecureHTTPLoads = YES;
-				INFOPLIST_KEY_NSAppTransportSecurity_NSExceptionDomains_192.168.4.47_NSIncludesSubdomains = NO;
+				INFOPLIST_KEY_NSAppTransportSecurity_NSAllowsLocalNetworking = YES;
 				INFOPLIST_KEY_NSLocalNetworkUsageDescription = "KokoroDemoApp downloads a local development model manifest from this Mac during SDK validation.";
 				INFOPLIST_KEY_UILaunchScreen_Generation = YES;
 				IPHONEOS_DEPLOYMENT_TARGET = 18.0;

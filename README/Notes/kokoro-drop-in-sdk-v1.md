@@ -121,8 +121,8 @@ After Phase 6 audit, the demo app was tightened:
 - Signing is no longer hardcoded in the project. Device builds pass the team as
   `KOKORO_DEMO_DEVELOPMENT_TEAM=6ETYBAJKY8`; other developers should pass their
   own team ID and bundle ID override when needed.
-- ATS is narrowed to the local development host used by the smoke instead of
-  `NSAllowsArbitraryLoads`.
+- ATS now uses `NSAllowsLocalNetworking` instead of `NSAllowsArbitraryLoads` or
+  a single hardcoded host-IP exception.
 - `AVAudioSession` is configured with `.playback` / `.spokenAudio` before
   scheduling the synthesized buffer.
 - The plan no longer marks the two-resource-mode demo task complete. The CLI
@@ -138,11 +138,11 @@ KOKORO_DEMO_DONE samples=37800 sampleRate=24000 duration=1.575
 The app then ran the repeatable `--scenario all` path on the same device:
 
 ```text
-KOKORO_DEMO_DONE label=all-first samples=37800 sampleRate=24000 duration=1.575 elapsedSeconds=7.647611975669861
-KOKORO_DEMO_DONE label=all-warm samples=37800 sampleRate=24000 duration=1.575 elapsedSeconds=2.1253479719161987
-KOKORO_DEMO_DONE label=all-long samples=2000280 sampleRate=24000 duration=83.345 elapsedSeconds=81.14714300632477
+KOKORO_DEMO_DONE label=all-first samples=37800 sampleRate=24000 duration=1.575 elapsedSeconds=7.448700904846191
+KOKORO_DEMO_DONE label=all-warm samples=37800 sampleRate=24000 duration=1.575 elapsedSeconds=2.049916982650757
+KOKORO_DEMO_DONE label=all-long samples=2000280 sampleRate=24000 duration=83.345 elapsedSeconds=72.26398003101349
 KOKORO_DEMO_CANCELLED error=CancellationError()
-KOKORO_DEMO_MEMORY physicalFootprintBytes=1243220112
+KOKORO_DEMO_MEMORY physicalFootprintBytes=1221429320
 KOKORO_DEMO_SCENARIO_DONE scenario=all
 ```
 
