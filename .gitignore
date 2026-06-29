@@ -181,6 +181,7 @@ outputs_mps/
 swift/.build/
 swift-tts/.build/
 examples/*/.build/
+examples/KokoroDemoApp/local-signing.yml
 *.profraw
 
 # CoreML model packages — downloaded from HF Hub, not stored in git.

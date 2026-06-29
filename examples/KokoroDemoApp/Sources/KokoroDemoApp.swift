@@ -108,6 +108,9 @@ final class DemoModel: ObservableObject {
     }
 
     private func play(_ audio: KokoroAudio) throws {
+        let session = AVAudioSession.sharedInstance()
+        try session.setCategory(.playback, mode: .spokenAudio, options: [])
+        try session.setActive(true)
         let buffer = try audio.makePCMBuffer()
         if !engine.attachedNodes.contains(player) {
             engine.attach(player)

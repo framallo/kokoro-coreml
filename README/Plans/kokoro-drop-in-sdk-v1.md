@@ -640,9 +640,10 @@ British Misaki phonemizer for `b*` voices.
 
 - [x] Add `examples/KokoroDemoApp` with a minimal iOS UI: text field,
       voice picker, synthesize button, progress/error display, and playback.
-- [x] Include two resource modes in the example when feasible: bundled starter
+- [ ] Include two resource modes in the example when feasible: bundled starter
       resources for offline demos and downloaded manifest resources for the
-      Gist-style app flow.
+      Gist-style app flow. The CLI/fixture covers both modes; the iOS demo app
+      currently covers downloaded manifest mode only.
 - [x] Extend the Phase 5 `swift-tts` `kokoro-sdk-smoke` executable into a
       Phase 6 app/fixture smoke that writes a WAV and exercises bundled and
       downloaded resources.

@@ -83,6 +83,7 @@ xcodebuild -quiet \
   -scheme KokoroDemoApp \
   -destination 'id=8A12AEE8-0136-50BE-8EB3-91650E467F15' \
   -derivedDataPath /tmp/kokoro-demo-device-dd \
+  KOKORO_DEMO_DEVELOPMENT_TEAM=6ETYBAJKY8 \
   build
 xcrun devicectl device install app \
   --device 8A12AEE8-0136-50BE-8EB3-91650E467F15 \
@@ -100,9 +101,35 @@ xcrun devicectl device process launch \
 
 First device run failed with `NSURLErrorDomain Code=-1009` and
 `Local network prohibited`. Adding `NSLocalNetworkUsageDescription` to the
-generated Info.plist fixed the local-network permission path.
+generated Info.plist fixed the local-network permission path after the device
+accepted the local-network prompt. A fresh install may still need manual
+permission acceptance, so this is not yet a fully unattended local-network
+device harness.
 
 Second device run on `Commas?` (iPhone 15 Pro Max) succeeded:
+
+```text
+KOKORO_DEMO_DONE samples=37800 sampleRate=24000 duration=1.575
+```
+
+This sentinel is emitted after synthesis returns samples and the buffer is
+scheduled for playback. It proves downloaded raw-text synthesis on device; it
+does not yet prove audible playback completion.
+
+After Phase 6 audit, the demo app was tightened:
+
+- Signing is no longer hardcoded in the project. Device builds pass the team as
+  `KOKORO_DEMO_DEVELOPMENT_TEAM=6ETYBAJKY8`; other developers should pass their
+  own team ID and bundle ID override when needed.
+- ATS is narrowed to the local development host used by the smoke instead of
+  `NSAllowsArbitraryLoads`.
+- `AVAudioSession` is configured with `.playback` / `.spokenAudio` before
+  scheduling the synthesized buffer.
+- The plan no longer marks the two-resource-mode demo task complete. The CLI
+  and consumer fixture cover bundle and downloaded modes; the iOS demo app
+  currently covers downloaded-manifest mode.
+
+The rebuilt app was reinstalled and relaunched on `Commas?` after those fixes:
 
 ```text
 KOKORO_DEMO_DONE samples=37800 sampleRate=24000 duration=1.575
