@@ -783,18 +783,19 @@ integration, bundled and downloaded resources, playback, starter/full bundle
 commands, release gates, troubleshooting, and the V1 decision to publish source
 plus downloadable resource bundles rather than a SwiftPM binary/resource
 artifact. `README/hf-model-card.md` now points app developers at `KokoroTTS`
-and marks old `KokoroPipeline` snippets as low-level. Remote HF upload remains
-pending until the final release commit and final artifact checks are ready.
+and marks old `KokoroPipeline` snippets as low-level.
 The physical iOS readiness gate is now closed by iPhone 15 Pro Max evidence.
 The HF metadata payload helper shares the downloader's env, repo `.env`, and
-Hugging Face cache token lookup. The first HF metadata upload reached live
-revision `272dca12ba29d956dae5e4a0841789f99131fb40`, but the final audit
-superseded it: the hardened upload must include the starter runtime files at
-the HF root, expose only the top-level starter `HostedManifest.json` as the
-directly hydratable manifest, publish full profile metadata for supported
-English voices only, and point `sdk/SDKReleaseManifest.json` at the final SDK
-hardening commit. Replace this paragraph with the new live revision after the
-fixed payload upload and inspection pass.
+Hugging Face cache token lookup. The final hardened HF metadata upload reached
+live revision `ccaa3199213acb163b14477e1eaee8b896740e69`.
+`scripts/inspect_hf_artifacts.py` reports no missing SDK metadata and no
+unresolved top-level `HostedManifest.json` files. The directly hydratable
+starter manifest has 34 files and the release manifest points at SDK commit
+`8a278df2d3d10ecb62c3eb65516cd09e31a182f3`. It records top-level hosted files
+`runtime/hnsf_weights.json`, `runtime/kokoro-vocab.json`, and
+`voices/af_heart.bin`; starter profile `starter-8a278df2d3d1` has 10 models / 1
+voice and full profile `full-8a278df2d3d1` has 22 models / 28 supported English
+voices.
 Verification after the docs/drift slice: `node
 scripts/check_sdk_drift.mjs`, `swift test --package-path swift-tts`, `swift
 test --package-path swift`, `node scripts/compare_botnet_prepare_input.mjs
