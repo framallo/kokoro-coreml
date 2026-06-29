@@ -105,12 +105,20 @@ final class DemoModel: ObservableObject {
     @Published var isRunning = false
 
     private let scenario: String
+    private let memoryPressureMegabytes: Int
     private let invalidResourceMode: String?
+    private let invalidMemoryPressureMegabytes: String?
     private let engine = AVAudioEngine()
     private let player = AVAudioPlayerNode()
     private var didAutoRun = false
     private var memoryWarningObserver: NSObjectProtocol?
-    private static let validScenarios: Set<String> = ["smoke", "warm", "long", "cancel", "all"]
+    private static let validScenarios: Set<String> = ["smoke", "warm", "long", "cancel", "memory-pressure", "all"]
+    private static let defaultMemoryPressureMegabytes = 384
+    private static let memoryPressureChunkMegabytes = 16
+    private static let minimumMemoryPressureMegabytes = 64
+    private static let maximumMemoryPressureMegabytes = 768
+    private static let bytesPerMegabyte = 1_048_576
+    private static let memoryPageBytes = 4_096
 
     init() {
         let args = CommandLine.arguments
@@ -134,6 +142,20 @@ final class DemoModel: ObservableObject {
             self.text = text
         }
         scenario = Self.value(after: "--scenario", in: args) ?? "smoke"
+        let pressureString = Self.value(after: "--memory-pressure-megabytes", in: args)
+            ?? ProcessInfo.processInfo.environment["KOKORO_MEMORY_PRESSURE_MEGABYTES"]
+        if let pressureString {
+            if let pressure = Int(pressureString) {
+                memoryPressureMegabytes = pressure
+                invalidMemoryPressureMegabytes = nil
+            } else {
+                memoryPressureMegabytes = Self.defaultMemoryPressureMegabytes
+                invalidMemoryPressureMegabytes = pressureString
+            }
+        } else {
+            memoryPressureMegabytes = Self.defaultMemoryPressureMegabytes
+            invalidMemoryPressureMegabytes = nil
+        }
         memoryWarningObserver = NotificationCenter.default.addObserver(
             forName: UIApplication.didReceiveMemoryWarningNotification,
             object: nil,
@@ -199,6 +221,10 @@ final class DemoModel: ObservableObject {
             print("KOKORO_DEMO_ERROR scenario=\(scenario) resource-mode=\(invalidResourceMode) \(DemoScenarioError.unsupportedResourceMode(invalidResourceMode))")
             return
         }
+        if scenario == "memory-pressure", let invalidMemoryPressureMegabytes {
+            print("KOKORO_DEMO_ERROR scenario=\(scenario) memory-pressure-megabytes=\(invalidMemoryPressureMegabytes) \(DemoScenarioError.invalidMemoryPressureMegabytes(invalidMemoryPressureMegabytes))")
+            return
+        }
         isRunning = true
         do {
             print("KOKORO_DEMO_PID pid=\(getpid()) scenario=\(scenario) resourceMode=\(resourceMode.rawValue)")
@@ -219,6 +245,8 @@ final class DemoModel: ObservableObject {
                 try play(audio)
             case "cancel":
                 try await runCancellation(tts: tts)
+            case "memory-pressure":
+                try await runMemoryPressureRecovery(tts: tts)
             case "all":
                 _ = try await runSynthesis(tts: tts, text: text, label: "all-first")
                 _ = try await runSynthesis(tts: tts, text: text, label: "all-warm")
@@ -281,6 +309,49 @@ final class DemoModel: ObservableObject {
         } catch {
             throw error
         }
+    }
+
+    private func runMemoryPressureRecovery(tts: KokoroTTS) async throws {
+        guard memoryPressureMegabytes >= Self.minimumMemoryPressureMegabytes,
+              memoryPressureMegabytes <= Self.maximumMemoryPressureMegabytes
+        else {
+            throw DemoScenarioError.memoryPressureMegabytesOutOfRange(
+                memoryPressureMegabytes,
+                minimum: Self.minimumMemoryPressureMegabytes,
+                maximum: Self.maximumMemoryPressureMegabytes
+            )
+        }
+
+        let baseline = try Self.physicalFootprintBytes()
+        print("KOKORO_DEMO_MEMORY_PRESSURE_BEGIN requestedMegabytes=\(memoryPressureMegabytes) baselinePhysicalFootprintBytes=\(baseline)")
+
+        var allocations: [[UInt8]] = []
+        allocations.reserveCapacity((memoryPressureMegabytes + Self.memoryPressureChunkMegabytes - 1) / Self.memoryPressureChunkMegabytes)
+        var allocatedMegabytes = 0
+        var peak = baseline
+
+        while allocatedMegabytes < memoryPressureMegabytes {
+            let chunkMegabytes = min(Self.memoryPressureChunkMegabytes, memoryPressureMegabytes - allocatedMegabytes)
+            var chunk = [UInt8](repeating: 0, count: chunkMegabytes * Self.bytesPerMegabyte)
+            for offset in stride(from: 0, to: chunk.count, by: Self.memoryPageBytes) {
+                chunk[offset] = UInt8(truncatingIfNeeded: allocatedMegabytes + offset)
+            }
+            allocations.append(chunk)
+            allocatedMegabytes += chunkMegabytes
+            let current = try Self.physicalFootprintBytes()
+            peak = max(peak, current)
+            print("KOKORO_DEMO_MEMORY_PRESSURE_STEP allocatedMegabytes=\(allocatedMegabytes) physicalFootprintBytes=\(current)")
+            try await Task.sleep(nanoseconds: 50_000_000)
+        }
+
+        print("KOKORO_DEMO_MEMORY_PRESSURE_PEAK allocatedMegabytes=\(allocatedMegabytes) physicalFootprintBytes=\(peak)")
+        allocations.removeAll(keepingCapacity: false)
+        try await Task.sleep(nanoseconds: 500_000_000)
+        let afterRelease = try Self.physicalFootprintBytes()
+        print("KOKORO_DEMO_MEMORY_PRESSURE_RELEASED physicalFootprintBytes=\(afterRelease)")
+
+        let audio = try await runSynthesis(tts: tts, text: text, label: "memory-pressure-recovery")
+        print("KOKORO_DEMO_MEMORY_PRESSURE_DONE requestedMegabytes=\(memoryPressureMegabytes) baselinePhysicalFootprintBytes=\(baseline) peakPhysicalFootprintBytes=\(peak) afterReleasePhysicalFootprintBytes=\(afterRelease) recoverySamples=\(audio.samples.count)")
     }
 
     private func play(_ audio: KokoroAudio) throws {
@@ -353,6 +424,8 @@ final class DemoModel: ObservableObject {
 enum DemoScenarioError: Error, LocalizedError {
     case unsupportedScenario(String)
     case unsupportedResourceMode(String)
+    case invalidMemoryPressureMegabytes(String)
+    case memoryPressureMegabytesOutOfRange(Int, minimum: Int, maximum: Int)
     case missingManifestURL
     case cancellationDidNotThrow
     case memoryFootprintUnavailable(kern_return_t)
@@ -363,6 +436,10 @@ enum DemoScenarioError: Error, LocalizedError {
             return "Unsupported scenario: \(scenario)"
         case .unsupportedResourceMode(let mode):
             return "Unsupported resource mode: \(mode)"
+        case .invalidMemoryPressureMegabytes(let value):
+            return "Invalid memory pressure megabytes: \(value)"
+        case .memoryPressureMegabytesOutOfRange(let value, let minimum, let maximum):
+            return "Memory pressure megabytes \(value) is outside the supported range \(minimum)...\(maximum)."
         case .missingManifestURL:
             return "Missing manifest URL for downloaded resource mode."
         case .cancellationDidNotThrow:

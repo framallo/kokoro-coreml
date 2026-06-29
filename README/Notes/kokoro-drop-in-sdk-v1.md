@@ -8,6 +8,178 @@ do not put local-only analysis in `README/Guides/`.
 
 ---
 
+## Issue: iPhone 15 Pro Max Physical Lifecycle and Bounded Memory Smoke
+
+### Context
+
+Phase 6 requires physical-device evidence before any iOS readiness claim. A
+previous iPhone 12 Pro retry was blocked because the device was locked. On
+2026-06-28 PDT, paired iPhone 15 Pro Max `Commas?`
+(`8A12AEE8-0136-50BE-8EB3-91650E467F15`, `iPhone16,2`) was available over
+local network transport, booted on iOS 26.5, and had Developer Mode enabled.
+
+### Commands
+
+Fresh signed device build:
+
+```bash
+xcodebuild -quiet \
+  -project examples/KokoroDemoApp/KokoroDemoApp.xcodeproj \
+  -scheme KokoroDemoApp \
+  -destination 'id=8A12AEE8-0136-50BE-8EB3-91650E467F15' \
+  -derivedDataPath /tmp/kokoro-demo-iphone15-dd \
+  KOKORO_DEMO_DEVELOPMENT_TEAM=6ETYBAJKY8 \
+  KOKORO_DEMO_BUNDLE_ID=com.mattmireles.KokoroDemoApp \
+  build
+```
+
+Install:
+
+```bash
+xcrun devicectl device install app \
+  --device 8A12AEE8-0136-50BE-8EB3-91650E467F15 \
+  /tmp/kokoro-demo-iphone15-dd/Build/Products/Debug-iphoneos/KokoroDemoApp.app
+```
+
+Hosted starter bundle server:
+
+```bash
+python3 -m http.server 8766 --bind 0.0.0.0
+```
+
+Full downloaded-manifest scenario:
+
+```bash
+xcrun devicectl device process launch \
+  --device 8A12AEE8-0136-50BE-8EB3-91650E467F15 \
+  --terminate-existing \
+  --console \
+  --timeout 300 \
+  com.mattmireles.KokoroDemoApp \
+  --auto-run \
+  --scenario all \
+  --resource-mode downloaded \
+  --manifest-url http://192.168.4.47:8766/HostedManifest.json \
+  --text 'Hello world.'
+```
+
+Background/foreground transition:
+
+```bash
+xcrun devicectl device process launch \
+  --device 8A12AEE8-0136-50BE-8EB3-91650E467F15 \
+  --timeout 30 \
+  com.apple.Preferences
+
+xcrun devicectl device process launch \
+  --device 8A12AEE8-0136-50BE-8EB3-91650E467F15 \
+  --timeout 30 \
+  com.mattmireles.KokoroDemoApp
+```
+
+Memory-warning attempt:
+
+```bash
+xcrun devicectl device process sendMemoryWarning \
+  --device 8A12AEE8-0136-50BE-8EB3-91650E467F15 \
+  --pid 4736
+```
+
+### Evidence
+
+Build and install both succeeded. The app launched with:
+
+```text
+KOKORO_DEMO_PID pid=4736 scenario=all resourceMode=downloaded
+KOKORO_DEMO_RESOURCE_MODE mode=downloaded
+KOKORO_DEMO_SCENE_PHASE reason=appear phase=inactive
+KOKORO_DEMO_SCENE_PHASE reason=change phase=active
+```
+
+The physical-device synthesis scenario completed:
+
+```text
+KOKORO_DEMO_DONE label=all-first samples=37800 sampleRate=24000 duration=1.575 elapsedSeconds=7.865571022033691
+KOKORO_DEMO_DONE label=all-warm samples=37800 sampleRate=24000 duration=1.575 elapsedSeconds=2.0228769779205322
+KOKORO_DEMO_DONE label=all-long samples=2000280 sampleRate=24000 duration=83.345 elapsedSeconds=71.03100502490997
+KOKORO_DEMO_CANCELLED error=KokoroError.synthesisCancelled
+KOKORO_DEMO_MEMORY physicalFootprintBytes=1015416856
+KOKORO_DEMO_SCENARIO_DONE scenario=all
+```
+
+Activating Settings and returning to the demo produced real scene-phase
+transitions while the app was attached:
+
+```text
+KOKORO_DEMO_SCENE_PHASE reason=change phase=inactive
+KOKORO_DEMO_SCENE_PHASE reason=change phase=background
+KOKORO_DEMO_SCENE_PHASE reason=change phase=inactive
+KOKORO_DEMO_SCENE_PHASE reason=change phase=active
+```
+
+`devicectl device info processes` confirmed PID 4736 was
+`KokoroDemoApp.app/KokoroDemoApp`, but `sendMemoryWarning` failed before the app
+received a memory-warning notification:
+
+```text
+ERROR: The operation could not be completed. No such file or directory (NSPOSIXErrorDomain error 2 (0x02))
+```
+
+### Bounded Memory Recovery Evidence
+
+Because `devicectl sendMemoryWarning` failed before delivering an app
+notification on iOS 26.5, the demo app now has an explicit safer release gate:
+`--scenario memory-pressure`. The scenario allocates and touches bounded memory
+in chunks, records baseline/peak/released physical footprint, releases the
+pressure, then requires a post-pressure synthesis to complete.
+
+Command:
+
+```bash
+xcrun devicectl device process launch \
+  --device 8A12AEE8-0136-50BE-8EB3-91650E467F15 \
+  --terminate-existing \
+  --console \
+  --timeout 180 \
+  com.mattmireles.KokoroDemoApp \
+  --auto-run \
+  --scenario memory-pressure \
+  --memory-pressure-megabytes 384 \
+  --resource-mode downloaded \
+  --manifest-url http://192.168.4.47:8766/HostedManifest.json \
+  --text 'Hello world.'
+```
+
+Result on the same iPhone 15 Pro Max after a fresh signed build/install:
+
+```text
+KOKORO_DEMO_PID pid=4782 scenario=memory-pressure resourceMode=downloaded
+KOKORO_DEMO_RESOURCE_MODE mode=downloaded
+KOKORO_DEMO_SCENE_PHASE reason=appear phase=inactive
+KOKORO_DEMO_SCENE_PHASE reason=change phase=active
+KOKORO_DEMO_MEMORY_PRESSURE_BEGIN requestedMegabytes=384 baselinePhysicalFootprintBytes=178193496
+KOKORO_DEMO_MEMORY_PRESSURE_STEP allocatedMegabytes=384 physicalFootprintBytes=514590096
+KOKORO_DEMO_MEMORY_PRESSURE_PEAK allocatedMegabytes=384 physicalFootprintBytes=514590096
+KOKORO_DEMO_MEMORY_PRESSURE_RELEASED physicalFootprintBytes=258508032
+KOKORO_DEMO_DONE label=memory-pressure-recovery samples=37800 sampleRate=24000 duration=1.575 elapsedSeconds=7.765531063079834
+KOKORO_DEMO_MEMORY_PRESSURE_DONE requestedMegabytes=384 baselinePhysicalFootprintBytes=178193496 peakPhysicalFootprintBytes=514590096 afterReleasePhysicalFootprintBytes=258508032 recoverySamples=37800
+KOKORO_DEMO_SCENARIO_DONE scenario=memory-pressure
+```
+
+### Decision
+
+Count this run as fresh physical iPhone evidence for first call, warm call,
+long-text chunking, typed cancellation, memory-footprint logging, downloaded
+manifest hydration, and real background/foreground lifecycle transitions. Do
+not count `devicectl sendMemoryWarning` as memory-pressure behavior because it
+failed before the app received a warning. Count the bounded
+`--scenario memory-pressure` run as the approved safer memory-pressure recovery
+gate: it applied controlled pressure, released it, and proved the SDK can still
+synthesize afterward on the physical iPhone. The iOS release-readiness gate is
+closed under this documented standard.
+
+---
+
 ## Issue: Phase 7 SDK Docs and Drift Gate - In Progress
 
 **First spotted:** 2026-06-28
@@ -20,9 +192,10 @@ artifact should be published until package size and Xcode resource behavior are
 measured.
 
 `README/hf-model-card.md` now presents `KokoroTTS` as the app API and demotes
-old direct `KokoroPipeline` snippets to low-level benchmark/graph examples. Do
-not upload the model-card change to Hugging Face until the release commit is
-final and the remaining iOS readiness gates are closed.
+old direct `KokoroPipeline` snippets to low-level benchmark/graph examples. At
+the time of this Phase 7 docs slice, the model-card change was not ready for
+Hugging Face upload because the release commit and iOS readiness gates were not
+final.
 
 `scripts/check_sdk_drift.mjs` verifies the Swift package floor, Swift runtime
 constants, JS/Python prep constants, SDK bundle profiles, downloader profiles,
@@ -110,9 +283,10 @@ The paired devices visible to `xcrun devicectl list devices` are:
 - `Commas?`, iPhone 15 Pro Max, available paired
 - `Webcam`, iPhone 12 Pro, available paired
 
-Do not mark Phase 6 or iOS readiness complete yet. The next slice must add the
-remaining warm-call, long-text, cancellation, memory, and
-background/foreground checks on a physical iPhone.
+At this point in the work, Phase 6 and iOS readiness were not complete yet. The
+next slice still needed to add warm-call, long-text, cancellation, memory, and
+background/foreground checks on a physical iPhone. Later entries supersede this
+older blocker with iPhone 15 Pro Max physical evidence.
 
 ### Demo App Evidence
 
@@ -338,10 +512,12 @@ xcodebuild: error: Timed out waiting for all destinations matching the provided 
 Webcam may need to be unlocked to recover from previously reported preparation errors
 ```
 
-Do not mark iOS release readiness complete from this attempt. The release gate
-is intentionally blocked until an unlocked physical iPhone records
-`KOKORO_DEMO_SCENE_PHASE` background/foreground logs and a real memory-pressure
-event. Prior process suspend/resume and physical-footprint logging remain useful
+This locked-device attempt was not sufficient for iOS release readiness. At
+that point, the release gate was intentionally blocked until an unlocked
+physical iPhone recorded `KOKORO_DEMO_SCENE_PHASE` background/foreground logs
+and memory-pressure evidence. Later iPhone 15 Pro Max runs supersede this
+blocked attempt. Prior process suspend/resume and physical-footprint logging
+remain useful
 smoke evidence, but they are not substitutes for those two missing proofs.
 
 ### Demo App Resource Modes

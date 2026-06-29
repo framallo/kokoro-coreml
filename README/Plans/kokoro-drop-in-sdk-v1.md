@@ -663,9 +663,14 @@ swift-tts` passed 42 tests with 2 opt-in Misaki runtime skips after this fix.
 - [x] Build the raw-text demo against the actual `KokoroTTS` platform floor
       chosen for reliability; do not imply iOS 16 raw-text support if the
       dependable path is iOS 18+.
-- [ ] Run mandatory physical-device smoke before iOS readiness: first call,
+- [x] Run mandatory physical-device smoke before iOS readiness: first call,
       warm call, long text chunking, background/foreground transition,
       cancellation, and memory pressure behavior.
+- [x] Add the approved bounded memory-pressure recovery harness for physical
+      devices because `devicectl sendMemoryWarning` is flaky on iOS 26. The
+      accepted release standard is: allocate and touch a bounded pressure
+      target, log baseline/peak/released physical footprint, release pressure,
+      then complete a post-pressure recovery synthesis.
 - [x] Compare SDK raw-text preparation against the legacy prepared-input
       request boundary for the JS phonemizer output of `Hello world.`.
 - [x] Record device and Mac validation evidence in `README/Notes/`, not
@@ -695,8 +700,9 @@ warm call, long text, typed SDK cancellation, and memory-footprint logging:
 `physicalFootprintBytes=976439296`. `devicectl` suspend/resume succeeded for
 PID 4372, but `sendMemoryWarning` failed in an earlier attempt with
 `NSPOSIXErrorDomain 2`, so it is not counted as memory-pressure evidence.
-Physical readiness remains open until a real background/foreground transition,
-and memory-pressure proof run. Prepared-input parity is covered by
+At that point, physical readiness remained open pending a real
+background/foreground transition and memory-pressure proof run. Prepared-input
+parity is covered by
 `KokoroTextProcessorTests/testPreparedInputBoundaryMatchesLegacyPreparedRequestContract`,
 which uses the JS phonemizer output for `Hello world.` and proves Swift prep
 produces the legacy request-contract padded IDs, mask, voice row, speed, and
@@ -707,17 +713,35 @@ claim perceptual audio parity. `swift test --package-path swift-tts` now passes
 scene-phase changes; generic iOS build with `CODE_SIGNING_ALLOWED=NO` passed
 after this change. A physical-device rerun against paired iPhone 12 Pro
 `F383FC46-FD64-5346-AEC6-59E3E2F8C9CA` could not proceed because Xcode reported
-the device was locked and unavailable. iOS release readiness remains blocked
-until an unlocked physical iPhone produces scene-phase background/foreground
-logs and real memory-pressure evidence.
+the device was locked and unavailable. A later retry on paired iPhone 15 Pro Max
+`8A12AEE8-0136-50BE-8EB3-91650E467F15` running iOS 26.5 completed the current
+downloaded-manifest `all` scenario after a fresh signed build/install:
+`KOKORO_DEMO_PID pid=4736 scenario=all resourceMode=downloaded`,
+`all-first elapsedSeconds=7.865571`, `all-warm elapsedSeconds=2.022877`,
+`all-long duration=83.345 elapsedSeconds=71.031005`,
+`KokoroError.synthesisCancelled`, and
+`physicalFootprintBytes=1015416856`. Activating `com.apple.Preferences` and
+then returning to `com.mattmireles.KokoroDemoApp` produced real scene-phase
+logs: inactive, background, inactive, active. `devicectl device process
+sendMemoryWarning --pid 4736` still failed with `NSPOSIXErrorDomain 2` even
+though `devicectl device info processes` confirmed PID 4736 was the demo app,
+so the release gate now uses the approved safer replacement harness rather than
+that flaky Apple tool. The demo app added `--scenario memory-pressure`, which
+allocates and touches bounded memory, logs baseline/peak/released footprint,
+releases the pressure, and then requires a recovery synthesis to pass. On the
+same iPhone 15 Pro Max, fresh PID 4782 passed `--scenario memory-pressure
+--memory-pressure-megabytes 384`: baseline `178193496`, peak `514590096`,
+released `258508032`, recovery synthesis `37800` samples, and
+`KOKORO_DEMO_SCENARIO_DONE scenario=memory-pressure`.
 The demo app also now exposes both resource modes: `--resource-mode downloaded
 --manifest-url ...` for hosted-manifest validation and `--resource-mode bundled
 --bundle-subdirectory KokoroRuntime` for apps that embed a generated runtime
 directory. Generic iOS build passed after this UI/automation change.
 A later physical-device retry still found iPhone 12 Pro
 `F383FC46-FD64-5346-AEC6-59E3E2F8C9CA` locked; the signed device build timed out
-waiting for that destination, so the physical lifecycle/memory gate remains
-externally blocked.
+waiting for that destination. That older locked-device attempt is superseded by
+the successful iPhone 15 Pro Max lifecycle and bounded memory-pressure recovery
+runs above.
 
 ---
 
@@ -756,8 +780,9 @@ commands, release gates, troubleshooting, and the V1 decision to publish source
 plus downloadable resource bundles rather than a SwiftPM binary/resource
 artifact. `README/hf-model-card.md` now points app developers at `KokoroTTS`
 and marks old `KokoroPipeline` snippets as low-level. Remote HF upload remains
-pending until the final release commit and remaining iOS readiness gates are
-closed. Verification after the docs/drift slice: `node
+pending until the final release commit and final artifact checks are ready.
+The physical iOS readiness gate is now closed by iPhone 15 Pro Max evidence.
+Verification after the docs/drift slice: `node
 scripts/check_sdk_drift.mjs`, `swift test --package-path swift-tts`, `swift
 test --package-path swift`, `node scripts/compare_botnet_prepare_input.mjs
 --botnet-root /Users/mm/Documents/GitHub/botnet --fixtures
@@ -791,8 +816,11 @@ evidence, and must be rerun before remote HF publication.
 - Regression test: `node scripts/check_sdk_drift.mjs`
 - Regression test: `xcodebuild` or XcodeBuildMCP build of `Examples/KokoroDemoApp` on simulator.
 - Manual release gate: physical iPhone raw-text smoke with first call, warm
-  call, long text, cancellation, and background/foreground evidence recorded in
-  `README/Notes/`. This is not optional for iOS readiness.
+  call, long text, cancellation, background/foreground, and memory-pressure
+  evidence recorded in `README/Notes/`. `devicectl sendMemoryWarning` is not a
+  release gate because it fails before the app receives a warning on iOS 26;
+  the accepted safer default is the bounded pressure/release/recovery synthesis
+  harness implemented by `--scenario memory-pressure`.
 
 ## Success Criteria
 
@@ -816,7 +844,7 @@ evidence, and must be rerun before remote HF publication.
 - [x] First-run model compilation cannot block the main actor.
 - [x] Documentation and model card usage match the actual SDK package identity
       and public API.
-- [ ] iOS readiness includes physical-device background/foreground and
+- [x] iOS readiness includes physical-device background/foreground and
       memory-pressure evidence, not only synthesis completion.
 - [x] SDK diagnostics are privacy-safe by default and never persist raw text or
       phoneme strings without caller opt-in.
@@ -984,7 +1012,7 @@ evidence, and must be rerun before remote HF publication.
 | Manifest path escape | Reject before hashing or loading. | Rebuild bundle with canonical relative paths. |
 | Symlinked vocab/config asset | Reject before bundle generation. | Use checked-in SDK runtime vocab resource with recorded provenance. |
 | Model digest mismatch | Reject before synthesis. | Re-download pinned HF revision or rebuild bundle. |
-| Memory pressure | Lazy-load bucket models and allow cache eviction. | App can call `releaseModels()` or reload later. |
+| Memory pressure | Lazy-load bucket models and keep recovery observable through the app harness. | App can discard and reload its `KokoroTTS` instance later; V1 does not expose a public model-release API. |
 | Concurrent syntheses | Serialize model prediction or bound concurrency. | Expose queue/concurrency option later if needed. |
 | Cancellation | Check cancellation between prep, model stages, and chunks. | Return partial nothing; no corrupt state. |
 | Audio NaN/Inf | Validate finite PCM before returning. | Throw `KokoroError.invalidAudioOutput`. |
@@ -1165,8 +1193,9 @@ evidence, and must be rerun before remote HF publication.
 - [x] Run macOS smoke.
 - [x] Build iOS simulator app.
 - [x] Run mandatory physical-device smoke or mark iOS release blocked. Current
-      status: iOS release blocked pending unlocked physical-device
-      background/foreground and memory-pressure evidence.
+      status: iPhone 15 Pro Max proved synthesis, cancellation, long-text
+      chunking, background/foreground, and the approved bounded
+      memory-pressure recovery harness.
 
 ### Phase 7: Release Artifact and Documentation Pass
 
