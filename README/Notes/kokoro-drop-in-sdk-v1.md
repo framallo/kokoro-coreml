@@ -8,6 +8,55 @@ do not put local-only analysis in `README/Guides/`.
 
 ---
 
+## Issue: Phase 7 SDK Docs and Drift Gate - In Progress
+
+**First spotted:** 2026-06-28
+**Status:** In progress
+
+Phase 7 added `README/SDK.md` as the public app-integration entry point. It
+documents the current truth: the Swift package lives under `swift-tts`, V1 ships
+source plus downloadable resource bundles, and no SwiftPM binary/resource
+artifact should be published until package size and Xcode resource behavior are
+measured.
+
+`README/hf-model-card.md` now presents `KokoroTTS` as the app API and demotes
+old direct `KokoroPipeline` snippets to low-level benchmark/graph examples. Do
+not upload the model-card change to Hugging Face until the release commit is
+final and the remaining iOS readiness gates are closed.
+
+`scripts/check_sdk_drift.mjs` verifies the Swift package floor, Swift runtime
+constants, JS/Python prep constants, SDK bundle profiles, downloader profiles,
+runtime manifest required keys, SwiftPM package identity, `README/SDK.md`, and
+the HF model-card snippet agree on iOS/macOS floor, sample rate, starter voice,
+duration token sizes, full bucket set, max caller chunk tokens, and voice
+embedding dimension. The first phase-audit pass caught a bad package identity
+snippet (`package: "KokoroTTS"` instead of `package: "swift-tts"`); the drift
+checker now covers that fixture-backed install contract.
+
+Validation on 2026-06-28:
+
+```bash
+node scripts/check_sdk_drift.mjs
+swift test --package-path swift-tts
+swift test --package-path swift
+node scripts/compare_botnet_prepare_input.mjs \
+  --botnet-root /Users/mm/Documents/GitHub/botnet \
+  --fixtures tests/fixtures/kokoro-text-prep/*.json \
+  --compare full
+python3 scripts/verify_runtime_assets.py
+swift build --package-path /tmp/kokoro-sdk-doc-check
+git diff --check
+```
+
+Results: drift check passed; `swift-tts` passed 40 tests with 2 Misaki runtime
+tests skipped unless `KOKORO_RUN_MISAKI_RUNTIME_TESTS=1`; `swift` passed 46
+tests; Botnet parity compared 12 fixtures; runtime assets verified vocab and
+hn-NSF hashes; an external SwiftPM package using the documented local path and
+`.product(name: "KokoroTTS", package: "swift-tts")` built; whitespace check
+passed.
+
+---
+
 ## Issue: Phase 6 Consumer Fixture and Smoke Foundation - In Progress
 
 **First spotted:** 2026-06-28

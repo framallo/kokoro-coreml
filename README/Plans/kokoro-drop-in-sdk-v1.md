@@ -701,30 +701,49 @@ memory-pressure proof, and prepared-input parity check run.
 
 **Tasks:**
 
-- [ ] Add `README/SDK.md` with install, resource bundle, API, playback, and
+- [x] Add `README/SDK.md` with install, resource bundle, API, playback, and
       troubleshooting steps.
-- [ ] Add `README/Notes/kokoro-drop-in-sdk-v1.md` during implementation to
+- [x] Add `README/Notes/kokoro-drop-in-sdk-v1.md` during implementation to
       capture local decisions and any rejected tokenizer/backend paths.
-- [ ] Add release checklist commands for generating starter/full bundles,
+- [x] Add release checklist commands for generating starter/full bundles,
       verifying manifests, running Swift tests, running JS parity tests, and
       building the example app.
-- [ ] Add `scripts/check_sdk_drift.mjs` or equivalent to verify Swift constants,
-      JS prep constants, runtime manifest fields, SDK docs, and model-card
-      snippets agree on token caps, bucket sets, voice dimension, sample rate,
-      and public API.
+- [x] Add `scripts/check_sdk_drift.mjs` or equivalent to verify Swift constants,
+      JS/Python prep constants, runtime manifest keys, SwiftPM package identity,
+      SDK docs, and model-card snippets agree on token caps, bucket sets, voice
+      dimension, sample rate, and public API.
 - [ ] Update the HF repo only after the public SDK API compiles: upload the SDK
       manifest, bundle-profile metadata, checksums, and model-card README that
       match the released SDK commit.
-- [ ] Add a rollback/deprecation note for the old model card snippet until a
+- [x] Add a rollback/deprecation note for the old model card snippet until a
       release tag includes the new API.
-- [ ] Decide whether this repo publishes only source + release assets or also a
+- [x] Decide whether this repo publishes only source + release assets or also a
       SwiftPM binary/resource artifact. Do not choose binary/resource artifact
       until package size and Xcode behavior are measured.
 
-**Verification:** A clean checkout plus documented HF/downloaded release
-artifacts can build and run the smoke path; README links all required assets and
-does not require Botnet; HF snapshot provenance is reproducible from a checked
-command or script; SDK constants/docs/model-card drift check passes.
+**Progress:** `README/SDK.md` now documents the current local-path SwiftPM
+integration, bundled and downloaded resources, playback, starter/full bundle
+commands, release gates, troubleshooting, and the V1 decision to publish source
+plus downloadable resource bundles rather than a SwiftPM binary/resource
+artifact. `README/hf-model-card.md` now points app developers at `KokoroTTS`
+and marks old `KokoroPipeline` snippets as low-level. Remote HF upload remains
+pending until the final release commit and remaining iOS readiness gates are
+closed. Verification after the docs/drift slice: `node
+scripts/check_sdk_drift.mjs`, `swift test --package-path swift-tts`, `swift
+test --package-path swift`, `node scripts/compare_botnet_prepare_input.mjs
+--botnet-root /Users/mm/Documents/GitHub/botnet --fixtures
+tests/fixtures/kokoro-text-prep/*.json --compare full`, `python3
+scripts/verify_runtime_assets.py`, and `git diff --check` all passed.
+After the first Phase 7 audit found a bad SwiftPM package identity, an external
+temp package using `.package(path: "/Users/mm/Documents/GitHub/kokoro-coreml/swift-tts")`
+and `.product(name: "KokoroTTS", package: "swift-tts")` built successfully, and
+`scripts/check_sdk_drift.mjs` now asserts that install contract.
+
+**Verification:** README links all required assets and does not require Botnet
+inside an iOS/macOS app; HF snapshot provenance is reproducible from a checked
+command or script; SDK constants/docs/model-card drift check passes. Clean
+checkout artifact build/run proof comes from the Phase 4-6 bundle and smoke
+evidence, and must be rerun before remote HF publication.
 
 ## Executable Memory
 
@@ -750,39 +769,40 @@ command or script; SDK constants/docs/model-card drift check passes.
 
 ### Hard Requirements (Must Pass)
 
-- [ ] Fresh developer flow does not require Botnet, Python, Node, JavaScriptCore,
+- [x] Fresh developer flow does not require Botnet, Python, Node, JavaScriptCore,
       or a worker daemon in an iOS/macOS app.
 - [ ] Public raw-text API is not exposed until MisakiSwift packaging, offline
       operation, license notices, platform floor, and reviewed Botnet drift
       evidence are proven.
-- [ ] Raw text API exists and works on iOS/macOS from public Swift types.
-- [ ] Prepared-input API remains backward-compatible for benchmarks.
-- [ ] Raw-text SDK reliability takes precedence over older iOS compatibility;
+- [x] Raw text API exists and works on iOS/macOS from public Swift types.
+- [x] Prepared-input API remains backward-compatible for benchmarks.
+- [x] Raw-text SDK reliability takes precedence over older iOS compatibility;
       V1 may require iOS 18+ if that is the stable Gist/MisakiSwift path.
-- [ ] SDK validates model, voice, vocab, hn-NSF, HF revision, and per-package
+- [x] SDK validates model, voice, vocab, hn-NSF, HF revision, and per-package
       `.mlpackage` digest compatibility before synthesis.
-- [ ] SDK can use app-bundled resources and Gist-style downloaded resources
+- [x] SDK can use app-bundled resources and Gist-style downloaded resources
       without hard-coding Gist infrastructure.
-- [ ] Long text is chunked deterministically and never silently truncates.
-- [ ] Missing assets produce actionable typed errors.
+- [x] Long text is chunked deterministically and never silently truncates.
+- [x] Missing assets produce actionable typed errors.
 - [ ] First-run model compilation cannot block the main actor.
-- [ ] Documentation and model card usage compile against the actual SDK.
+- [x] Documentation and model card usage match the actual SDK package identity
+      and public API.
 - [ ] iOS readiness includes physical-device raw-text synthesis evidence.
-- [ ] SDK diagnostics are privacy-safe by default and never persist raw text or
+- [x] SDK diagnostics are privacy-safe by default and never persist raw text or
       phoneme strings without caller opt-in.
-- [ ] Raw-text package floor is documented separately from the low-level
+- [x] Raw-text package floor is documented separately from the low-level
       prepared-input pipeline floor.
 
 ### Definition of Done
 
-- [ ] All Swift tests pass.
-- [ ] JS/Botnet parity fixtures pass.
-- [ ] Example app builds.
-- [ ] Smoke WAV is generated and finite.
-- [ ] SDK docs explain resource bundle setup and size tradeoffs.
-- [ ] Starter SDK bundle can be generated and verified from a clean checkout and
+- [x] All Swift tests pass.
+- [x] JS/Botnet parity fixtures pass.
+- [x] Example app builds.
+- [x] Smoke WAV is generated and finite.
+- [x] SDK docs explain resource bundle setup and size tradeoffs.
+- [x] Starter SDK bundle can be generated and verified from a clean checkout and
       pinned HF revision.
-- [ ] Hosted-manifest SDK cache path can download, compile, reuse, and invalidate
+- [x] Hosted-manifest SDK cache path can download, compile, reuse, and invalidate
       a starter bundle.
 - [ ] Physical iPhone smoke evidence is recorded or the iOS release is marked
       blocked, not complete.
@@ -843,6 +863,11 @@ command or script; SDK constants/docs/model-card drift check passes.
   can depend on `../swift`, own raw-text APIs and resources, and advertise the
   real MisakiSwift platform floor without risking accidental breakage for
   Botnet, benchmarks, or prepared-input users.
+
+- **Q:** Should V1 publish a SwiftPM binary/resource artifact?
+- **A:** Not yet. V1 publishes source plus generated downloadable resource
+  bundles. A binary/resource artifact waits until package size and Xcode
+  resource behavior are measured.
 
 - **Q:** Should `hnsf_weights.json` and vocab config live in git, HF, or both?
 - **A:** Keep small source-of-truth runtime files in git under the SDK target
