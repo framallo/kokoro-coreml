@@ -16,6 +16,9 @@ top-level `README/*.md` files; link from notes instead of duplicating.
 - [Core ML compute-unit ablation](coreml-compute-unit-ablation.md) - F/G/G-prime/G-double-prime benchmark logic for isolating `.all`, ANE, GPU, and CPU behavior in the Swift pipeline.
 - [Restarted Kokoro guide triage](kokoro-restarted-guide-triage-2026-06-06.md) - Ingested Deep Research guide triage for warmed lower-end Mac optimization, benchmark hygiene, and source/body candidate priority.
 - [Apple Silicon warmed-inference benchmark hygiene](../Guides/apple-silicon/Apple-Silicon-warmed-inference-benchmark-hygiene-guide.md) - Warmed-only benchmark contract, quiet-host gating, and Core ML compile/cache separation.
+- [MoE SSD/DRAM prefetch guide triage](moe-ssd-dram-prefetch-guide-triage-2026-06-29.md) - Deep Research Max provenance and ingest decisions for learned expert prefetching, SSD/NVMe measurement, and Stage 0 kill-gate planning.
+- [MoE expert offload and prefetch prior art](../Guides/moe-expert-offload-prefetch-prior-art-guide.md) - Research-routing guide for expert prediction, offload baselines, and why Apple Silicon UMA needs physical SSD measurements.
+- [Apple Silicon NVMe and energy measurement](../Guides/apple-silicon/apple-silicon-nvme-energy-measurement-guide.md) - macOS cache-bypass, `fs_usage`, `powermetrics`, and joules/token evidence requirements for SSD-tier model-weight experiments.
 - [Kokoro Irvine M1 paper frontier guide](../Guides/apple-silicon/Kokoro-Irvine-M1-3s-7s-paper-frontier-guide.md) - Lower-end Mac `3s`/`7s` frontier strategy after corrected MLX comparisons.
 - [Kokoro M1 vocoder runtime boundary guide](../Guides/apple-silicon/Kokoro-M1-vocoder-runtime-boundary-guide.md) - Runtime-boundary strategy for strict lower-end Apple Silicon wins.
 - [Kokoro M1 vocoder partition and boundary guide](../Guides/apple-silicon/Kokoro-M1-vocoder-partition-boundary-guide.md) - Core ML partition and boundary mechanics for strict Kokoro vocoder bodies.
