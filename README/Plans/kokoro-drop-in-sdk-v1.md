@@ -41,7 +41,7 @@ developer diagnostic path, not an app runtime dependency.
 
 ### Goals
 
-- [ ] Make `kokoro-coreml` self-host the Botnet prep contract without requiring
+- [x] Make `kokoro-coreml` self-host the Botnet prep contract without requiring
       Botnet's `packages/kokoro-coreml-runtime` layout.
 - [ ] Add a native Swift SDK API:
       `let tts = try await KokoroTTS.load(...); try await tts.synthesize("Hello")`.
@@ -136,6 +136,15 @@ developer diagnostic path, not an app runtime dependency.
 - **G2P contract:** V1 raw-text prep uses MisakiSwift plus a checked Kokoro vocab
   table, matching the Gist app pattern. Botnet/eSpeak parity is a drift signal,
   not a requirement for byte-identical phoneme strings in V1.
+- **Chunking contract:** V1 text chunking starts from Botnet's Mac fleet
+  chunker at
+  `/Users/mm/Documents/GitHub/botnet/apps/kokoro-worker/Sources/KokoroWorkerCore/TextChunker.swift`.
+  The SDK may apply the same deliberate iPhone/Gist cap change
+  (`maxChunkSeconds` defaulting to 15 seconds instead of Botnet's static
+  30 seconds), but the sentence-boundary, abbreviation, protected punctuation,
+  word-packing, character-window, whitespace-normalization, speed, and
+  `maxCharacters` fallback heuristics must remain fleet-identical unless a
+  phase audit approves a documented divergence.
 - **Manifest provenance:** Runtime manifests must include HF repo ID, HF
   revision, per-`.mlpackage` tree digests, file counts, byte sizes, vocab hash,
   voice hashes, hn-NSF weights hash, bundle profile, SDK commit, and minimum
@@ -214,6 +223,12 @@ developer diagnostic path, not an app runtime dependency.
   15-second chunking, one synthesis in flight, first-class model download, and
   on-device CPU fallback after Core ML failures. It deliberately does not embed
   Node in the iOS app.
+- **Botnet chunker baseline:** Botnet's canonical production chunker lives at
+  `/Users/mm/Documents/GitHub/botnet/apps/kokoro-worker/Sources/KokoroWorkerCore/TextChunker.swift`.
+  Gist's `TextChunker.swift` is explicitly documented as a copy of that fleet
+  chunker with only the iPhone 15-second cap changed from Botnet's static
+  30-second cap. The SDK implementation must preserve this source-of-truth
+  relationship.
 - **Platform-floor baseline:** Gist keeps MisakiSwift at the app layer because
   it raises the platform floor beyond the lower-level fleet runtime. This SDK
   should preserve the same split: raw-text convenience can have a higher floor;
@@ -306,32 +321,35 @@ and the JS prep path becomes the parity oracle for the SDK.
 
 **Tasks:**
 
-- [ ] Fix `scripts/kokoro-prepare-input.mjs` so its default runtime root is the
+- [x] Fix `scripts/kokoro-prepare-input.mjs` so its default runtime root is the
       current repo root when `kokoro.js/src/phonemize.js` is present.
-- [ ] Add an explicit `--runtime-root` argument to both prep scripts; environment
+- [x] Add an explicit `--runtime-root` argument to both prep scripts; environment
       variables remain optional, not required.
-- [ ] Add `--botnet-root` to the parity script; default to
+- [x] Add `--botnet-root` to the parity script; default to
       `/Users/mm/Documents/GitHub/botnet` only as a local convenience.
-- [ ] Add a small top-level package script or documented `npm --prefix kokoro.js`
+- [x] Add a small top-level package script or documented `npm --prefix kokoro.js`
       command so `phonemizer` installs where the script can resolve it.
-- [ ] Add `scripts/compare_botnet_prepare_input.mjs` that runs this repo and
+- [x] Add `scripts/compare_botnet_prepare_input.mjs` that runs this repo and
       the Botnet script selected by `--botnet-root` on the same fixture list.
-- [ ] Compare the full prepared-input contract: `key`, `text`, `voice`, `speed`,
+- [x] Compare the full prepared-input contract: `key`, `text`, `voice`, `speed`,
       `input_ids`, `attention_mask`, `ref_s`, `canonical_duration_s`, optional
       `num_tokens`, and optional `hnsf_weights_sha256`. Fields intentionally
       absent from the JS oracle must be listed explicitly.
-- [ ] Add fixtures for empty text, whitespace, abbreviations, initials, numbers,
+- [x] Add fixtures for empty text, whitespace, abbreviations, initials, numbers,
       currency, URLs/emails, quotes, punctuation runs, emoji, long text near
       450 active tokens, `af_heart`, and one British voice.
-- [ ] Record the exact current behavior for unsupported or unknown phonemes:
+- [x] Record the exact current behavior for unsupported or unknown phonemes:
       unknown chars are dropped during vocab lookup, then BOS/EOS and padding
       still apply unless the phonemizer returns empty output.
 
-**Verification:** `node scripts/kokoro-prepare-input.mjs --text-file ...` works
-from this repo without `KOKORO_COREML_ROOT`; parity script passes against
-Botnet for all fixtures; `python scripts/kokoro-prepare-input.py --runtime-root
-...` covers the Python path if it was changed; `npm --prefix kokoro.js test`
-still passes.
+**Verification:** `node scripts/kokoro-prepare-input.mjs --runtime-root
+/Users/mm/Documents/GitHub/kokoro-coreml --text-file ...` works from this repo
+without `KOKORO_COREML_ROOT`; `node scripts/compare_botnet_prepare_input.mjs
+--botnet-root /Users/mm/Documents/GitHub/botnet --fixtures
+tests/fixtures/kokoro-text-prep/*.json --compare full` passed 12 fixtures
+against Botnet; `uv run python scripts/kokoro-prepare-input.py --runtime-root
+/Users/mm/Documents/GitHub/kokoro-coreml ...` generated the expected 32-token
+smoke input; `npm --prefix kokoro.js test` passed 276 tests.
 
 ---
 
@@ -436,9 +454,19 @@ the Gist-proven Swift phonemizer path and checked runtime assets.
 - [ ] Adapt Gist's `VoiceTable.swift` behavior: little-endian float32 `.bin`
       loading, 256-float rows, supported voice list, and
       `rowIndex = clamp(phonemeCount - 1, 0, rowCount - 1)`.
-- [ ] Adapt Gist's `TextChunker.swift` behavior needed for long text chunking,
-      including abbreviations, initials, decimals, punctuation, and the
-      15-second starter-bundle cap.
+- [ ] Port Botnet's canonical
+      `/Users/mm/Documents/GitHub/botnet/apps/kokoro-worker/Sources/KokoroWorkerCore/TextChunker.swift`
+      into `swift-tts/Sources/KokoroTTS/TextChunker.swift`, preserving fleet
+      sentence-boundary, abbreviation, protected punctuation, word-packing,
+      character-window, whitespace-normalization, speed, and `maxCharacters`
+      fallback behavior.
+- [ ] Apply only the Gist/iPhone-specific chunk cap change on top of the Botnet
+      chunker: `maxChunkSeconds` is configurable and defaults to 15 seconds for
+      the SDK starter profile instead of Botnet's static 30 seconds.
+- [ ] Add a chunker parity fixture/test set against the Botnet source behavior
+      for abbreviations, initials, decimals, punctuation runs, protected
+      commas, hyphenated words, whitespace normalization, long text, speed
+      changes, and `maxCharacters` recursive token-budget fallback.
 - [ ] Port deterministic Botnet-compatible non-phonemizer prep logic to Swift:
       language gating, duration token-budget guard, metadata preservation, and
       typed validation.
@@ -450,8 +478,10 @@ the Gist-proven Swift phonemizer path and checked runtime assets.
 
 **Verification:** `swift test --package-path swift-tts --filter KokoroText` passes;
 Swift-prepared fixtures match the Gist path for phonemes, token IDs, selected
-voice row, `ref_s`, and metadata fields; Botnet JS/eSpeak comparison produces
-the approved drift report; no app code path imports Node, Python, or Botnet.
+voice row, `ref_s`, and metadata fields; `TextChunker` fixtures match Botnet's
+fleet chunker behavior except for the documented configurable 15-second SDK cap;
+Botnet JS/eSpeak comparison produces the approved drift report; no app code
+path imports Node, Python, or Botnet.
 
 ---
 
@@ -798,6 +828,7 @@ command or script; SDK constants/docs/model-card drift check passes.
 - `kokoro.js/src/phonemize.js`
 - `/Users/mm/Documents/GitHub/botnet/scripts/kokoro-prepare-input.mjs`
 - `/Users/mm/Documents/GitHub/botnet/apps/kokoro-worker/Sources/KokoroWorkerCore/KokoroWorkerCore.swift`
+- `/Users/mm/Documents/GitHub/botnet/apps/kokoro-worker/Sources/KokoroWorkerCore/TextChunker.swift`
 - `/Users/mm/Documents/GitHub/gist/packages/ios-app/App/Sources/Audio/KokoroG2P.swift`
 - `/Users/mm/Documents/GitHub/gist/packages/ios-app/App/Sources/Audio/SynthEngine.swift`
 - `/Users/mm/Documents/GitHub/gist/packages/ios-app/App/Sources/Audio/KokoroModelStore.swift`
@@ -906,7 +937,7 @@ command or script; SDK constants/docs/model-card drift check passes.
 | `swift-tts/Sources/KokoroTTS/KokoroPhonemizer.swift` | Create | Protocol boundary for MisakiSwift now and future backends later. |
 | `swift-tts/Sources/KokoroTTS/KokoroMisakiPhonemizer.swift` | Create | Gist-style MisakiSwift phonemizer wrapper. |
 | `swift-tts/Sources/KokoroTTS/VoiceTable.swift` | Create | Gist-style voice `.bin` loader and row selection. |
-| `swift-tts/Sources/KokoroTTS/TextChunker.swift` | Create | Gist/fleet chunking behavior adapted for SDK use. |
+| `swift-tts/Sources/KokoroTTS/TextChunker.swift` | Create | Port Botnet fleet chunker with only the documented configurable 15-second SDK cap change. |
 | `swift-tts/Sources/KokoroTTS/KokoroTTS.swift` | Create | Drop-in public API. |
 | `swift-tts/Sources/KokoroTTS/KokoroResourceProvider.swift` | Create | Bundle/directory/downloaded resource loading. |
 | `swift-tts/Sources/KokoroTTS/KokoroDownloadedModelStore.swift` | Create | Gist-style manifest download, compile, cache, and invalidation. |
@@ -953,11 +984,11 @@ command or script; SDK constants/docs/model-card drift check passes.
 
 ### Phase 0: Make the Copied Prep Layer Self-Hosting
 
-- [ ] Fix JS default runtime root.
-- [ ] Add `--runtime-root`.
-- [ ] Add `--botnet-root`.
-- [ ] Add dependency install/run path.
-- [ ] Add full-contract Botnet parity script and fixtures.
+- [x] Fix JS default runtime root.
+- [x] Add `--runtime-root`.
+- [x] Add `--botnet-root`.
+- [x] Add dependency install/run path.
+- [x] Add full-contract Botnet parity script and fixtures.
 
 ### Phase 1: SDK Boundaries and Gist-Proven Phonemizer Spike
 
@@ -1095,6 +1126,28 @@ and release/documentation skills.
 `Required skills` line to every phase, with side-effect boundaries for
 `execute-plan-hardcore`, `deploy`, `git-commit`, and `git-push`.
 **Files:** `README/Plans/kokoro-drop-in-sdk-v1.md`
+
+---
+
+### 2026-06-28 - Phase 0 Prep Self-Hosting
+
+**Problem:** The copied JS prep script still defaulted to Botnet's
+`packages/kokoro-coreml-runtime` layout, so this repo could not prepare text
+from its own checkout without `KOKORO_COREML_ROOT`.
+**Root Cause:** The script looked for Botnet's generated runtime tree before
+checking this repo's `kokoro.js/src`, `_kokoro_vocab.json`, and
+`kokoro.js/voices` assets.
+**Fix:** Added explicit `--runtime-root` handling to both prep scripts, made the
+JS script default to the current checkout when runtime assets are present,
+added local vocab/voice fallbacks, added a Botnet full-contract comparison
+harness, and added tokenizer edge-case fixtures.
+**Verification:** JS `Hello world` smoke passed; Botnet comparison passed 12
+fixtures; `uv run` Python smoke generated a 32-token padded input; `npm
+--prefix kokoro.js test` passed 276 tests.
+**Files:** `scripts/kokoro-prepare-input.mjs`,
+`scripts/kokoro-prepare-input.py`, `scripts/compare_botnet_prepare_input.mjs`,
+`tests/fixtures/kokoro-text-prep/*.json`,
+`README/Notes/kokoro-drop-in-sdk-v1.md`
 
 ---
 
