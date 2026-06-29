@@ -179,6 +179,8 @@ outputs_mps/
 
 # SwiftPM build output
 swift/.build/
+swift-tts/.build/
+*.profraw
 
 # CoreML model packages — downloaded from HF Hub, not stored in git.
 # Run: python scripts/download_models.py

@@ -14,8 +14,12 @@ public struct KokoroVoiceID: RawRepresentable, Equatable, Hashable, Sendable, Ex
     /// Gist iOS male voice used for counter-argument layers.
     public static let amMichael = KokoroVoiceID("am_michael")
 
-    /// Voices bundled by the starter Gist-compatible profile.
-    public static let starterVoices: [KokoroVoiceID] = [.afBella, .amMichael, .afHeart]
+    /// Voice bundled by the starter SDK profile.
+    public static let starterVoices: [KokoroVoiceID] = [.afHeart]
+
+    /// Voices commonly used by the Gist app when a full/custom bundle includes
+    /// their embedding files.
+    public static let gistVoices: [KokoroVoiceID] = [.afBella, .amMichael, .afHeart]
 
     /// Creates a voice identifier from its raw string.
     ///

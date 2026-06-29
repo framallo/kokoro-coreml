@@ -8,6 +8,183 @@ do not put local-only analysis in `README/Guides/`.
 
 ---
 
+## Issue: Phase 5 SDK Facade, Provider, and Runtime Smoke - Resolved
+
+**First spotted:** 2026-06-28
+**Resolved:** 2026-06-28
+**Status:** Resolved
+
+### Summary
+
+Phase 5 added the first real drop-in API:
+
+```swift
+let tts = try await KokoroTTS.load(resources: .appBundle(.main))
+let audio = try await tts.synthesize("Hello world.", voice: .afHeart)
+```
+
+The public facade is a loaded-only actor over `KokoroTextProcessor`,
+`KokoroResourceProvider`, and `KokoroSDKModelProvider`. It supports explicit
+generated-bundle directories, app bundles, package bundles, and downloaded cache
+bundles. Generated bundle roots may include a `compiled/` directory, but V1 does
+not support precompiled-only roots without the source `.mlpackage` manifests.
+`KokoroSDKModelProvider` validates runtime/voice hashes at load, validates model
+package tree hashes lazily before Core ML compiles or loads a selected model,
+caches loaded `MLModel` instances, persists compiled `.mlmodelc` output when the
+resource root is writable, and exposes `prewarm(...)`.
+
+### Phase 5 Cross-Agent Audit
+
+A read-only Codex cross-agent audit was run against the current uncommitted
+Phase 5 diff on 2026-06-28. It graded the first pass:
+
+```text
+Architecture: C
+Correctness risk: C
+Complexity debt: B
+Commit-readiness: No
+```
+
+The audit findings were valid:
+
+- Hosted manifest paths in `KokoroDownloadedModelStore` needed stronger
+  containment checks before local writes and remote URL construction.
+- `public init()` made an unusable `KokoroTTS()` facade possible.
+- The typed-error checklist overstated missing-voice and unsupported-language
+  behavior.
+- `.precompiledDirectory` implied precompiled-only support even though runtime
+  validation still requires source `.mlpackage` manifests.
+- The downloaded-store checklist claimed local version comparison, but the first
+  implementation only validated file size/hash.
+
+Fixes applied after the audit: reject absolute, `..`, empty, and backslash path
+components in hosted manifests; clear the compiled cache when hosted bundle
+version changes; remove the dead public initializer; map missing/malformed voice
+assets to public `KokoroError` cases; remove the misleading precompiled-only
+resource-provider case; and update the plan to describe the actual supported
+bundle shape.
+
+A second read-only cross-agent pass found additional correctness blockers:
+compiled `.mlmodelc` cache reuse was trusted by sidecar alone, runtime/cache
+parent symlinks were not rejected before all reads, hosted-download cancellation
+could be swallowed by retry logic, `maxChunkSeconds` was ignored by the facade,
+and model-set consistency was not fail-fast at load.
+
+Fixes applied after the second pass: make `KokoroSDKModelProvider` internal so
+the public app API cannot call synchronous model loading directly; require
+compiled caches to live under the bundle root with non-symlink components and a
+matching source-tree sidecar; reject symlinked parent components for runtime,
+voice, downloaded-cache, and model-package paths before reads or writes;
+validate duration and per-bucket stage packages at load; make hosted downloads
+preserve cancellation; honor `KokoroSynthesisOptions.maxChunkSeconds`; and add
+targeted tests for those edge cases.
+
+A final focused cross-agent pass found release-safety issues in the bundle
+builder and SDK surface: destructive `--output` deletion, local artifact
+provenance being stamped as HF provenance without verification, hosted manifests
+including platform-compiled caches, symlinked resource roots, unsupported
+manifest schemas, stale starter voice constants, and British voices using the
+U.S. Misaki path. Fixes applied: require a download manifest unless
+`--allow-local-provenance 1` is explicit, add a bundle marker and dangerous-path
+deletion guard, exclude `compiled/` from `HostedManifest.json`, reject symlinked
+bundle/cache roots, enforce schema version 1, align starter constants to
+`af_heart`, and choose Misaki British mode for `b*` voices.
+
+### Starter Bundle Fix
+
+The first macOS smoke attempt exposed a bad starter default: the starter bundle
+included only `kokoro_duration_t512.mlpackage`, so even `"Hello world."` loaded
+the largest duration model. Core ML spent minutes in E5 AOT specialization:
+
+```text
+KokoroSDKModelProvider.durationModel
+MLModel(contentsOf:configuration:)
+MLE5ProgramLibraryOnDeviceAOTCompilationImpl
+e5rt_e5_compiler_compile_from_ir_program
+```
+
+Precompiling with `xcrun coremlcompiler` and forcing `.cpuOnly` did not fix the
+t512 load cost. The simple fix was to make starter/custom bundles include the
+full padded duration ladder `[32, 64, 128, 256, 320, 384, 512]`, while keeping
+the starter synthesis bucket at 15 seconds and `af_heart`. After that, short
+text selects `kokoro_duration_t32`.
+
+### Verification
+
+Rebuilt compiled starter bundle:
+
+```bash
+python3 scripts/download_models.py \
+  --repo-id mattmireles/kokoro-coreml \
+  --revision c02933e179932e51909ff3b29466a7debac7d0e6 \
+  --sdk-profile starter \
+  --manifest-out /tmp/kokoro-download-manifest.json
+
+node scripts/build_sdk_bundle.mjs \
+  --profile starter \
+  --compile-models 1 \
+  --output /tmp/kokoro-sdk-starter-compiled \
+  --repo-id mattmireles/kokoro-coreml \
+  --revision c02933e179932e51909ff3b29466a7debac7d0e6 \
+  --download-manifest /tmp/kokoro-download-manifest.json
+```
+
+Result on 2026-06-28: built a starter bundle with 10 model packages, 1 voice,
+and 34 hosted files. The local `compiled/` cache is present for the smoke bundle
+but is intentionally excluded from `HostedManifest.json`.
+
+Bundle validation:
+
+```bash
+node scripts/validate_sdk_bundle.mjs /tmp/kokoro-sdk-starter-compiled
+```
+
+Result on 2026-06-28: passed.
+
+Swift tests:
+
+```bash
+swift test --package-path swift-tts
+swift test --package-path swift
+```
+
+Result on 2026-06-28: `swift-tts` passed 40 tests with 2 MLX runtime tests
+skipped by design; `swift` passed 46 tests after the SDK facade landed.
+
+Xcode-built macOS smoke:
+
+```bash
+xcodebuild -quiet \
+  -scheme kokoro-sdk-smoke \
+  -destination 'platform=macOS,arch=arm64' \
+  -derivedDataPath /tmp/kokoro-tts-smoke-dd \
+  build
+
+DYLD_FRAMEWORK_PATH=/tmp/kokoro-tts-smoke-dd/Build/Products/Debug/PackageFrameworks \
+  /tmp/kokoro-tts-smoke-dd/Build/Products/Debug/kokoro-sdk-smoke \
+  /tmp/kokoro-sdk-starter-compiled \
+  'Hello world.'
+```
+
+Result on 2026-06-28: passed with
+`samples=37800 sampleRate=24000 duration=1.575`.
+
+### Known Limitation
+
+Direct `swift run --package-path swift-tts kokoro-sdk-smoke ...` currently fails
+before synthesis because MLX Swift's `default.metallib` resource bundle is not
+copied into `.build`:
+
+```text
+MLX error: Failed to load the default metallib.
+```
+
+The Xcode-built app path embeds `mlx-swift_Cmlx.bundle/default.metallib` and
+runs successfully. Treat Xcode app builds as the reliable validation path for
+Phase 5; Phase 6 owns fresh app fixture and physical-device proof.
+
+---
+
 ## Issue: Phase 4 Reproducible HF Downloads and SDK Bundle Builder - Resolved
 
 **First spotted:** 2026-06-28
@@ -39,7 +216,7 @@ HF does not currently publish `KokoroRuntimeManifest.json` or
 
 `scripts/download_models.py` now supports `--repo-id`, `--revision`,
 `--manifest-out`, and `--sdk-profile starter|custom|full`. Starter downloads
-only the t512 duration model, 15-second F0Ntrain/decoder-pre/HAR-post packages,
+all padded duration buckets, 15-second F0Ntrain/decoder-pre/HAR-post packages,
 and `af_heart.bin`.
 
 ### Bundle Policy
@@ -79,7 +256,7 @@ python3 scripts/download_models.py \
   --manifest-out /tmp/kokoro-download-manifest.json
 ```
 
-Result on 2026-06-28: passed, fetched/verified 13 files, and wrote a 13-file
+Result on 2026-06-28: passed, fetched/verified 31 files, and wrote a 31-file
 download manifest. The first attempt exposed a symlink-order bug in manifest
 writing around `checkpoints/config.json`; Phase 4 fixed it by skipping symlinks
 before calling `is_file()`.
@@ -105,7 +282,11 @@ node scripts/build_sdk_bundle.mjs \
   --revision c02933e179932e51909ff3b29466a7debac7d0e6
 ```
 
-Result on 2026-06-28: built a starter bundle with 4 model packages, 1 voice,
+Result on 2026-06-28: initially built a starter bundle with 4 model packages,
+1 voice, `KokoroRuntimeManifest.json`, and `HostedManifest.json`. Phase 5 later
+changed starter/custom duration defaults to all padded duration buckets because
+t512-only starter bundles caused multi-minute Core ML specialization for short
+text. Current starter bundles contain 10 model packages, 1 voice,
 `KokoroRuntimeManifest.json`, and `HostedManifest.json`.
 
 Bundle validation:

@@ -11,6 +11,7 @@ let package = Package(
     products: [
         .library(name: "KokoroTTS", targets: ["KokoroTTS"]),
         .executable(name: "kokoro-misaki-probe", targets: ["KokoroMisakiProbe"]),
+        .executable(name: "kokoro-sdk-smoke", targets: ["KokoroSDKSmoke"]),
     ],
     dependencies: [
         .package(name: "KokoroPipeline", path: "../swift"),
@@ -35,6 +36,11 @@ let package = Package(
             name: "KokoroMisakiProbe",
             dependencies: ["KokoroTTS"],
             path: "Sources/KokoroMisakiProbe"
+        ),
+        .executableTarget(
+            name: "KokoroSDKSmoke",
+            dependencies: ["KokoroTTS"],
+            path: "Sources/KokoroSDKSmoke"
         ),
         .testTarget(
             name: "KokoroTTSTests",

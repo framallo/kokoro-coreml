@@ -29,10 +29,10 @@ public struct VoiceTable {
     /// Number of floats per Kokoro voice embedding row.
     public static let embeddingDim = PipelineConstants.voiceEmbeddingDim
 
-    /// Gist iOS default voice.
-    public static let defaultVoiceID = KokoroVoiceID.afBella
+    /// Default voice bundled by the starter SDK profile.
+    public static let defaultVoiceID = KokoroVoiceID.afHeart
 
-    /// Starter-profile voices proven by the Gist iOS path.
+    /// Voice IDs bundled by the starter SDK profile.
     public static let supportedVoiceIDs = KokoroVoiceID.starterVoices
 
     /// Directory containing `<voice>.bin` files.
@@ -71,10 +71,18 @@ public struct VoiceTable {
         if let cached = tables[voiceID] {
             return cached
         }
-        let url = voicesDirectory.appendingPathComponent("\(voiceID.rawValue).bin")
-        guard let data = try? Data(contentsOf: url) else {
+        guard Self.isSafeVoiceID(voiceID.rawValue) else {
             throw KokoroVoiceTableError.missingVoice(voiceID.rawValue)
         }
+        let url = voicesDirectory.appendingPathComponent("\(voiceID.rawValue).bin")
+        guard FileManager.default.fileExists(atPath: url.path) else {
+            throw KokoroVoiceTableError.missingVoice(voiceID.rawValue)
+        }
+        let values = try url.resourceValues(forKeys: [.isRegularFileKey, .isSymbolicLinkKey])
+        guard values.isRegularFile == true, values.isSymbolicLink != true else {
+            throw KokoroVoiceTableError.missingVoice(voiceID.rawValue)
+        }
+        let data = try Data(contentsOf: url)
         guard data.count % (Self.embeddingDim * 4) == 0, !data.isEmpty else {
             throw KokoroVoiceTableError.malformedVoice(voiceID.rawValue)
         }
@@ -88,5 +96,13 @@ public struct VoiceTable {
         }
         tables[voiceID] = floats
         return floats
+    }
+
+    /// Returns whether a public voice ID can be used as a single file stem.
+    private static func isSafeVoiceID(_ rawValue: String) -> Bool {
+        !rawValue.isEmpty
+            && !rawValue.contains("/")
+            && !rawValue.contains("\\")
+            && !rawValue.contains("..")
     }
 }

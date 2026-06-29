@@ -108,4 +108,13 @@ final class KokoroTextProcessorTests: XCTestCase {
             XCTAssertEqual(error as? KokoroVoiceTableError, .missingVoice("missing_voice"))
         }
     }
+
+    /// Verifies public voice IDs cannot escape the configured voice directory.
+    func testVoiceTableRejectsPathLikeVoiceID() {
+        var table = VoiceTable(voicesDirectory: repoRoot.appendingPathComponent("kokoro.js/voices"))
+
+        XCTAssertThrowsError(try table.refS(voiceID: "../af_heart", phonemeCount: 1)) { error in
+            XCTAssertEqual(error as? KokoroVoiceTableError, .missingVoice("../af_heart"))
+        }
+    }
 }

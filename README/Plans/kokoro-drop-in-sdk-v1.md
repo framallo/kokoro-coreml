@@ -32,7 +32,7 @@ developer diagnostic path, not an app runtime dependency.
 | Prepared input mode | Caller passes `inputIds`, `attentionMask`, and `refS` directly to `KokoroPipeline`. | Existing tests and benchmark fixtures keep working. |
 | Raw text SDK mode | Caller passes text, voice, and speed to `KokoroTTS`; SDK prepares inputs and synthesizes PCM. | This is the drop-in developer experience. |
 | App-bundled resources | App target or package resource bundle contains models, voices, vocab, and hn-NSF weights. | Required for offline iOS/macOS use and App Store-friendly behavior. |
-| Directory resources | SDK loads `.mlpackage` or `.mlmodelc` files from an explicit URL. | Keeps local development, benchmarks, and downloaded model bundles simple. |
+| Directory resources | SDK loads source `.mlpackage` files from an explicit URL and may reuse source-hash-matched `.mlmodelc` caches. | Keeps local development, benchmarks, and downloaded model bundles simple without trusting standalone compiled artifacts. |
 | Hugging Face resources | Repo tools hydrate model and voice assets from `mattmireles/kokoro-coreml`. | Keeps large binaries out of git while giving developers one canonical download source. |
 | Gist-style downloaded resources | App downloads a signed/hashed manifest of `.mlpackage` directories, voices, vocab, and hn-NSF weights, then compiles and caches `.mlmodelc` locally. | This is the shipping iOS precedent and avoids coupling release artifacts to one OS-compiled `.mlmodelc`. |
 | Node oracle mode | Node runs Botnet-compatible prep in tests, scripts, CI, or macOS developer diagnostics. | Useful for drift detection; forbidden as a required iOS app dependency. |
@@ -109,9 +109,10 @@ developer diagnostic path, not an app runtime dependency.
   required for reliable MisakiSwift and Core ML behavior. Prefer a reliable
   iOS 18+ raw-text SDK over a fragile older-OS compatibility story. Do not
   silently raise the low-level runtime's platform floor.
-- **Provider seam:** App-bundle, `.mlmodelc`, lazy loading, `prewarm(...)`, cache
-  eviction, and compute policy belong in a new SDK model provider conforming to
-  `KokoroModelProvider`, not in the existing `KokoroPipeline` class.
+- **Provider seam:** App-bundle resources, source-hash-matched compiled caches,
+  lazy loading, `prewarm(...)`, cache eviction, and compute policy belong in a
+  new SDK model provider conforming to `KokoroModelProvider`, not in the
+  existing `KokoroPipeline` class.
 - **Resource source of truth:** Small runtime files are package-owned and
   checked in; large model and voice binaries are downloaded from pinned HF
   revisions and copied into generated SDK bundles.
@@ -152,11 +153,12 @@ developer diagnostic path, not an app runtime dependency.
 - **Resource path safety:** Manifest paths must be relative, canonical, and
   confined to the bundle root. Reject absolute paths, `..`, symlinks that escape
   the bundle, and non-canonical model package names before hashing or loading.
-- **Core ML loading:** SDK must support both source `.mlpackage` directories and
-  Xcode-compiled `.mlmodelc` bundles.
+- **Core ML loading:** SDK must require source `.mlpackage` directories and may
+  reuse `.mlmodelc` caches only when a sidecar proves they were compiled from
+  the verified source package tree.
 - **On-device compilation:** Source `.mlpackage` directories may be downloaded
-  and compiled on device with `MLModel.compileModel(at:)`; precompiled
-  `.mlmodelc` remains supported for app-bundled builds.
+  and compiled on device with `MLModel.compileModel(at:)`; hosted downloads do
+  not distribute platform-compiled `.mlmodelc` caches.
 - **Compute policy:** iPhone production default follows staged loading:
   decoder-pre on `.cpuAndNeuralEngine`; duration, F0Ntrain, and generator on
   `.cpuAndGPU`, with a session-sticky `.cpuOnly` degradation path after Core ML
@@ -185,7 +187,8 @@ developer diagnostic path, not an app runtime dependency.
 - **Tokenizer assets:** `kokoro.js/src/phonemize.js`, `splitter.js`, `voices.js`,
   and voice `.bin` files exist locally.
 - **iOS resource precedent:** `ios-bench/project.yml` bundles Core ML packages
-  as app resources and lets Xcode compile them to `.mlmodelc`.
+  as app resources, but this SDK V1 still requires source `.mlpackage`
+  manifests for validation and treats compiled output as a cache.
 - **Gist iOS app precedent:** `/Users/mm/Documents/GitHub/gist/packages/ios-app`
   ships local listen mode with `KokoroG2P.swift`, `SynthEngine.swift`,
   `KokoroModelStore.swift`, `VoiceTable.swift`, and `SlideAudioStore.swift`.
@@ -547,46 +550,83 @@ without reading benchmark code or touching the low-level pipeline.
 
 **Tasks:**
 
-- [ ] Add `KokoroResourceProvider` in `KokoroTTS` with cases for explicit
-      directory URL, app bundle, package bundle, and precompiled `.mlmodelc`
-      bundle roots.
-- [ ] Add a downloaded-resource provider modeled on Gist's `KokoroModelStore`:
+- [x] Add `KokoroResourceProvider` in `KokoroTTS` with cases for explicit
+      generated-bundle directory URL, app bundle, package bundle, and downloaded
+      cache roots. Generated bundle roots may include a `compiled/` directory;
+      V1 does not support precompiled-only roots without source `.mlpackage`
+      manifests.
+- [x] Add a downloaded-resource provider modeled on Gist's `KokoroModelStore`:
       fetch remote manifest, compare local version and file sizes/hashes,
       download missing files with retry, exclude cache from iCloud backup,
       compile `.mlpackage` directories with `MLModel.compileModel(at:)`, and
       cache `.mlmodelc` next to source packages.
-- [ ] Add `KokoroSDKModelProvider` in `KokoroTTS` that conforms to
+- [x] Add `KokoroSDKModelProvider` in `KokoroTTS` that conforms to
       `KokoroModelProvider`, validates the manifest, owns lazy model loading,
-      handles `.mlpackage` off-main-thread compilation, handles `.mlmodelc`
-      loading, caches selected buckets, and exposes `prewarm(...)`.
-- [ ] Keep the existing `KokoroPipeline` class backward-compatible; do not move
+      handles `.mlpackage` off-main-thread compilation, reuses source-hash-
+      matched `.mlmodelc` caches, caches selected buckets, and exposes
+      `prewarm(...)`.
+- [x] Keep the existing `KokoroPipeline` class backward-compatible; do not move
       app resource discovery, HF download, or SDK cache policy into it.
-- [ ] Add `KokoroTTS` as an actor or otherwise concurrency-safe facade over
+- [x] Add `KokoroTTS` as an actor or otherwise concurrency-safe facade over
       `KokoroTextProcessor`, `KokoroResourceProvider`, and
       `KokoroSDKModelProvider`.
-- [ ] Public API target:
+- [x] Public API target:
       `let tts = try await KokoroTTS.load(resources: .appBundle(.main))`
       and `let audio = try await tts.synthesize("Hello world", voice: .afHeart)`.
-- [ ] Add `prepare(text:voice:speed:)` for developers who want to inspect or
+- [x] Add `prepare(_:voice:options:)` for developers who want to inspect or
       cache prepared inputs without running Core ML.
-- [ ] Add internal chunk stitching for text longer than one duration model can
+- [x] Add internal chunk stitching for text longer than one duration model can
       accept; use `PcmJoiner` for PCM output and expose raw chunks only as an
       advanced API.
-- [ ] Add `AVAudioPCMBuffer` convenience creation while keeping the core return
+- [x] Add `AVAudioPCMBuffer` convenience creation while keeping the core return
       type as raw `[Float]` plus sample rate and metadata.
-- [ ] Add clear default compute policy and an escape hatch for `MLComputeUnits`
+- [x] Add clear default compute policy and an escape hatch for `MLComputeUnits`
       per stage without exposing benchmark-only complexity in the common path.
-- [ ] Make the default iPhone compute policy match the Gist app: decoder-pre on
+- [x] Make the default iPhone compute policy match the Gist app: decoder-pre on
       `.cpuAndNeuralEngine`, duration/F0Ntrain/generator on `.cpuAndGPU`, and a
       session-sticky `.cpuOnly` retry after Core ML load or predict failure.
-- [ ] Add typed errors for missing model, missing voice, bad hash, path escape,
-      unsupported voice/language, input too long, empty phonemizer output,
-      Core ML load failure, synthesis cancellation, and invalid audio.
+- [x] Add typed errors for missing model, missing voice, bad hash, path escape,
+      unsupported voice, empty text, invalid speed, input too long, empty
+      phonemizer output, Core ML load failure, synthesis cancellation, and
+      invalid audio.
 
-**Verification:** One-line API compiles in a fresh SwiftPM consumer fixture;
-`KokoroTTS` can synthesize from an explicit directory, app-bundle resources,
-and downloaded-resource cache; docs snippets compile; existing
-`KokoroPipeline.synthesize(inputIds:...)` tests still pass.
+**Verification:** `swift test --package-path swift-tts` passes 40 tests
+(2 MLX-runtime tests skipped by design unless `KOKORO_RUN_MISAKI_RUNTIME_TESTS=1`
+is set); `swift test --package-path swift` passed 46 tests after the Phase 5
+surface landed; the Xcode-built `kokoro-sdk-smoke` synthesizes
+`"Hello world."` from `/tmp/kokoro-sdk-starter-compiled` with
+`samples=37800 sampleRate=24000 duration=1.575`. Direct SwiftPM CLI execution
+of the smoke currently fails before synthesis because upstream MLX Swift does
+not copy `mlx-swift_Cmlx.bundle/default.metallib` into `.build`; the Xcode app
+build embeds that resource bundle and is the supported app-validation path for
+this phase. Fresh consumer fixture, app UI, and physical-device validation are
+tracked in Phase 6.
+
+**Phase audit:** Read-only Codex cross-agent audit on 2026-06-28 initially
+graded this phase Architecture C / Correctness risk C / Complexity debt B and
+blocked commit-readiness. Fixes applied after that audit: downloaded hosted
+manifest paths reject absolute, `..`, empty, and backslash components before
+local writes or remote URL construction; hosted version changes clear the
+compiled cache; the dead public `KokoroTTS()` initializer was removed; missing
+or malformed voice assets map to public `KokoroError` cases; and the resource
+provider wording no longer implies precompiled-only bundle support.
+The second cross-agent pass found compiled-cache trust, parent-symlink,
+cancellation, model-set consistency, and ignored `maxChunkSeconds` issues. Those
+were fixed by making `KokoroSDKModelProvider` internal, validating compiled
+cache and runtime/cache/model path components, preserving hosted-download
+cancellation, failing fast on missing duration or bucket stage packages, honoring
+`KokoroSynthesisOptions.maxChunkSeconds`, requiring every manifest
+`duration_token_sizes` entry to have a matching duration model, and adding
+targeted tests.
+The final focused cross-agent pass found unsafe bundle-output deletion,
+self-consistent but unverified HF provenance, host-distributed compiled caches,
+root-symlink escapes, unsupported manifest-schema acceptance, stale starter
+voice constants, and British voices using the U.S. Misaki path. Those were fixed
+by adding a destructive-output guard and bundle marker, requiring
+`--download-manifest` unless local provenance is explicitly allowed, excluding
+`compiled/` from `HostedManifest.json`, rejecting symlinked roots, enforcing
+schema version 1, aligning starter constants to `af_heart`, and selecting the
+British Misaki phonemizer for `b*` voices.
 
 ---
 
@@ -603,8 +643,9 @@ and downloaded-resource cache; docs snippets compile; existing
 - [ ] Include two resource modes in the example when feasible: bundled starter
       resources for offline demos and downloaded manifest resources for the
       Gist-style app flow.
-- [ ] Add `swift/Sources/KokoroSDKSmoke` executable for local smoke tests that
-      writes a WAV.
+- [ ] Extend the Phase 5 `swift-tts` `kokoro-sdk-smoke` executable into a
+      Phase 6 app/fixture smoke that writes a WAV and exercises bundled and
+      downloaded resources.
 - [ ] Add a fresh consumer fixture outside `swift/` that depends on the package
       as a developer would and uses only public API.
 - [ ] Build and run macOS smoke with a generated starter bundle.
@@ -668,13 +709,14 @@ command or script; SDK constants/docs/model-card drift check passes.
 - Regression test: `python scripts/kokoro-prepare-input.py --runtime-root <repo-root> --text-file <fixture> --output /tmp/kokoro-prep.json --key smoke --voice af_heart --speed 1`
 - Regression test: `python scripts/verify_runtime_assets.py`
 - Regression test: `python scripts/inspect_hf_artifacts.py --repo-id mattmireles/kokoro-coreml --revision <released-sha> --format markdown --append README/Notes/kokoro-drop-in-sdk-v1.md`
-- Regression test: `python scripts/download_models.py --repo-id mattmireles/kokoro-coreml --revision <released-sha> --verify-manifest <bundle>/KokoroRuntimeManifest.json`
+- Regression test: `python scripts/download_models.py --repo-id mattmireles/kokoro-coreml --revision <released-sha> --sdk-profile starter --manifest-out /tmp/kokoro-download-manifest.json`
+- Regression test: `node scripts/build_sdk_bundle.mjs --profile starter --compile-models 1 --output /tmp/kokoro-sdk-starter-compiled --repo-id mattmireles/kokoro-coreml --revision <released-sha> --download-manifest /tmp/kokoro-download-manifest.json`
 - Regression test: `python scripts/hash_mlpackage_tree.py coreml/kokoro_duration_t512.mlpackage`
 - Regression test: `swift test --package-path swift`
 - Regression test: `swift test --package-path swift-tts --filter KokoroText`
 - Regression test: `swift test --package-path swift-tts --filter KokoroMisaki`
-- Regression test: `swift run --package-path swift-tts kokoro-sdk-smoke --resources <bundle> --text "Hello world" --out /tmp/kokoro.wav`
-- Regression test: `swift run --package-path swift-tts kokoro-sdk-smoke --manifest-url <hosted-manifest> --cache-dir <tmp> --text "Hello world" --out /tmp/kokoro.wav`
+- Regression test: Xcode-built `swift-tts` `kokoro-sdk-smoke <bundle-root> "Hello world"` prints finite samples, sample rate, and duration.
+- Phase 6 target: extend the smoke fixture to write WAV output and exercise hosted-manifest cache hydration.
 - Regression test: `node scripts/check_sdk_drift.mjs`
 - Regression test: `xcodebuild` or XcodeBuildMCP build of `Examples/KokoroDemoApp` on simulator.
 - Manual release gate: physical iPhone raw-text smoke with first call, warm
@@ -850,15 +892,15 @@ command or script; SDK constants/docs/model-card drift check passes.
 | Scenario | Behavior | Fallback |
 | --- | --- | --- |
 | Empty or whitespace text | Throw `KokoroError.emptyText`. | Caller can skip synthesis. |
-| Unknown voice | Throw `KokoroError.unsupportedVoice` with available voices. | Caller chooses another voice. |
-| Voice asset missing | Throw `KokoroError.missingVoiceAsset`. | Bundle generator or app resources must be fixed. |
-| Voice `.bin` corrupt length | Throw before synthesis. | Rebuild resource bundle. |
-| Unsupported language voice | Throw unless backend explicitly supports it. | Use supported English voice. |
+| Unknown voice | Throw `KokoroError.unsupportedVoice`. | Caller chooses another voice. |
+| Voice asset missing | Throw `KokoroError.missingVoice`. | Bundle generator or app resources must be fixed. |
+| Voice `.bin` corrupt length | Throw `KokoroError.malformedVoice`. | Rebuild resource bundle. |
+| Unsupported language voice | Treat as unsupported voice unless the bundled backend explicitly supports it. | Use supported English voice. |
 | Text exceeds token cap | Chunk before synthesis; if a single chunk still exceeds cap, throw. | Caller can shorten or SDK can split more aggressively. |
 | Unknown phoneme not in vocab | Match Gist behavior: drop unknown token and record privacy-safe diagnostic counters. | BOS/EOS still apply; throw only if no model tokens remain. |
 | Diagnostics requested | Return counters, hashes, and typed error codes by default. | Raw text or phonemes require explicit caller opt-in and are never persisted by SDK code. |
 | Missing duration bucket | Throw with required model filename. | Rebuild bundle with required bucket. |
-| `.mlpackage` first-run compile | Compile off-main-thread. | Use precompiled `.mlmodelc` in app resources. |
+| `.mlpackage` first-run compile | Compile through the SDK model provider and cache compiled output when the root is writable. | Reuse source-hash-matched local caches; hosted downloads distribute source packages only. |
 | Simulator run | Functional smoke only; no performance claim. | Use physical device for placement and latency. |
 | No physical iPhone available | Mark iOS release blocked or downgrade claim. | Do not mark iOS SDK readiness complete. |
 | Manifest path escape | Reject before hashing or loading. | Rebuild bundle with canonical relative paths. |
@@ -887,8 +929,8 @@ command or script; SDK constants/docs/model-card drift check passes.
   and retry locally before surfacing failure.
 - **If full resource bundle is too large:** ship starter/custom bundle flow
   first and document full bundle as optional.
-- **If `.mlmodelc` bundle discovery is flaky:** require explicit resource URL
-  until app-bundle discovery is proven.
+- **If compiled-cache discovery is flaky:** require explicit resource URL
+  injection and fall back to source package compilation.
 - **If HF update is delayed:** keep `scripts/download_models.py` pointed at the
   last known good model/voice revision and ship SDK source/docs separately; do
   not update the model card to the new raw-text API until the matching SDK
@@ -945,7 +987,7 @@ command or script; SDK constants/docs/model-card drift check passes.
 | `swift-tts/Sources/KokoroTTS/KokoroTTS.swift` | Create | Drop-in public API. |
 | `swift-tts/Sources/KokoroTTS/KokoroResourceProvider.swift` | Create | Bundle/directory/downloaded resource loading. |
 | `swift-tts/Sources/KokoroTTS/KokoroDownloadedModelStore.swift` | Create | Gist-style manifest download, compile, cache, and invalidation. |
-| `swift-tts/Sources/KokoroTTS/KokoroSDKModelProvider.swift` | Create | Lazy `.mlpackage`/`.mlmodelc` provider implementing `KokoroModelProvider`. |
+| `swift-tts/Sources/KokoroTTS/KokoroSDKModelProvider.swift` | Create | Lazy `.mlpackage` provider with source-hash-matched `.mlmodelc` cache reuse implementing `KokoroModelProvider`. |
 | `swift-tts/Sources/KokoroTTS/KokoroErrors.swift` | Create | Typed SDK errors. |
 | `swift/Tests/KokoroPipelineTests/*` | Modify/Create | Prepared-input compatibility stays green. |
 | `swift-tts/Tests/KokoroTTSTests/*` | Create | Text prep, resource, manifest, SDK API, and diagnostics tests. |
@@ -1030,13 +1072,13 @@ command or script; SDK constants/docs/model-card drift check passes.
 
 ### Phase 5: SDK Model Provider and Drop-In API
 
-- [ ] Add resource provider.
-- [ ] Add downloaded-resource provider.
-- [ ] Add SDK model provider using `KokoroModelProvider`.
-- [ ] Support `.mlpackage` and `.mlmodelc`.
-- [ ] Add `KokoroTTS` facade.
-- [ ] Add chunk synthesis and PCM conveniences.
-- [ ] Add Gist-style staged compute policy and `.cpuOnly` retry.
+- [x] Add resource provider.
+- [x] Add downloaded-resource provider.
+- [x] Add SDK model provider using `KokoroModelProvider`.
+- [x] Support `.mlpackage` plus source-hash-matched `.mlmodelc` cache reuse.
+- [x] Add `KokoroTTS` facade.
+- [x] Add chunk synthesis and PCM conveniences.
+- [x] Add Gist-style staged compute policy and `.cpuOnly` retry.
 
 ### Phase 6: Examples and macOS/iOS Validation
 

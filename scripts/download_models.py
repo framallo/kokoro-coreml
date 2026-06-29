@@ -45,7 +45,7 @@ VOICE_PATTERNS = [
     "kokoro.js/voices/*.bin",
 ]
 STARTER_BUCKET_SECONDS = [15]
-STARTER_DURATION_TOKEN_SIZES = [512]
+SDK_DURATION_TOKEN_SIZES = [32, 64, 128, 256, 320, 384, 512]
 STARTER_VOICES = ["af_heart"]
 # Files to always skip (not model artifacts).
 # IMPORTANT: Do NOT add "*.json" here — it would exclude Manifest.json inside
@@ -203,13 +203,13 @@ def _sdk_patterns(profile: str, voices: list[str], buckets: list[int]) -> list[s
     if profile == "starter":
         voices = voices or STARTER_VOICES
         buckets = buckets or STARTER_BUCKET_SECONDS
-        duration_sizes = STARTER_DURATION_TOKEN_SIZES
+        duration_sizes = SDK_DURATION_TOKEN_SIZES
     elif profile == "custom":
         if not voices:
             raise SystemExit("--sdk-profile custom requires --sdk-voices")
         if not buckets:
             raise SystemExit("--sdk-profile custom requires --sdk-buckets")
-        duration_sizes = STARTER_DURATION_TOKEN_SIZES
+        duration_sizes = SDK_DURATION_TOKEN_SIZES
     else:
         raise SystemExit(f"unknown SDK profile: {profile}")
 
@@ -258,9 +258,9 @@ def _sdk_required_packages(profile: str, voices: list[str], buckets: list[int]) 
         ]
     if profile == "starter":
         buckets = buckets or STARTER_BUCKET_SECONDS
-        duration_sizes = STARTER_DURATION_TOKEN_SIZES
+        duration_sizes = SDK_DURATION_TOKEN_SIZES
     elif profile == "custom":
-        duration_sizes = STARTER_DURATION_TOKEN_SIZES
+        duration_sizes = SDK_DURATION_TOKEN_SIZES
     else:
         raise SystemExit(f"unknown SDK profile: {profile}")
 

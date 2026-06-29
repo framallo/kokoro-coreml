@@ -86,6 +86,14 @@ public struct KokoroTextProcessor {
     ///   is absent or malformed.
     public static func loadBundledVocab() throws -> [String: Int32] {
         let url = try KokoroRuntimeAssets.url(for: .vocab)
+        return try loadVocab(from: url)
+    }
+
+    /// Loads a Kokoro vocab file from an explicit URL.
+    ///
+    /// - Parameter url: JSON file with a top-level `vocab` dictionary.
+    /// - Returns: Phoneme-character vocabulary table.
+    public static func loadVocab(from url: URL) throws -> [String: Int32] {
         let data = try Data(contentsOf: url)
         guard
             let json = try JSONSerialization.jsonObject(with: data) as? [String: Any],
@@ -114,13 +122,17 @@ public struct KokoroTextProcessor {
     ///   - refS: Selected 256-float voice embedding row.
     ///   - options: Synthesis prep options.
     ///   - key: Optional fixture or batch key.
+    ///   - phonemeResult: Optional precomputed phoneme result. Supplying this
+    ///     avoids a second G2P pass when the caller already phonemized to choose
+    ///     a voice embedding row.
     /// - Returns: Prepared input with padded token IDs and attention mask.
     public func prepare(
         text: String,
         voice: KokoroVoiceID,
         refS: [Float],
         options: KokoroSynthesisOptions = KokoroSynthesisOptions(),
-        key: String? = nil
+        key: String? = nil,
+        phonemeResult: KokoroPhonemeResult? = nil
     ) throws -> KokoroPreparedInput {
         let normalized = Self.normalizeWhitespace(text)
         guard !normalized.isEmpty else {
@@ -136,8 +148,13 @@ public struct KokoroTextProcessor {
             )
         }
 
-        let phonemeResult = try phonemizer.phonemize(normalized)
-        let modelTokenIDs = tokenIDs(forPhonemes: phonemeResult.phonemes)
+        let resolvedPhonemeResult: KokoroPhonemeResult
+        if let phonemeResult {
+            resolvedPhonemeResult = phonemeResult
+        } else {
+            resolvedPhonemeResult = try phonemizer.phonemize(normalized)
+        }
+        let modelTokenIDs = tokenIDs(forPhonemes: resolvedPhonemeResult.phonemes)
         guard !modelTokenIDs.isEmpty else {
             throw KokoroTextProcessingError.emptyTokenization
         }
@@ -179,6 +196,18 @@ public struct KokoroTextProcessor {
     /// - Returns: Unframed model token IDs.
     public func tokenIDs(forPhonemes phonemes: String) -> [Int32] {
         phonemes.compactMap { vocab[String($0)] }
+    }
+
+    /// Converts text to phonemes after the same whitespace normalization used by prep.
+    ///
+    /// - Parameter text: Raw caller text.
+    /// - Returns: Phoneme result used for tokenization and voice-row selection.
+    public func phonemize(_ text: String) throws -> KokoroPhonemeResult {
+        let normalized = Self.normalizeWhitespace(text)
+        guard !normalized.isEmpty else {
+            throw KokoroTextProcessingError.emptyText
+        }
+        return try phonemizer.phonemize(normalized)
     }
 
     /// Normalizes caller text the same way the Botnet chunker does.
