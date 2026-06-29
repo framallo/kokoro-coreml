@@ -30,13 +30,18 @@ model_packages: 23
 voices: 54
 ```
 
-This machine does not currently have upload credentials:
+`huggingface_hub.whoami()` did not find a direct env/cache token:
 
 ```text
 HF_TOKEN env: false
 cached token: false
 whoami: LocalTokenNotFoundError
 ```
+
+However, `scripts/download_models.py` found `HF_TOKEN` through the repo's
+configured `.env` lookup and successfully accessed the public repo with
+configured credentials. `scripts/prepare_hf_sdk_metadata.py` now uses the same
+lookup order: env, repo `.env`, then Hugging Face cache.
 
 ### Fix
 
@@ -54,8 +59,8 @@ from validated starter/full SDK bundles:
 
 The script refuses to write inside the repo checkout, verifies each profile's
 `KokoroRuntimeManifest.json` has the expected `sdk_commit`, and can upload the
-payload with `--upload` once `HF_TOKEN` or a Hugging Face login cache is
-available.
+payload with `--upload` using env, repo `.env`, or Hugging Face cache
+credentials.
 
 ### Decision
 

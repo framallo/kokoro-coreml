@@ -786,8 +786,10 @@ artifact. `README/hf-model-card.md` now points app developers at `KokoroTTS`
 and marks old `KokoroPipeline` snippets as low-level. Remote HF upload remains
 pending until the final release commit and final artifact checks are ready.
 The physical iOS readiness gate is now closed by iPhone 15 Pro Max evidence.
-The HF metadata payload helper is ready, but the actual upload is still pending
-because this machine has no `HF_TOKEN` or Hugging Face login cache configured.
+The HF metadata payload helper is ready and shares the downloader's env,
+repo `.env`, and Hugging Face cache token lookup. The actual upload remains
+pending until the final payload is regenerated for the current SDK commit and
+the live HF repo verifies.
 Verification after the docs/drift slice: `node
 scripts/check_sdk_drift.mjs`, `swift test --package-path swift-tts`, `swift
 test --package-path swift`, `node scripts/compare_botnet_prepare_input.mjs

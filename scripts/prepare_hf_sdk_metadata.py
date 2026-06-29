@@ -19,6 +19,7 @@ from __future__ import annotations
 import argparse
 import hashlib
 import json
+import os
 import shutil
 import subprocess
 from dataclasses import dataclass
@@ -103,6 +104,26 @@ def load_json(path: Path) -> dict[str, Any]:
     """Load one JSON object from disk."""
 
     return json.loads(path.read_text(encoding="utf-8"))
+
+
+def load_hf_token() -> str | None:
+    """Load an HF token using the same env/.env/cache order as the downloader."""
+
+    token = os.environ.get("HF_TOKEN")
+    if token:
+        return token
+    env_path = REPO_ROOT / ".env"
+    if env_path.exists():
+        for line in env_path.read_text(encoding="utf-8").splitlines():
+            stripped = line.strip()
+            if stripped.startswith("HF_TOKEN="):
+                return stripped.split("=", 1)[1].strip()
+    try:
+        from huggingface_hub import HfFolder
+
+        return HfFolder.get_token()
+    except Exception:
+        return None
 
 
 def copy_manifest_pair(profile: ProfileInput, output: Path, sdk_commit: str) -> dict[str, Any]:
@@ -196,7 +217,10 @@ def upload_payload(repo_id: str, payload: Path) -> None:
 
     from huggingface_hub import HfApi
 
-    api = HfApi()
+    token = load_hf_token()
+    if not token:
+        raise SystemExit("HF upload requires HF_TOKEN, .env HF_TOKEN, or a Hugging Face login cache")
+    api = HfApi(token=token)
     api.upload_folder(
         repo_id=repo_id,
         repo_type="model",
