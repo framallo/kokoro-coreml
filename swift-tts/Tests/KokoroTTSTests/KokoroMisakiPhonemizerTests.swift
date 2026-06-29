@@ -61,4 +61,24 @@ final class KokoroMisakiPhonemizerTests: XCTestCase {
         XCTAssertTrue(policy.includesPhonemes)
         XCTAssertFalse(policy.persistsRawPayloads)
     }
+
+    /// Verifies SwiftPM bundles every checked runtime asset with the SDK target.
+    func testRuntimeAssetsAreBundled() throws {
+        for asset in KokoroRuntimeAsset.allCases {
+            let url = try KokoroRuntimeAssets.url(for: asset)
+
+            XCTAssertTrue(FileManager.default.fileExists(atPath: url.path), "\(asset.fileName) is missing")
+        }
+    }
+
+    /// Verifies the checked hn-NSF resource does not carry the old unverified hash marker.
+    func testRuntimeHnsfWeightsCarryVerifiedHash() throws {
+        let url = try KokoroRuntimeAssets.url(for: .hnsfWeights)
+        let payload = try JSONSerialization.jsonObject(with: Data(contentsOf: url)) as? [String: Any]
+
+        XCTAssertEqual(
+            payload?["weights_sha256"] as? String,
+            "25a471a6fc81fc9c5ff7c46e4be9d9ec3710dbbfea6e121a99fac75e4a97ad99"
+        )
+    }
 }

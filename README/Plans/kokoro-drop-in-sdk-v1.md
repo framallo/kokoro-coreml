@@ -411,23 +411,23 @@ cannot accidentally absorb machine-local symlinks or stale files.
 
 **Tasks:**
 
-- [ ] Add checked-in SDK runtime resources under
+- [x] Add checked-in SDK runtime resources under
       `swift-tts/Sources/KokoroTTS/Resources/KokoroRuntime/`:
       - `kokoro-vocab.json`, copied or regenerated from the same Kokoro vocab
         source used by the Gist iOS app, with recorded SHA/provenance.
       - `hnsf_weights.json`, regenerated or promoted from the verified source
         so `weights_sha256` is not `"unverified"`.
-- [ ] Add `scripts/verify_runtime_assets.py` to reject symlinked configs,
+- [x] Add `scripts/verify_runtime_assets.py` to reject symlinked configs,
       compare vocab hashes, compare hn-NSF weights hashes, and prove the package
       resources are the canonical SDK inputs.
-- [ ] Update prep scripts only if needed so local oracle paths can use the same
+- [x] Update prep scripts only if needed so local oracle paths can use the same
       real vocab source as the SDK without relying on `checkpoints/config.json`.
-- [ ] Leave `checkpoints/config.json` out of SDK bundle generation entirely
+- [x] Leave `checkpoints/config.json` out of SDK bundle generation entirely
       unless it has been replaced with a real copied file and provenance.
-- [ ] Add a small runtime asset manifest fragment with hashes for vocab and
+- [x] Add a small runtime asset manifest fragment with hashes for vocab and
       hn-NSF weights; later bundle manifests must embed these exact hashes.
 
-**Verification:** `python scripts/verify_runtime_assets.py` passes from a clean
+**Verification:** `python3 scripts/verify_runtime_assets.py` passes from a clean
 checkout; the script fails on symlinked vocab config, missing hn-NSF weights,
 `weights_sha256: "unverified"`, or hash drift between package resources and any
 generated benchmark copies.
@@ -1007,10 +1007,10 @@ command or script; SDK constants/docs/model-card drift check passes.
 
 ### Phase 2: Runtime Asset Source of Truth
 
-- [ ] Add checked SDK vocab resource.
-- [ ] Add checked verified hn-NSF weights resource.
-- [ ] Add runtime asset verifier.
-- [ ] Reject symlinked configs and unverified hashes.
+- [x] Add checked SDK vocab resource.
+- [x] Add checked verified hn-NSF weights resource.
+- [x] Add runtime asset verifier.
+- [x] Reject symlinked configs and unverified hashes.
 
 ### Phase 3: Native Swift Text Prep and Public Types
 

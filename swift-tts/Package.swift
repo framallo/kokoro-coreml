@@ -26,7 +26,10 @@ let package = Package(
                 .product(name: "KokoroPipeline", package: "KokoroPipeline"),
                 .product(name: "MisakiSwift", package: "MisakiSwift"),
             ],
-            path: "Sources/KokoroTTS"
+            path: "Sources/KokoroTTS",
+            resources: [
+                .process("Resources"),
+            ]
         ),
         .executableTarget(
             name: "KokoroMisakiProbe",

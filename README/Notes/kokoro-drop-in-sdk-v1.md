@@ -8,6 +8,96 @@ do not put local-only analysis in `README/Guides/`.
 
 ---
 
+## Issue: Phase 2 Runtime Asset Source of Truth - Resolved
+
+**First spotted:** 2026-06-28
+**Resolved:** 2026-06-28
+**Status:** Resolved
+
+### Summary
+
+Phase 2 made the small SDK runtime inputs checked, hashed, and independently
+verifiable. The SDK package now bundles `kokoro-vocab.json`,
+`hnsf_weights.json`, and `KokoroRuntimeAssets.json` under
+`swift-tts/Sources/KokoroTTS/Resources/KokoroRuntime/`. `KokoroPipeline` stays
+unchanged; these resources belong to the higher-floor raw-text SDK package.
+
+The old root `hnsf_weights.json` carried `"weights_sha256": "unverified"`.
+Phase 2 promoted the verified copy from
+`ios-bench/Resources/bench_inputs/hnsf_weights.json` to both the SDK resource
+and root file so repo-local tools no longer default to unverified weights.
+
+### Hashes
+
+| Asset | SHA-256 | Notes |
+| --- | --- | --- |
+| `swift-tts/.../kokoro-vocab.json` | `353ca94410fde4575cb091a0ba32b8e99077fde4f38fded506f4f041d22571a3` | Byte copy from Gist iOS `Resources/Kokoro/kokoro-vocab.json`. |
+| SDK vocab canonical JSON | `c888d4ef5abac125fcd45201e54aa6bf512722bcc4213f76bb053edb056923de` | Matches `_kokoro_vocab.json` and `ios-bench/Vendor/kokoro-ios/Resources/config.json:vocab` semantically. |
+| `swift-tts/.../hnsf_weights.json` | `de73b717732da77b31736f67a108d35c478ab116b0a188e9787019b0408c0226` | Matches root `hnsf_weights.json` and `ios-bench/Resources/bench_inputs/hnsf_weights.json` byte-for-byte. |
+| hn-NSF internal `weights_sha256` | `25a471a6fc81fc9c5ff7c46e4be9d9ec3710dbbfea6e121a99fac75e4a97ad99` | Replaces the old `"unverified"` marker. |
+
+### Guardrails
+
+`scripts/verify_runtime_assets.py` is the Phase 2 gate. It rejects missing
+files, symlinked SDK resources or checked comparison files, malformed vocab
+JSON, vocab canonical-hash drift, hn-NSF byte-hash drift, and
+`weights_sha256: "unverified"`.
+
+`checkpoints/config.json` remains a local symlink and is deliberately not used
+as an SDK source. The verifier compares SDK vocab against `_kokoro_vocab.json`
+and the checked iOS bench config, not the machine-local checkpoint symlink.
+
+SwiftPM flattens processed resources in some test builds. `KokoroRuntimeAssets`
+therefore checks `KokoroRuntime/<file>` first and then falls back to the
+flattened bundle root while keeping the source tree organized under
+`Resources/KokoroRuntime`.
+
+### Verification
+
+Regression test:
+
+```bash
+python3 scripts/verify_runtime_assets.py
+```
+
+Result on 2026-06-28: passed with the SDK vocab and hn-NSF hashes above.
+Temporary negative checks also passed: replacing the SDK vocab with a symlink
+failed as expected, replacing SDK `weights_sha256` with `"unverified"` failed
+as expected, and the restored files passed the verifier again.
+
+Regression test:
+
+```bash
+swift test --package-path swift-tts
+```
+
+Result on 2026-06-28: passed 7 tests with 2 Misaki runtime tests skipped by
+default. The new resource tests prove the package bundle exposes the manifest,
+vocab, and verified hn-NSF weights.
+
+Regression test:
+
+```bash
+swift test --package-path swift
+```
+
+Result on 2026-06-28: passed 45 tests, confirming the low-level prepared-input
+pipeline still builds after promoting the root hn-NSF weights file.
+
+### If This Recurs
+
+- [ ] Run `python3 scripts/verify_runtime_assets.py` before building SDK
+      bundles.
+- [ ] Do not use `checkpoints/config.json` as an SDK vocab source while it is a
+      symlink.
+- [ ] Keep `KokoroRuntimeAssets.json` hashes in lockstep with the checked SDK
+      resource files.
+- [ ] Preserve the `KokoroRuntimeAssets` flattened-resource fallback unless the
+      package build is proven to preserve subdirectories across SwiftPM and
+      Xcode.
+
+---
+
 ## Issue: Phase 1 `swift-tts` Package Boundary - Resolved
 
 **First spotted:** 2026-06-28
