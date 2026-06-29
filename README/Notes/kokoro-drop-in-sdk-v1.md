@@ -8,6 +8,140 @@ do not put local-only analysis in `README/Guides/`.
 
 ---
 
+## Issue: Phase 4 Reproducible HF Downloads and SDK Bundle Builder - Resolved
+
+**First spotted:** 2026-06-28
+**Resolved:** 2026-06-28
+**Status:** Resolved
+
+### Summary
+
+Phase 4 added pinned Hugging Face provenance and deterministic SDK bundle
+assembly. The current HF source of truth is:
+
+- Repo: `mattmireles/kokoro-coreml`
+- Revision: `c02933e179932e51909ff3b29466a7debac7d0e6`
+- Last modified: `2026-06-10T05:43:09.000Z`
+- Public/gated: public, not gated
+- API inventory at that revision: 23 `.mlpackage` directories and 54 voice
+  `.bin` files
+
+HF does not currently publish `KokoroRuntimeManifest.json` or
+`HostedManifest.json`; those are SDK-generated artifacts in this repo.
+
+### Files Added
+
+- `scripts/inspect_hf_artifacts.py`
+- `scripts/hash_mlpackage_tree.py`
+- `scripts/build_sdk_bundle.mjs`
+- `scripts/validate_sdk_bundle.mjs`
+- `schemas/KokoroRuntimeManifest.schema.json`
+
+`scripts/download_models.py` now supports `--repo-id`, `--revision`,
+`--manifest-out`, and `--sdk-profile starter|custom|full`. Starter downloads
+only the t512 duration model, 15-second F0Ntrain/decoder-pre/HAR-post packages,
+and `af_heart.bin`.
+
+### Bundle Policy
+
+`models.gist.is/coreml/v1` remains Gist app infrastructure. The public SDK does
+not hard-code it. Instead, `scripts/build_sdk_bundle.mjs` emits the same kind of
+hosted-manifest shape:
+
+```json
+{ "version": "...", "files": [{ "path": "...", "bytes": 0, "sha256": "..." }] }
+```
+
+A developer or release process can host that manifest anywhere.
+
+### Verification
+
+HF inspection:
+
+```bash
+python3 scripts/inspect_hf_artifacts.py \
+  --repo-id mattmireles/kokoro-coreml \
+  --revision c02933e179932e51909ff3b29466a7debac7d0e6 \
+  --output /tmp/kokoro-hf-inspect.json
+```
+
+Result on 2026-06-28: resolved the pinned revision and reported 23 model
+packages, 54 voices, and missing upstream SDK metadata
+`HostedManifest.json`, `KokoroRuntimeManifest.json`.
+
+Pinned starter download:
+
+```bash
+python3 scripts/download_models.py \
+  --repo-id mattmireles/kokoro-coreml \
+  --revision c02933e179932e51909ff3b29466a7debac7d0e6 \
+  --sdk-profile starter \
+  --manifest-out /tmp/kokoro-download-manifest.json
+```
+
+Result on 2026-06-28: passed, fetched/verified 13 files, and wrote a 13-file
+download manifest. The first attempt exposed a symlink-order bug in manifest
+writing around `checkpoints/config.json`; Phase 4 fixed it by skipping symlinks
+before calling `is_file()`.
+
+Package tree hash:
+
+```bash
+python3 scripts/hash_mlpackage_tree.py \
+  coreml/kokoro_duration_t512.mlpackage \
+  coreml/kokoro_decoder_pre_15s.mlpackage \
+  --output /tmp/kokoro-package-hashes.json
+```
+
+Result on 2026-06-28: passed and produced stable per-package tree digests.
+
+Bundle generation:
+
+```bash
+node scripts/build_sdk_bundle.mjs \
+  --profile starter \
+  --output /tmp/kokoro-sdk-starter \
+  --repo-id mattmireles/kokoro-coreml \
+  --revision c02933e179932e51909ff3b29466a7debac7d0e6
+```
+
+Result on 2026-06-28: built a starter bundle with 4 model packages, 1 voice,
+`KokoroRuntimeManifest.json`, and `HostedManifest.json`.
+
+Bundle validation:
+
+```bash
+node scripts/validate_sdk_bundle.mjs /tmp/kokoro-sdk-starter
+```
+
+Result on 2026-06-28: passed. A temporary newline appended to
+`runtime/kokoro-vocab.json` made validation fail as expected; restoring the file
+made validation pass again.
+
+Custom profile smoke:
+
+```bash
+node scripts/build_sdk_bundle.mjs \
+  --profile custom \
+  --voices af_heart,af_bella \
+  --buckets 3 \
+  --output /tmp/kokoro-sdk-custom \
+  --repo-id mattmireles/kokoro-coreml \
+  --revision c02933e179932e51909ff3b29466a7debac7d0e6
+```
+
+Result on 2026-06-28: built a custom bundle with 4 model packages and 2 voices.
+
+### If This Recurs
+
+- [ ] Always pass `--revision` for release bundles.
+- [ ] Treat missing upstream SDK manifests as expected until HF is updated.
+- [ ] Validate generated bundles before handing them to app integration work.
+- [ ] Keep Gist hosting outside SDK code; the SDK consumes a manifest shape, not
+      a Gist-specific URL.
+
+---
+
 ## Issue: Phase 3 Native Swift Text Prep - Resolved
 
 **First spotted:** 2026-06-28

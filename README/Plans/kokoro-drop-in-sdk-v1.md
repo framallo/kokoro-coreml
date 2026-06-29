@@ -498,31 +498,31 @@ pinned artifacts with verifiable provenance.
 
 **Tasks:**
 
-- [ ] Extend `scripts/download_models.py` with explicit `--repo-id`,
+- [x] Extend `scripts/download_models.py` with explicit `--repo-id`,
       `--revision`, `--manifest-out`, and SDK-oriented download modes so a clean
       checkout hydrates exactly the model/voice revision used to build a bundle.
-- [ ] Add `scripts/inspect_hf_artifacts.py` or equivalent to record HF repo ID,
+- [x] Add `scripts/inspect_hf_artifacts.py` or equivalent to record HF repo ID,
       revision, last-modified time, model package list, file counts, byte sizes,
       and missing SDK metadata.
-- [ ] Add `scripts/hash_mlpackage_tree.py` to compute stable per-package digests
+- [x] Add `scripts/hash_mlpackage_tree.py` to compute stable per-package digests
       over every file inside each `.mlpackage`.
-- [ ] Add `KokoroRuntimeManifest.json` schema covering SDK commit, HF repo ID,
+- [x] Add `KokoroRuntimeManifest.json` schema covering SDK commit, HF repo ID,
       HF revision, model package names, per-package digests, file counts, byte
       sizes, bucket set, vocab hash, voice hashes, hn-NSF weights hash,
       supported languages, minimum platform versions, and bundle profile.
-- [ ] Add `scripts/build_sdk_bundle.mjs` to assemble a release-ready starter
+- [x] Add `scripts/build_sdk_bundle.mjs` to assemble a release-ready starter
       bundle from pinned `coreml/`, `kokoro.js/voices/`, and checked-in runtime
       assets. The builder may hydrate missing model/voice files via
       `scripts/download_models.py`, but must fail on symlinks, path escapes,
       missing hashes, or digest mismatches.
-- [ ] Add a Gist-style hosted-manifest output mode that emits
+- [x] Add a Gist-style hosted-manifest output mode that emits
       `{ version, files: [{ path, bytes, sha256 }] }` for file-by-file hosting
       of `.mlpackage` directories, voice `.bin` files, vocab, hn-NSF weights,
       and `KokoroRuntimeManifest.json`.
-- [ ] Decide whether `models.gist.is/coreml/v1` remains only a Gist app
+- [x] Decide whether `models.gist.is/coreml/v1` remains only a Gist app
       endpoint or becomes a generated example of the public SDK-hosted manifest
       shape. Do not hard-code Gist infrastructure into the SDK.
-- [ ] Support bundle profiles in this order:
+- [x] Support bundle profiles in this order:
       - `starter`: smallest documented bundle for a demo app, one default voice
         and the minimum required bucket set, matching Gist's single-bucket v1
         shape unless measurements require otherwise.
@@ -1021,12 +1021,12 @@ command or script; SDK constants/docs/model-card drift check passes.
 
 ### Phase 4: Reproducible HF Downloads and SDK Bundle Builder
 
-- [ ] Add repo/revision-pinned HF downloader mode.
-- [ ] Add HF artifact inspection/provenance script.
-- [ ] Add per-`.mlpackage` tree hashing.
-- [ ] Add starter/custom/full bundle generator.
-- [ ] Add hosted-manifest generator.
-- [ ] Add runtime manifest validation.
+- [x] Add repo/revision-pinned HF downloader mode.
+- [x] Add HF artifact inspection/provenance script.
+- [x] Add per-`.mlpackage` tree hashing.
+- [x] Add starter/custom/full bundle generator.
+- [x] Add hosted-manifest generator.
+- [x] Add runtime manifest validation.
 
 ### Phase 5: SDK Model Provider and Drop-In API
 
