@@ -1,7 +1,7 @@
 # MoE SSD/DRAM Expert Prefetch Experiment Plan
 
 **Date:** 2026-06-29
-**Status:** In-Progress
+**Status:** Complete (Stage 0 killed: missing `fs_usage` proof)
 
 > This plan is intentionally gate-heavy. The goal is not to build an impressive
 > prefetcher. The goal is to cheaply decide whether learned expert prefetching
@@ -188,19 +188,19 @@ threshold JSON exist.
 
 **Tasks:**
 
-- [ ] Add `scripts/moe_prefetch/direct_read_bench.c` using `open`, `fcntl` with
+- [x] Add `scripts/moe_prefetch/direct_read_bench.c` using `open`, `fcntl` with
       `F_NOCACHE`, page-aligned buffers, `pread`, configurable block size,
       offset pattern, queue depth, and JSON output.
-- [ ] Add `scripts/moe_prefetch/run_stage0_envelope.py` to compile the C
+- [x] Add `scripts/moe_prefetch/run_stage0_envelope.py` to compile the C
       benchmark, create incompressible synthetic expert files, run sequential
       and random cells, and record command provenance.
-- [ ] Capture `fs_usage -w -f diskio <pid>` output for each accepted benchmark
-      cell and store paths in the result JSON.
-- [ ] Add optional `powermetrics` capture for sustained read loops using
+- [x] Capture `fs_usage -w -f diskio <pid>` output for each accepted benchmark
+      cell and store paths or privileged-tool errors in the result JSON.
+- [x] Add optional `powermetrics` capture for sustained read loops using
       `disk,cpu_power,gpu_power,ane_power,thermal` samplers.
-- [ ] Add `scripts/moe_prefetch/summarize.py stage0` to compute p50/p95
+- [x] Add `scripts/moe_prefetch/summarize.py stage0` to compute p50/p95
       latency, bandwidth, hideability, oracle bandwidth ceiling, and go/kill.
-- [ ] Append the Stage 0 memo to
+- [x] Append the Stage 0 memo to
       `README/Notes/moe-ssd-dram-prefetch-results.md`.
 
 **Verification:**
@@ -217,10 +217,10 @@ python scripts/moe_prefetch/summarize.py stage0 \
 python -m pytest tests/test_moe_prefetch_tools.py
 ```
 
-**Gate:** Kill the program if the oracle bandwidth ceiling is below target
-tokens/sec or if `fs_usage` evidence is missing. If hideability is much greater
-than one layer of compute, record that Stage 1 must evaluate multi-layer-ahead
-prediction.
+**Gate:** Killed on this host because `fs_usage` evidence is missing:
+non-interactive `sudo -n` reports that a password is required, and unprivileged
+`fs_usage` reports that it must be run as root. The timing rows are retained as
+invalid diagnostics only; Stage 1 must not start from them.
 
 ---
 

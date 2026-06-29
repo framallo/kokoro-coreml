@@ -69,3 +69,59 @@ def test_model_inventory_cli_writes_inventory_and_thresholds(tmp_path: Path) -> 
     assert inventory["active_expert_bytes_per_token"] == 5_637_144_576
     assert thresholds["speed_win_percent"] == 25.0
     assert thresholds["trivial_margin_percent"] == 10.0
+
+
+def test_stage0_summarize_kills_on_oracle_bandwidth_ceiling(tmp_path: Path) -> None:
+    results = tmp_path / "results.json"
+    notes = tmp_path / "notes.md"
+    notes.write_text(
+        "# Results\n\n"
+        "## Stage 0: Hardware Envelope\n\n"
+        "Pending.\n\n"
+        "## Stage 1: Router Trace and Predictor Replay\n\n"
+        "Blocked.\n"
+    )
+    payload = {
+        "inventory": {
+            "model_id": "test/moe",
+            "expert_bytes": 88_080_384,
+            "active_expert_bytes_per_token": 5_637_144_576,
+            "target_tokens_per_second": 1.0,
+        },
+        "thresholds": thresholds_payload(),
+        "cells": [
+            {
+                "pattern": "random",
+                "returncode": 0,
+                "fs_usage_path": str(tmp_path / "fs_usage.txt"),
+                "fs_usage_error": "",
+                "measurement": {
+                    "successful_reads": 1,
+                    "failed_reads": 0,
+                    "total_bytes_read": 88_080_384,
+                    "wall_time_ns": 88_080_384,
+                    "latencies_ns": [88_080_384],
+                },
+            }
+        ],
+    }
+    (tmp_path / "fs_usage.txt").write_text("RdData B=88080384\n")
+    results.write_text(json.dumps(payload))
+
+    subprocess.run(
+        [
+            sys.executable,
+            "scripts/moe_prefetch/summarize.py",
+            "stage0",
+            "--input",
+            str(results),
+            "--notes",
+            str(notes),
+        ],
+        check=True,
+    )
+
+    summary = json.loads((tmp_path / "summary.json").read_text())
+    assert summary["oracle_bandwidth_ceiling_tokens_per_second"] < 1.0
+    assert summary["decision"].startswith("KILL: oracle bandwidth ceiling")
+    assert "Oracle bandwidth ceiling" in notes.read_text()

@@ -18,70 +18,48 @@ starts. A kill decision is a valid result.
 
 ## Stage 0: Hardware Envelope
 
-**Status:** Assumptions frozen; hardware envelope not measured yet.
+**Status:** Complete.
 
 ### Frozen Assumptions
 
 - Model inventory: `outputs/moe_prefetch/stage0/model_inventory.json`
 - Gate thresholds: `outputs/moe_prefetch/stage0/thresholds.json`
+- Model: `mistralai/Mixtral-8x7B-v0.1`
+- Expert bytes: `88080384`
+- Active expert bytes/token: `5637144576`
+- Target decode rate: `1.0` token/sec
 
-Current inventory was generated on 2026-06-29 with:
+### Measurements
 
-```bash
-python3 scripts/moe_prefetch/model_inventory.py \
-  --model-id mistralai/Mixtral-8x7B-v0.1 \
-  --quantization-bits 4 \
-  --active-experts-per-token 64 \
-  --target-tokens-per-second 1.0 \
-  --expert-parameters 176160768 \
-  --target-device "Apple Silicon UMA local" \
-  --estimate-source "Mixtral per-layer FFN expert parameter estimate: 3 * hidden_size 4096 * intermediate_size 14336" \
-  --notes "Initial Stage 0 comparability target from original spec; revise only before running Stage 0, not after seeing measurements." \
-  --output outputs/moe_prefetch/stage0/model_inventory.json
-```
+| Pattern | Bandwidth GB/s | p50 latency ns | p95 latency ns | fs_usage proof |
+| --- | ---: | ---: | ---: | --- |
+| sequential | 6.055 | 13830000 | 17113000 | False |
+| random | 6.105 | 13833000 | 16681000 | False |
 
-Recorded values:
+Oracle bandwidth ceiling: `1.082934` tokens/sec.
 
-| Field | Value |
-| --- | ---: |
-| Expert parameters | 176,160,768 |
-| Quantization | 4-bit |
-| Expert bytes | 88,080,384 |
-| Active experts/token | 64 |
-| Active expert bytes/token | 5,637,144,576 |
-| Target decode rate | 1.0 token/sec |
-| Speed win threshold | 25% |
-| Trivial baseline margin | 10% |
-| Energy target | Demand-paging baseline |
+### Privileged Capture Status
 
-The local machine recorded in the inventory is an Apple M2 Ultra Mac Studio
-(`Mac14,14`) with 64 GiB RAM, running macOS 26.5.1.
-
-### Required Evidence
-
-- Cold sequential expert-block bandwidth.
-- Cold random expert-block bandwidth.
-- p50/p95 expert-block latency.
-- One-layer compute-time budget.
-- Hideability ratio.
-- Oracle bandwidth ceiling.
-- `fs_usage -f diskio` proof for accepted read measurements.
+- `fs_usage`: missing for at least one accepted read cell. This run is not
+  valid SSD proof.
+- `powermetrics`: `not captured or no error recorded`
 
 ### Decision
 
-Pending.
+KILL: missing fs_usage disk I/O proof for accepted measurements.
 
 ## Stage 1: Router Trace and Predictor Replay
 
-**Status:** Blocked until Stage 0 passes.
+**Status:** Not run. Stage 0 killed before router tracing because the session
+could not produce required `fs_usage` disk I/O proof.
 
 ## Stage 2: Offline Simulator
 
-**Status:** Blocked until Stage 1 passes.
+**Status:** Not run. Stage 1 did not start.
 
 ## Stage 3: Runtime Harness
 
-**Status:** Blocked until Stage 2 passes.
+**Status:** Not run. Stage 2 did not start.
 
 ## Required Executable Memory
 
