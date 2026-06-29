@@ -1,0 +1,1104 @@
+# Kokoro Drop-In SDK v1 Plan
+
+**Date:** 2026-06-28
+**Status:** Planned
+
+## Executive Summary
+
+Build a real Swift SDK that lets an app developer add local Kokoro TTS to an
+iPhone or macOS app with one high-level API call. Use the proven Gist iOS
+pattern: native Swift text prep with MisakiSwift, checked Kokoro vocab, voice
+row lookup, manifest-backed model download/compile/cache, and the existing
+Core ML synthesis runtime. Botnet's Node prep remains the parity oracle and
+developer diagnostic path, not an app runtime dependency.
+
+## Problem Statement
+
+- **Symptom:** The model card promises `synthesize(text:voice:)`, but the
+  current Swift library only accepts pre-tokenized `inputIds`, `attentionMask`,
+  and `refS`.
+- **Root Cause:** Text normalization, phonemization, vocab lookup, voice row
+  selection, long-text chunking, model resource discovery, and developer-facing
+  examples live in scripts or Botnet worker glue instead of a supported SDK
+  surface.
+- **Impact:** A developer can technically embed the Core ML pipeline, but cannot
+  drop it into an iOS or macOS app without reverse-engineering scripts, ignored
+  model assets, voice assets, and current worker conventions.
+
+## Mode Definitions
+
+| Mode | Behavior | Why it matters |
+| --- | --- | --- |
+| Prepared input mode | Caller passes `inputIds`, `attentionMask`, and `refS` directly to `KokoroPipeline`. | Existing tests and benchmark fixtures keep working. |
+| Raw text SDK mode | Caller passes text, voice, and speed to `KokoroTTS`; SDK prepares inputs and synthesizes PCM. | This is the drop-in developer experience. |
+| App-bundled resources | App target or package resource bundle contains models, voices, vocab, and hn-NSF weights. | Required for offline iOS/macOS use and App Store-friendly behavior. |
+| Directory resources | SDK loads `.mlpackage` or `.mlmodelc` files from an explicit URL. | Keeps local development, benchmarks, and downloaded model bundles simple. |
+| Hugging Face resources | Repo tools hydrate model and voice assets from `mattmireles/kokoro-coreml`. | Keeps large binaries out of git while giving developers one canonical download source. |
+| Gist-style downloaded resources | App downloads a signed/hashed manifest of `.mlpackage` directories, voices, vocab, and hn-NSF weights, then compiles and caches `.mlmodelc` locally. | This is the shipping iOS precedent and avoids coupling release artifacts to one OS-compiled `.mlmodelc`. |
+| Node oracle mode | Node runs Botnet-compatible prep in tests, scripts, CI, or macOS developer diagnostics. | Useful for drift detection; forbidden as a required iOS app dependency. |
+
+## Goals and Non-Goals
+
+### Goals
+
+- [ ] Make `kokoro-coreml` self-host the Botnet prep contract without requiring
+      Botnet's `packages/kokoro-coreml-runtime` layout.
+- [ ] Add a native Swift SDK API:
+      `let tts = try await KokoroTTS.load(...); try await tts.synthesize("Hello")`.
+- [ ] Ship a Swift text-prep layer, following Gist's `KokoroG2P` pattern, that
+      produces the same prepared-input fields needed by `KokoroSynthesisRequest`.
+- [ ] Keep `KokoroPipeline` compatible with iOS 16+ and macOS 13+ while making
+      the sibling `swift-tts/` package explicitly target the newest OS floor
+      that makes raw-text synthesis reliable.
+- [ ] Support explicit resource discovery, background model compilation, typed
+      errors, and no main-thread stalls.
+- [ ] Provide an example iOS/macOS app and a CLI smoke test that a new developer
+      can run without reading benchmark internals.
+- [ ] Add parity/drift tests against Botnet's JS prep for representative text
+      edge cases and existing bakeoff fixtures, with known Misaki-vs-eSpeak
+      differences recorded instead of hidden.
+- [ ] Document a release artifact workflow for the large model assets instead of
+      pretending they belong in git.
+- [ ] Make `scripts/download_models.py` and Hugging Face revision pinning the
+      default way to hydrate large model/voice assets for SDK bundles.
+- [ ] Prove MisakiSwift packaging on macOS and iOS before exposing a public
+      raw-text SDK API, reusing the Gist iOS bundle-fix decision where needed.
+- [ ] Require at least one physical-device iPhone raw-text synthesis smoke
+      before claiming iOS SDK readiness.
+
+### Non-Goals
+
+- Do not redesign the Core ML model graph or bucket geometry.
+- Do not require Python, Node, JavaScriptCore, or a worker daemon in the
+  production iOS app path.
+- Do not ship a hidden WebView/WASM bridge as the default iOS phonemizer.
+- Do not chase native eSpeak-NG as the V1 app path unless MisakiSwift proves
+  unusable for the product target.
+- Do not promise non-English raw-text synthesis in V1; Gist's MisakiSwift path
+  is English-only.
+- Do not make benchmark or paper claims without rerunning the existing gates.
+
+## Scope and Constraints
+
+- **Scope:** `swift/`, `scripts/kokoro-prepare-input.*`, `kokoro.js/src`,
+  `swift-tts/`, tokenizer/voice assets, SDK docs, example apps,
+  package/resource manifests, Gist iOS audio precedents, Hugging Face artifact
+  metadata, and tests.
+- **Constraints:** `coreml/` is about 2.6 GB and ignored by git; voice binaries
+  under `kokoro.js/voices/` are about 27 MB and ignored by git; SwiftPM resource
+  bundling must use explicit target resources and `Bundle.module` access;
+  Core ML compilation is expensive and must not run on the main thread.
+- **Guardrails:** Keep `KokoroPipeline.synthesize(inputIds:attentionMask:refS:)`
+  stable for benchmarks and worker reuse. Add a higher-level SDK above it
+  instead of breaking the existing contract.
+
+## Target Boundary Rules
+
+- **`KokoroPipeline` target:** Remains the low-level prepared-input synthesis
+  target. It owns `KokoroSynthesisRequest`, `KokoroModelProvider`,
+  `executeKokoroSynthesis(...)`, Core ML tensor binding, DSP, and existing
+  benchmark compatibility. It must not grow raw-text prep, HF download logic,
+  app-bundle discovery, or public SDK convenience API.
+- **`swift-tts/` package:** New higher-level SwiftPM package that depends on
+  the existing `swift/` package and exposes the `KokoroTTS` library product. It
+  owns raw-text prep, MisakiSwift/native phonemizer binding, resource manifest
+  validation, SDK model/provider cache, public `KokoroTTS` facade, diagnostics
+  policy, and AVFoundation conveniences.
+- **Platform split:** `KokoroPipeline` keeps its current low-level platform
+  floor inside `swift/`. `swift-tts/` advertises the newer iOS/macOS floor
+  required for reliable MisakiSwift and Core ML behavior. Prefer a reliable
+  iOS 18+ raw-text SDK over a fragile older-OS compatibility story. Do not
+  silently raise the low-level runtime's platform floor.
+- **Provider seam:** App-bundle, `.mlmodelc`, lazy loading, `prewarm(...)`, cache
+  eviction, and compute policy belong in a new SDK model provider conforming to
+  `KokoroModelProvider`, not in the existing `KokoroPipeline` class.
+- **Resource source of truth:** Small runtime files are package-owned and
+  checked in; large model and voice binaries are downloaded from pinned HF
+  revisions and copied into generated SDK bundles.
+- **Downloaded-resource seam:** The SDK should support Gist's manifest-backed
+  download/compile/cache pattern as a first-class provider, not only
+  app-bundled resources.
+
+## Ground Truth Contracts (Do Not Violate)
+
+- **Prepared input contract:** `input_ids`, `attention_mask`, `ref_s`, `voice`,
+  `speed`, and `canonical_duration_s` must stay compatible with
+  `KokoroSynthesisRequest` and Botnet's `PreparedKokoroInput`.
+- **Token cap:** Active tokens are capped at
+  `PipelineConstants.maxCallerChunkTokens == 450`; padding length is not the
+  active-token count.
+- **Duration token buckets:** Prepared inputs pad to one of
+  `[32, 64, 128, 256, 320, 384, 512]`.
+- **Voice embedding:** `ref_s` is exactly 256 floats selected from the voice
+  `.bin` rows by clamping `phonemeCount - 1`.
+- **Runtime assets:** Models, vocab, voices, and hn-NSF weights must be tied
+  together by a manifest with versions and hashes.
+- **G2P contract:** V1 raw-text prep uses MisakiSwift plus a checked Kokoro vocab
+  table, matching the Gist app pattern. Botnet/eSpeak parity is a drift signal,
+  not a requirement for byte-identical phoneme strings in V1.
+- **Manifest provenance:** Runtime manifests must include HF repo ID, HF
+  revision, per-`.mlpackage` tree digests, file counts, byte sizes, vocab hash,
+  voice hashes, hn-NSF weights hash, bundle profile, SDK commit, and minimum
+  platform versions.
+- **Resource path safety:** Manifest paths must be relative, canonical, and
+  confined to the bundle root. Reject absolute paths, `..`, symlinks that escape
+  the bundle, and non-canonical model package names before hashing or loading.
+- **Core ML loading:** SDK must support both source `.mlpackage` directories and
+  Xcode-compiled `.mlmodelc` bundles.
+- **On-device compilation:** Source `.mlpackage` directories may be downloaded
+  and compiled on device with `MLModel.compileModel(at:)`; precompiled
+  `.mlmodelc` remains supported for app-bundled builds.
+- **Compute policy:** iPhone production default follows staged loading:
+  decoder-pre on `.cpuAndNeuralEngine`; duration, F0Ntrain, and generator on
+  `.cpuAndGPU`, with a session-sticky `.cpuOnly` degradation path after Core ML
+  load or predict failures.
+- **Threading:** Resource loading, model compilation, and synthesis must be safe
+  to call from Swift concurrency without blocking the main actor.
+- **Diagnostics privacy:** SDK diagnostics must never persist raw text or
+  phoneme mirrors by default. Default diagnostics are counters, hashes, and
+  typed error codes; raw diagnostic payloads require explicit caller opt-in.
+- **iOS readiness:** Simulator builds prove compile/resource wiring only. iOS
+  SDK readiness requires physical-device raw-text synthesis evidence.
+
+## Already Shipped (Do Not Re-Solve)
+
+- **Swift pipeline:** `swift/Package.swift` exposes the `KokoroPipeline` library
+  for iOS 16+ and macOS 13+.
+- **Core ML orchestration:** `swift/Sources/KokoroPipeline/KokoroPipeline.swift`
+  loads duration, F0Ntrain, decoder-pre, and generator packages and synthesizes
+  from prepared inputs.
+- **Shared executor:** `executeKokoroSynthesis(...)` is the single path used by
+  the library and benchmark runners.
+- **PCM stitching:** `swift/Sources/KokoroPipeline/PcmJoiner.swift` already joins
+  chunked PCM with a small crossfade.
+- **Botnet prep copy:** `scripts/kokoro-prepare-input.mjs` and
+  `scripts/kokoro-prepare-input.py` are byte-for-byte identical to Botnet today.
+- **Tokenizer assets:** `kokoro.js/src/phonemize.js`, `splitter.js`, `voices.js`,
+  and voice `.bin` files exist locally.
+- **iOS resource precedent:** `ios-bench/project.yml` bundles Core ML packages
+  as app resources and lets Xcode compile them to `.mlmodelc`.
+- **Gist iOS app precedent:** `/Users/mm/Documents/GitHub/gist/packages/ios-app`
+  ships local listen mode with `KokoroG2P.swift`, `SynthEngine.swift`,
+  `KokoroModelStore.swift`, `VoiceTable.swift`, and `SlideAudioStore.swift`.
+  It uses MisakiSwift plus `kokoro-vocab.json`, downloads model artifacts from
+  a manifest, compiles `.mlpackage` directories on device, caches `.mlmodelc`,
+  uses the shared Swift `KokoroPipeline`, and falls back to shared cache/server
+  synth only when local synth is unavailable or fails.
+
+## Fresh Baseline (Current State)
+
+- **Architecture:** Core ML synthesis is Swift-first, but raw-text prep is not a
+  public SDK surface.
+- **Current API gap:** `README/hf-model-card.md` shows
+  `pipeline.synthesize(text: "Hello world", voice: "af_heart")`; the actual
+  Swift API requires prepared tensors.
+- **Current script gap:** Running `node scripts/kokoro-prepare-input.mjs` from
+  this repo fails by default because it looks for
+  `packages/kokoro-coreml-runtime`, the Botnet runtime layout.
+- **Dependency gap:** Even with `KOKORO_COREML_ROOT` set, JS prep requires the
+  `phonemizer` npm package to resolve from the current environment.
+- **Asset gap:** `coreml/`, `outputs/`, and `kokoro.js/voices/*.bin` are ignored
+  by git; the SDK needs a model/asset artifact story.
+- **HF download baseline:** `scripts/download_models.py` already targets
+  `mattmireles/kokoro-coreml` and downloads the curated Core ML packages plus
+  voice `.bin` files.
+- **HF live snapshot:** On 2026-06-28 the live HF repo was
+  `c02933e179932e51909ff3b29466a7debac7d0e6`, last modified
+  2026-06-10, with 23 curated `coreml/*.mlpackage` packages and voice assets.
+- **HF SDK gap:** The live HF file list does not expose an SDK runtime manifest,
+  SDK bundle profiles, `hnsf_weights.json`, or tokenizer/vocab config as public
+  runtime files. It is a model/voice artifact repo today, not yet a drop-in SDK
+  artifact repo.
+- **Gist iOS raw-text baseline:** Gist already solved the app-path question in
+  Swift: MisakiSwift G2P, checked vocab, fleet-compatible voice-row lookup,
+  15-second chunking, one synthesis in flight, first-class model download, and
+  on-device CPU fallback after Core ML failures. It deliberately does not embed
+  Node in the iOS app.
+- **Platform-floor baseline:** Gist keeps MisakiSwift at the app layer because
+  it raises the platform floor beyond the lower-level fleet runtime. This SDK
+  should preserve the same split: raw-text convenience can have a higher floor;
+  prepared-input `KokoroPipeline` should not.
+- **Config gap:** `checkpoints/config.json` is tracked as a symlink to an
+  external user path. SDK bundle generation must reject this even on machines
+  where the symlink resolves; V1 should use a real checked-in vocab resource
+  derived from `_kokoro_vocab.json` or a copied upstream Kokoro config with
+  recorded provenance.
+- **hn-NSF weights gap:** The generated verified weights live under ignored
+  `outputs/swift_bench_inputs/hnsf_weights.json`, while the tracked root
+  `hnsf_weights.json` currently carries `weights_sha256: "unverified"` and does
+  not match the generated verified file. V1 must promote or regenerate a
+  verified checked-in copy before any clean-checkout bundle claim.
+- **Model set drift:** Local `coreml/` contains experimental and legacy packages
+  not present on HF. V1 SDK bundles should depend only on the curated HF runtime
+  set unless a missing local package is intentionally published and documented.
+- **Known good smoke:** The same JS prep script succeeds in Botnet and emits a
+  32-token padded input, 32-entry attention mask, and 256-float `ref_s` for
+  "Hello world".
+
+## Solution Overview
+
+Use a thin adapter over the working pipeline and the Gist iOS app's proven
+shape. Do not fight Core ML, do not move dynamic text prep into the model, do
+not invent a second synthesis path, and do not require Node in an iPhone app.
+
+```
+App text
+  |
+  v
+KokoroTextProcessor
+  - normalize / MisakiSwift phonemize
+  - vocab lookup
+  - voice row lookup
+  - chunk and token-budget guard
+  |
+  v
+PreparedKokoroInput[]
+  |
+  v
+KokoroTTS actor
+  - resource manifest or app bundle
+  - lazy model provider with staged compute policy
+  - background download / compile / load
+  |
+  v
+KokoroPipeline / executeKokoroSynthesis
+  |
+  v
+24 kHz mono PCM + AVAudioPCMBuffer convenience
+```
+
+## Implementation Phases
+
+> Do one phase at a time. Verify before proceeding.
+
+### Required Skills
+
+Use the workflow skills explicitly when executing this plan:
+
+- **Whole plan:** `execute-plan` for normal phase-by-phase implementation.
+  Use `execute-plan-hardcore` only if the user explicitly asks for the full
+  post-execution audit/fix loop.
+- **Every phase:** `phase-audit` before moving to the next phase. If delegated
+  review is unavailable, run the local phase-audit rubric.
+- **Plan and docs edits:** `markdown` for this plan, `write-notes` for
+  implementation evidence under `README/Notes/`, and `david-ogilvy` only for
+  reader-facing SDK copy polish after the API is real.
+- **Final release:** `deploy`, `git-commit`, and `git-push` only when the user
+  authorizes release/push side effects.
+
+| Phase | Required skills | Why |
+| --- | --- | --- |
+| Phase 0 | `botnet`, `debug`, `phase-audit` | Compare the copied prep layer against Botnet and prove the local oracle works. |
+| Phase 1 | `ilya-sutskever`, `coreml`, `debug`, `phase-audit` | Keep the Swift package boundary simple while proving the raw-text backend and platform floor. |
+| Phase 2 | `coreml`, `debug`, `phase-audit` | Make runtime assets canonical, hashed, and safe for clean checkouts. |
+| Phase 3 | `ilya-sutskever`, `coreml`, `documentation`, `phase-audit` | Port text prep carefully and document the public prep contracts. |
+| Phase 4 | `coreml`, `debug`, `phase-audit` | Build reproducible HF/model bundle tooling with stable hashes and manifests. |
+| Phase 5 | `ilya-sutskever`, `coreml`, `debug`, `documentation`, `phase-audit` | Add the drop-in SDK facade without contaminating the low-level pipeline. |
+| Phase 6 | `coreml`, `audio-judge`, `phase-audit` | Validate app integration, generated audio, and real-device behavior. |
+| Phase 7 | `markdown`, `write-notes`, `david-ogilvy`, `deploy`, `phase-audit` | Publish accurate docs, notes, model-card updates, and release artifacts. |
+
+### Phase 0: Make the Copied Prep Layer Self-Hosting
+
+**Goal:** `kokoro-coreml` can prepare text without Botnet's directory layout,
+and the JS prep path becomes the parity oracle for the SDK.
+
+**Required skills:** `botnet`, `debug`, `phase-audit`.
+
+**Tasks:**
+
+- [ ] Fix `scripts/kokoro-prepare-input.mjs` so its default runtime root is the
+      current repo root when `kokoro.js/src/phonemize.js` is present.
+- [ ] Add an explicit `--runtime-root` argument to both prep scripts; environment
+      variables remain optional, not required.
+- [ ] Add `--botnet-root` to the parity script; default to
+      `/Users/mm/Documents/GitHub/botnet` only as a local convenience.
+- [ ] Add a small top-level package script or documented `npm --prefix kokoro.js`
+      command so `phonemizer` installs where the script can resolve it.
+- [ ] Add `scripts/compare_botnet_prepare_input.mjs` that runs this repo and
+      the Botnet script selected by `--botnet-root` on the same fixture list.
+- [ ] Compare the full prepared-input contract: `key`, `text`, `voice`, `speed`,
+      `input_ids`, `attention_mask`, `ref_s`, `canonical_duration_s`, optional
+      `num_tokens`, and optional `hnsf_weights_sha256`. Fields intentionally
+      absent from the JS oracle must be listed explicitly.
+- [ ] Add fixtures for empty text, whitespace, abbreviations, initials, numbers,
+      currency, URLs/emails, quotes, punctuation runs, emoji, long text near
+      450 active tokens, `af_heart`, and one British voice.
+- [ ] Record the exact current behavior for unsupported or unknown phonemes:
+      unknown chars are dropped during vocab lookup, then BOS/EOS and padding
+      still apply unless the phonemizer returns empty output.
+
+**Verification:** `node scripts/kokoro-prepare-input.mjs --text-file ...` works
+from this repo without `KOKORO_COREML_ROOT`; parity script passes against
+Botnet for all fixtures; `python scripts/kokoro-prepare-input.py --runtime-root
+...` covers the Python path if it was changed; `npm --prefix kokoro.js test`
+still passes.
+
+---
+
+### Phase 1: `swift-tts/` Package and Gist-Proven Phonemizer Spike
+
+**Goal:** Prove the Gist iOS raw-text backend and target boundaries before
+public SDK API work starts.
+
+**Required skills:** `ilya-sutskever`, `coreml`, `debug`, `phase-audit`.
+
+**Tasks:**
+
+- [ ] Leave `swift/Package.swift` as the low-level prepared-input package for
+      `KokoroPipeline`; do not add MisakiSwift or raw-text targets there.
+- [ ] Create `swift-tts/Package.swift` with a `KokoroTTS` library product that
+      depends on `../swift` and imports `KokoroPipeline`.
+- [ ] Add a minimal `swift-tts/Sources/KokoroTTS` scaffold, but do not expose
+      `KokoroTTS.synthesize(text:)` yet.
+- [ ] Add MisakiSwift as the V1 raw-text phonemizer dependency in the
+      `swift-tts/` package only. Do not add it to `KokoroPipeline`.
+- [ ] Reuse the Gist packaging decision where applicable: pin the fork/revision
+      or upstream tag, include license notices, and confirm resource layout does
+      not break iOS code signing.
+- [ ] Add `KokoroMisakiPhonemizer` behind a `KokoroPhonemizer` protocol so a
+      future eSpeak backend can be added without changing the public API.
+- [ ] Add a short probe executable or test target that phonemizes the same
+      fixture texts on macOS and iOS simulator using MisakiSwift.
+- [ ] Compare probe output against Botnet's Node/eSpeak oracle and write a
+      drift table: exact matches, acceptable phoneme differences, dropped
+      characters, empty-output behavior, and voice-row-selection consequences.
+- [ ] Record the dependency, license, platform floor, bundle resource, and App
+      Store decision to `README/Notes/kokoro-drop-in-sdk-v1.md`.
+- [ ] Define the SDK diagnostics policy: default diagnostics are counters,
+      stable hashes, and typed error codes; raw text and phoneme strings require
+      explicit caller opt-in and are never persisted by the SDK.
+
+**Verification:** `swift test --package-path swift` still builds the low-level
+package without MisakiSwift; `swift test --package-path swift-tts` builds the
+new raw-text package and imports `KokoroPipeline`; the MisakiSwift probe builds
+on macOS and iOS simulator, runs offline, records platform floor and
+license/provenance notes, and produces a reviewed drift table against the
+Botnet JS/eSpeak oracle. If packaging, offline operation, or code signing
+fails, execution stops before Phase 2. Exact phoneme-string equality with
+eSpeak is not required for V1 unless the drift causes tokenization or
+audio-quality failures.
+
+---
+
+### Phase 2: Runtime Asset Source of Truth
+
+**Goal:** Clean checkouts have real small runtime assets, and generated bundles
+cannot accidentally absorb machine-local symlinks or stale files.
+
+**Required skills:** `coreml`, `debug`, `phase-audit`.
+
+**Tasks:**
+
+- [ ] Add checked-in SDK runtime resources under
+      `swift-tts/Sources/KokoroTTS/Resources/KokoroRuntime/`:
+      - `kokoro-vocab.json`, copied or regenerated from the same Kokoro vocab
+        source used by the Gist iOS app, with recorded SHA/provenance.
+      - `hnsf_weights.json`, regenerated or promoted from the verified source
+        so `weights_sha256` is not `"unverified"`.
+- [ ] Add `scripts/verify_runtime_assets.py` to reject symlinked configs,
+      compare vocab hashes, compare hn-NSF weights hashes, and prove the package
+      resources are the canonical SDK inputs.
+- [ ] Update prep scripts only if needed so local oracle paths can use the same
+      real vocab source as the SDK without relying on `checkpoints/config.json`.
+- [ ] Leave `checkpoints/config.json` out of SDK bundle generation entirely
+      unless it has been replaced with a real copied file and provenance.
+- [ ] Add a small runtime asset manifest fragment with hashes for vocab and
+      hn-NSF weights; later bundle manifests must embed these exact hashes.
+
+**Verification:** `python scripts/verify_runtime_assets.py` passes from a clean
+checkout; the script fails on symlinked vocab config, missing hn-NSF weights,
+`weights_sha256: "unverified"`, or hash drift between package resources and any
+generated benchmark copies.
+
+---
+
+### Phase 3: Native Swift Text Prep and Public Types
+
+**Goal:** The production SDK can prepare raw text in-process on iOS/macOS using
+the Gist-proven Swift phonemizer path and checked runtime assets.
+
+**Required skills:** `ilya-sutskever`, `coreml`, `documentation`,
+`phase-audit`.
+
+**Tasks:**
+
+- [ ] Create `swift/Sources/KokoroPipeline/KokoroPreparedInput.swift` with the
+      low-level prepared-input contract only: token IDs, attention mask, `refS`,
+      speed, optional `canonicalDurationSeconds`, optional `numTokens`, optional
+      `hnsfWeightsSHA256`, and metadata needed for existing fixtures.
+- [ ] Create `swift-tts/Sources/KokoroTTS/KokoroVoiceID.swift`,
+      `KokoroSynthesisOptions.swift`, `KokoroAudio.swift`,
+      `KokoroTextProcessor.swift`, and `KokoroPhonemizer.swift` in the
+      `swift-tts/` package.
+- [ ] Adapt Gist's `KokoroG2P.swift` behavior: MisakiSwift phonemization,
+      checked Kokoro vocab lookup, unknown-vocab drop behavior, BOS/EOS token
+      framing, and phoneme UTF-16 count for voice-row selection.
+- [ ] Adapt Gist's `VoiceTable.swift` behavior: little-endian float32 `.bin`
+      loading, 256-float rows, supported voice list, and
+      `rowIndex = clamp(phonemeCount - 1, 0, rowCount - 1)`.
+- [ ] Adapt Gist's `TextChunker.swift` behavior needed for long text chunking,
+      including abbreviations, initials, decimals, punctuation, and the
+      15-second starter-bundle cap.
+- [ ] Port deterministic Botnet-compatible non-phonemizer prep logic to Swift:
+      language gating, duration token-budget guard, metadata preservation, and
+      typed validation.
+- [ ] Define unknown-token behavior as Gist-compatible by default: characters
+      without vocab entries are dropped during tokenization; throw only when no
+      model tokens remain after phonemization/tokenization.
+- [ ] Keep Node/WASM and Python prep as test/dev oracles only; they must not be
+      required by an iOS app.
+
+**Verification:** `swift test --package-path swift-tts --filter KokoroText` passes;
+Swift-prepared fixtures match the Gist path for phonemes, token IDs, selected
+voice row, `ref_s`, and metadata fields; Botnet JS/eSpeak comparison produces
+the approved drift report; no app code path imports Node, Python, or Botnet.
+
+---
+
+### Phase 4: Reproducible HF Downloads and SDK Bundle Builder
+
+**Goal:** Developers can generate or download a starter SDK runtime bundle from
+pinned artifacts with verifiable provenance.
+
+**Required skills:** `coreml`, `debug`, `phase-audit`.
+
+**Tasks:**
+
+- [ ] Extend `scripts/download_models.py` with explicit `--repo-id`,
+      `--revision`, `--manifest-out`, and SDK-oriented download modes so a clean
+      checkout hydrates exactly the model/voice revision used to build a bundle.
+- [ ] Add `scripts/inspect_hf_artifacts.py` or equivalent to record HF repo ID,
+      revision, last-modified time, model package list, file counts, byte sizes,
+      and missing SDK metadata.
+- [ ] Add `scripts/hash_mlpackage_tree.py` to compute stable per-package digests
+      over every file inside each `.mlpackage`.
+- [ ] Add `KokoroRuntimeManifest.json` schema covering SDK commit, HF repo ID,
+      HF revision, model package names, per-package digests, file counts, byte
+      sizes, bucket set, vocab hash, voice hashes, hn-NSF weights hash,
+      supported languages, minimum platform versions, and bundle profile.
+- [ ] Add `scripts/build_sdk_bundle.mjs` to assemble a release-ready starter
+      bundle from pinned `coreml/`, `kokoro.js/voices/`, and checked-in runtime
+      assets. The builder may hydrate missing model/voice files via
+      `scripts/download_models.py`, but must fail on symlinks, path escapes,
+      missing hashes, or digest mismatches.
+- [ ] Add a Gist-style hosted-manifest output mode that emits
+      `{ version, files: [{ path, bytes, sha256 }] }` for file-by-file hosting
+      of `.mlpackage` directories, voice `.bin` files, vocab, hn-NSF weights,
+      and `KokoroRuntimeManifest.json`.
+- [ ] Decide whether `models.gist.is/coreml/v1` remains only a Gist app
+      endpoint or becomes a generated example of the public SDK-hosted manifest
+      shape. Do not hard-code Gist infrastructure into the SDK.
+- [ ] Support bundle profiles in this order:
+      - `starter`: smallest documented bundle for a demo app, one default voice
+        and the minimum required bucket set, matching Gist's single-bucket v1
+        shape unless measurements require otherwise.
+      - `custom`: explicit voices and buckets selected by the developer.
+      - `full`: all production buckets and all supported English voices, only
+        after starter/custom behavior is proven.
+
+**Verification:** A clean checkout can run the documented pinned HF download
+command, generate a starter bundle, generate a hosted manifest, validate
+per-package and per-file digests against the manifests, and intentionally fail
+when a model file, voice file, vocab, or hn-NSF weights file is modified.
+
+---
+
+### Phase 5: SDK Model Provider and Drop-In API
+
+**Goal:** A developer can add the package, add resources, and synthesize speech
+without reading benchmark code or touching the low-level pipeline.
+
+**Required skills:** `ilya-sutskever`, `coreml`, `debug`, `documentation`,
+`phase-audit`.
+
+**Tasks:**
+
+- [ ] Add `KokoroResourceProvider` in `KokoroTTS` with cases for explicit
+      directory URL, app bundle, package bundle, and precompiled `.mlmodelc`
+      bundle roots.
+- [ ] Add a downloaded-resource provider modeled on Gist's `KokoroModelStore`:
+      fetch remote manifest, compare local version and file sizes/hashes,
+      download missing files with retry, exclude cache from iCloud backup,
+      compile `.mlpackage` directories with `MLModel.compileModel(at:)`, and
+      cache `.mlmodelc` next to source packages.
+- [ ] Add `KokoroSDKModelProvider` in `KokoroTTS` that conforms to
+      `KokoroModelProvider`, validates the manifest, owns lazy model loading,
+      handles `.mlpackage` off-main-thread compilation, handles `.mlmodelc`
+      loading, caches selected buckets, and exposes `prewarm(...)`.
+- [ ] Keep the existing `KokoroPipeline` class backward-compatible; do not move
+      app resource discovery, HF download, or SDK cache policy into it.
+- [ ] Add `KokoroTTS` as an actor or otherwise concurrency-safe facade over
+      `KokoroTextProcessor`, `KokoroResourceProvider`, and
+      `KokoroSDKModelProvider`.
+- [ ] Public API target:
+      `let tts = try await KokoroTTS.load(resources: .appBundle(.main))`
+      and `let audio = try await tts.synthesize("Hello world", voice: .afHeart)`.
+- [ ] Add `prepare(text:voice:speed:)` for developers who want to inspect or
+      cache prepared inputs without running Core ML.
+- [ ] Add internal chunk stitching for text longer than one duration model can
+      accept; use `PcmJoiner` for PCM output and expose raw chunks only as an
+      advanced API.
+- [ ] Add `AVAudioPCMBuffer` convenience creation while keeping the core return
+      type as raw `[Float]` plus sample rate and metadata.
+- [ ] Add clear default compute policy and an escape hatch for `MLComputeUnits`
+      per stage without exposing benchmark-only complexity in the common path.
+- [ ] Make the default iPhone compute policy match the Gist app: decoder-pre on
+      `.cpuAndNeuralEngine`, duration/F0Ntrain/generator on `.cpuAndGPU`, and a
+      session-sticky `.cpuOnly` retry after Core ML load or predict failure.
+- [ ] Add typed errors for missing model, missing voice, bad hash, path escape,
+      unsupported voice/language, input too long, empty phonemizer output,
+      Core ML load failure, synthesis cancellation, and invalid audio.
+
+**Verification:** One-line API compiles in a fresh SwiftPM consumer fixture;
+`KokoroTTS` can synthesize from an explicit directory, app-bundle resources,
+and downloaded-resource cache; docs snippets compile; existing
+`KokoroPipeline.synthesize(inputIds:...)` tests still pass.
+
+---
+
+### Phase 6: Examples and macOS/iOS Validation
+
+**Goal:** Prove the SDK works as an app dependency, not only as local scripts.
+
+**Required skills:** `coreml`, `audio-judge`, `phase-audit`.
+
+**Tasks:**
+
+- [ ] Add `Examples/KokoroDemoApp` with a minimal iOS/macOS UI: text field,
+      voice picker, synthesize button, progress/error display, and playback.
+- [ ] Include two resource modes in the example when feasible: bundled starter
+      resources for offline demos and downloaded manifest resources for the
+      Gist-style app flow.
+- [ ] Add `swift/Sources/KokoroSDKSmoke` executable for local smoke tests that
+      writes a WAV.
+- [ ] Add a fresh consumer fixture outside `swift/` that depends on the package
+      as a developer would and uses only public API.
+- [ ] Build and run macOS smoke with a generated starter bundle.
+- [ ] Build iOS simulator smoke for compile/resource validation, even though
+      simulator performance is not meaningful.
+- [ ] Build the raw-text demo against the actual `KokoroTTS` platform floor
+      chosen for reliability; do not imply iOS 16 raw-text support if the
+      dependable path is iOS 18+.
+- [ ] Run mandatory physical-device smoke before iOS readiness: first call,
+      warm call, long text chunking, background/foreground transition,
+      cancellation, and memory pressure behavior.
+- [ ] Compare output from `KokoroTTS.synthesize("Hello world", .afHeart)` against
+      the JS-prepared + old `KokoroPipeline` path for matching prepared inputs.
+- [ ] Record device and Mac validation evidence in `README/Notes/`, not
+      `README/Guides/`.
+
+**Verification:** macOS fixture green; iOS app build green; physical-device
+raw-text smoke green with evidence before any iOS SDK claim; no performance
+claim is made without target-device timing. If no device is available, mark the
+plan blocked for iOS release rather than complete.
+
+---
+
+### Phase 7: Release Artifact and Documentation Pass
+
+**Goal:** The SDK is publishable without local tribal knowledge.
+
+**Required skills:** `markdown`, `write-notes`, `david-ogilvy`, `deploy`,
+`phase-audit`.
+
+**Tasks:**
+
+- [ ] Add `README/SDK.md` with install, resource bundle, API, playback, and
+      troubleshooting steps.
+- [ ] Add `README/Notes/kokoro-drop-in-sdk-v1.md` during implementation to
+      capture local decisions and any rejected tokenizer/backend paths.
+- [ ] Add release checklist commands for generating starter/full bundles,
+      verifying manifests, running Swift tests, running JS parity tests, and
+      building the example app.
+- [ ] Add `scripts/check_sdk_drift.mjs` or equivalent to verify Swift constants,
+      JS prep constants, runtime manifest fields, SDK docs, and model-card
+      snippets agree on token caps, bucket sets, voice dimension, sample rate,
+      and public API.
+- [ ] Update the HF repo only after the public SDK API compiles: upload the SDK
+      manifest, bundle-profile metadata, checksums, and model-card README that
+      match the released SDK commit.
+- [ ] Add a rollback/deprecation note for the old model card snippet until a
+      release tag includes the new API.
+- [ ] Decide whether this repo publishes only source + release assets or also a
+      SwiftPM binary/resource artifact. Do not choose binary/resource artifact
+      until package size and Xcode behavior are measured.
+
+**Verification:** A clean checkout plus documented HF/downloaded release
+artifacts can build and run the smoke path; README links all required assets and
+does not require Botnet; HF snapshot provenance is reproducible from a checked
+command or script; SDK constants/docs/model-card drift check passes.
+
+## Executable Memory
+
+- Regression test: `node scripts/compare_botnet_prepare_input.mjs --botnet-root /Users/mm/Documents/GitHub/botnet --fixtures tests/fixtures/kokoro-text-prep/*.json --compare full`
+- Regression test: `python scripts/kokoro-prepare-input.py --runtime-root <repo-root> --text-file <fixture> --output /tmp/kokoro-prep.json --key smoke --voice af_heart --speed 1`
+- Regression test: `python scripts/verify_runtime_assets.py`
+- Regression test: `python scripts/inspect_hf_artifacts.py --repo-id mattmireles/kokoro-coreml --revision <released-sha> --format markdown --append README/Notes/kokoro-drop-in-sdk-v1.md`
+- Regression test: `python scripts/download_models.py --repo-id mattmireles/kokoro-coreml --revision <released-sha> --verify-manifest <bundle>/KokoroRuntimeManifest.json`
+- Regression test: `python scripts/hash_mlpackage_tree.py coreml/kokoro_duration_t512.mlpackage`
+- Regression test: `swift test --package-path swift`
+- Regression test: `swift test --package-path swift-tts --filter KokoroText`
+- Regression test: `swift test --package-path swift-tts --filter KokoroMisaki`
+- Regression test: `swift run --package-path swift-tts kokoro-sdk-smoke --resources <bundle> --text "Hello world" --out /tmp/kokoro.wav`
+- Regression test: `swift run --package-path swift-tts kokoro-sdk-smoke --manifest-url <hosted-manifest> --cache-dir <tmp> --text "Hello world" --out /tmp/kokoro.wav`
+- Regression test: `node scripts/check_sdk_drift.mjs`
+- Regression test: `xcodebuild` or XcodeBuildMCP build of `Examples/KokoroDemoApp` on simulator.
+- Manual release gate: physical iPhone raw-text smoke with first call, warm
+  call, long text, cancellation, and background/foreground evidence recorded in
+  `README/Notes/`. This is not optional for iOS readiness.
+
+## Success Criteria
+
+### Hard Requirements (Must Pass)
+
+- [ ] Fresh developer flow does not require Botnet, Python, Node, JavaScriptCore,
+      or a worker daemon in an iOS/macOS app.
+- [ ] Public raw-text API is not exposed until MisakiSwift packaging, offline
+      operation, license notices, platform floor, and reviewed Botnet drift
+      evidence are proven.
+- [ ] Raw text API exists and works on iOS/macOS from public Swift types.
+- [ ] Prepared-input API remains backward-compatible for benchmarks.
+- [ ] Raw-text SDK reliability takes precedence over older iOS compatibility;
+      V1 may require iOS 18+ if that is the stable Gist/MisakiSwift path.
+- [ ] SDK validates model, voice, vocab, hn-NSF, HF revision, and per-package
+      `.mlpackage` digest compatibility before synthesis.
+- [ ] SDK can use app-bundled resources and Gist-style downloaded resources
+      without hard-coding Gist infrastructure.
+- [ ] Long text is chunked deterministically and never silently truncates.
+- [ ] Missing assets produce actionable typed errors.
+- [ ] First-run model compilation cannot block the main actor.
+- [ ] Documentation and model card usage compile against the actual SDK.
+- [ ] iOS readiness includes physical-device raw-text synthesis evidence.
+- [ ] SDK diagnostics are privacy-safe by default and never persist raw text or
+      phoneme strings without caller opt-in.
+- [ ] Raw-text package floor is documented separately from the low-level
+      prepared-input pipeline floor.
+
+### Definition of Done
+
+- [ ] All Swift tests pass.
+- [ ] JS/Botnet parity fixtures pass.
+- [ ] Example app builds.
+- [ ] Smoke WAV is generated and finite.
+- [ ] SDK docs explain resource bundle setup and size tradeoffs.
+- [ ] Starter SDK bundle can be generated and verified from a clean checkout and
+      pinned HF revision.
+- [ ] Hosted-manifest SDK cache path can download, compile, reuse, and invalidate
+      a starter bundle.
+- [ ] Physical iPhone smoke evidence is recorded or the iOS release is marked
+      blocked, not complete.
+- [ ] Plan checkboxes updated with real evidence before execution is called
+      complete.
+
+## Open Questions
+
+### Resolved
+
+- **Q:** Should V1 put raw text prep inside Core ML?
+- **A:** No. Keep dynamic text prep on CPU and keep fixed-shape model buckets.
+
+- **Q:** Should the SDK depend on Botnet at runtime?
+- **A:** No. Botnet remains a parity oracle and source of copied prep logic.
+
+- **Q:** Should all model assets be committed to git?
+- **A:** No. `coreml/` is ignored and too large; release artifacts and manifests
+  are the right boundary.
+
+- **Q:** Should the public SDK break `KokoroPipeline.synthesize(...)`?
+- **A:** No. Add `KokoroTTS` above it.
+
+- **Q:** Can we download the model from
+  [mattmireles/kokoro-coreml on Hugging Face](https://huggingface.co/mattmireles/kokoro-coreml)?
+- **A:** Yes. `scripts/download_models.py` already downloads the curated Core ML
+  packages and voice `.bin` files from that repo. Treat HF as the default binary
+  source, but do not treat the current HF snapshot as a complete SDK runtime
+  bundle until the manifest/config work lands.
+
+- **Q:** Which native iOS phonemizer backend exactly matches Botnet's
+  eSpeak/WASM output?
+- **A:** V1 follows the Gist iOS app: MisakiSwift plus a checked Kokoro vocab in
+  the app/SDK path. Botnet's eSpeak/WASM output remains a drift oracle, not a
+  byte-equality requirement. Phase 1 must prove MisakiSwift packaging, offline
+  operation, platform floor, license/App Store redistribution, macOS build, iOS
+  simulator build, and reviewed drift evidence before public raw-text API work
+  proceeds.
+
+- **Q:** Why not embed the same small Node bridge Botnet uses?
+- **A:** Botnet is controlled macOS worker infrastructure, so Node is a fine
+  operational dependency there. Gist iOS proves the app pattern is different:
+  native Swift G2P and Core ML runtime in the app, with server/cache fallback as
+  product degradation. The SDK may keep Node as a dev/parity oracle, but a
+  drop-in iOS SDK must not require Node, JavaScriptCore, a daemon, or a WebView
+  bridge.
+
+- **Q:** Should V1 copy the Gist app's model download/compile/cache pattern?
+- **A:** Yes. Support app-bundled resources for offline demos and explicit
+  bundle distribution, but make the hosted-manifest download path first-class:
+  fetch manifest, validate hashes, download `.mlpackage` directories and
+  sidecars, compile on device, and cache `.mlmodelc`.
+
+- **Q:** Why use a separate `swift-tts/` package instead of adding `KokoroTTS`
+  to `swift/`?
+- **A:** Simpler and safer. `swift/` stays the prepared-input Core ML runtime
+  with its current platform floor and no MisakiSwift dependency. `swift-tts/`
+  can depend on `../swift`, own raw-text APIs and resources, and advertise the
+  real MisakiSwift platform floor without risking accidental breakage for
+  Botnet, benchmarks, or prepared-input users.
+
+- **Q:** Should `hnsf_weights.json` and vocab config live in git, HF, or both?
+- **A:** Keep small source-of-truth runtime files in git under the SDK target
+  resources, include hashed copies in generated bundles, and record the same
+  hashes in HF SDK metadata. Large models and voices stay in HF/downloaded
+  artifacts.
+
+- **Q:** Can iOS physical-device validation be deferred?
+- **A:** No for an iOS-ready SDK. Simulator builds prove compile/resource wiring
+  only; physical-device raw-text synthesis is a release gate. If no device is
+  available, the iOS claim is blocked or downgraded.
+
+- **Q:** Should unknown phonemes throw when vocab lookup drops every token?
+- **A:** Default V1 behavior matches Botnet: throw only when the phonemizer
+  returns empty output. Unknown vocab symbols are dropped, BOS/EOS still apply,
+  and diagnostics report counters without persisting raw text or phonemes.
+
+### Unresolved
+
+- **Q:** Should release bundles include every voice by default?
+- **Options:** all voices, English-only voices, or single default voice. Current
+  lean: starter bundle with Gist's supported production voices
+  (`af_bella`, `am_michael`, `af_heart`) or a single default voice if package
+  size forces it; full bundle with all supported English voices.
+
+- **Q:** Should the package publish resource bundles through SwiftPM?
+- **Options:** SwiftPM resources, GitHub Release zip, binary/resource artifact,
+  or app-provided resource directory only. Current lean: app-provided bundle for
+  V1 plus a generator script; measure SwiftPM artifact behavior before promising
+  it.
+
+- **Q:** What exact platform floor should `KokoroTTS` raw-text V1 advertise?
+- **A:** Use the newest OS floor that makes the system reliable, even if that
+  means iOS 18+. Do not spend V1 complexity on older-OS compatibility.
+  `swift-tts/` documents the real floor while `swift/` keeps `KokoroPipeline`
+  lower for prepared-input users.
+
+## References
+
+### Internal
+
+- [Runtime boundary wiki](../Wiki/runtime-boundary.md)
+- [CoreML export wiki](../Wiki/coreml-export.md)
+- [Runtime boundary note](../Notes/kokoro-runtime-boundary.md)
+- [Swift prefix rewrite plan](swift-prefix-rewrite-v1.md)
+- [iPhone performance plan](kokoro-iphone-performance-v1.md)
+- [Model card draft](../hf-model-card.md)
+- `swift/Package.swift`
+- `swift-tts/Package.swift`
+- `swift/Sources/KokoroPipeline/KokoroPipeline.swift`
+- `scripts/kokoro-prepare-input.mjs`
+- `kokoro.js/src/phonemize.js`
+- `/Users/mm/Documents/GitHub/botnet/scripts/kokoro-prepare-input.mjs`
+- `/Users/mm/Documents/GitHub/botnet/apps/kokoro-worker/Sources/KokoroWorkerCore/KokoroWorkerCore.swift`
+- `/Users/mm/Documents/GitHub/gist/packages/ios-app/App/Sources/Audio/KokoroG2P.swift`
+- `/Users/mm/Documents/GitHub/gist/packages/ios-app/App/Sources/Audio/SynthEngine.swift`
+- `/Users/mm/Documents/GitHub/gist/packages/ios-app/App/Sources/Audio/KokoroModelStore.swift`
+- `/Users/mm/Documents/GitHub/gist/packages/ios-app/App/Sources/Audio/VoiceTable.swift`
+- `/Users/mm/Documents/GitHub/gist/packages/ios-app/App/Sources/Audio/TextChunker.swift`
+- `/Users/mm/Documents/GitHub/gist/packages/ios-app/project.yml`
+
+### External
+
+- [SwiftPM resource bundling docs](https://github.com/swiftlang/swift-package-manager/blob/main/Sources/PackageManagerDocs/Documentation.docc/BundlingResources.md)
+- [Core ML compileModel(at:) docs](https://developer.apple.com/documentation/coreml/mlmodel/compilemodel%28at%3A%29)
+
+## Error Handling and Edge Cases
+
+| Scenario | Behavior | Fallback |
+| --- | --- | --- |
+| Empty or whitespace text | Throw `KokoroError.emptyText`. | Caller can skip synthesis. |
+| Unknown voice | Throw `KokoroError.unsupportedVoice` with available voices. | Caller chooses another voice. |
+| Voice asset missing | Throw `KokoroError.missingVoiceAsset`. | Bundle generator or app resources must be fixed. |
+| Voice `.bin` corrupt length | Throw before synthesis. | Rebuild resource bundle. |
+| Unsupported language voice | Throw unless backend explicitly supports it. | Use supported English voice. |
+| Text exceeds token cap | Chunk before synthesis; if a single chunk still exceeds cap, throw. | Caller can shorten or SDK can split more aggressively. |
+| Unknown phoneme not in vocab | Match Gist behavior: drop unknown token and record privacy-safe diagnostic counters. | BOS/EOS still apply; throw only if no model tokens remain. |
+| Diagnostics requested | Return counters, hashes, and typed error codes by default. | Raw text or phonemes require explicit caller opt-in and are never persisted by SDK code. |
+| Missing duration bucket | Throw with required model filename. | Rebuild bundle with required bucket. |
+| `.mlpackage` first-run compile | Compile off-main-thread. | Use precompiled `.mlmodelc` in app resources. |
+| Simulator run | Functional smoke only; no performance claim. | Use physical device for placement and latency. |
+| No physical iPhone available | Mark iOS release blocked or downgrade claim. | Do not mark iOS SDK readiness complete. |
+| Manifest path escape | Reject before hashing or loading. | Rebuild bundle with canonical relative paths. |
+| Symlinked vocab/config asset | Reject before bundle generation. | Use checked-in SDK runtime vocab resource with recorded provenance. |
+| Model digest mismatch | Reject before synthesis. | Re-download pinned HF revision or rebuild bundle. |
+| Memory pressure | Lazy-load bucket models and allow cache eviction. | App can call `releaseModels()` or reload later. |
+| Concurrent syntheses | Serialize model prediction or bound concurrency. | Expose queue/concurrency option later if needed. |
+| Cancellation | Check cancellation between prep, model stages, and chunks. | Return partial nothing; no corrupt state. |
+| Audio NaN/Inf | Validate finite PCM before returning. | Throw `KokoroError.invalidAudioOutput`. |
+| Long text stitching | Use deterministic chunk order and `PcmJoiner`. | Expose raw chunks for advanced callers. |
+
+## Degradation and Rollback
+
+**Degradation Modes:**
+
+- **If MisakiSwift packaging fails:** keep the lower-level prepared-input API
+  and mark the raw-text SDK plan blocked until the plan is revised. Do not ship
+  a raw-text iOS claim that needs hidden Node, WebView, or daemon behavior.
+- **If Misaki-vs-eSpeak drift is audible or breaks tokenization:** keep Botnet's
+  prepared-input oracle and add a new backend decision phase before public API.
+  Do not pretend the phonemizer is byte-parity-compatible when it is not.
+- **If hosted-manifest download fails:** use already-ready verified cache when
+  hashes and manifest version prove it is safe; otherwise surface a typed model
+  unavailable error.
+- **If Core ML staged policy fails on device:** latch `.cpuOnly` for the session
+  and retry locally before surfacing failure.
+- **If full resource bundle is too large:** ship starter/custom bundle flow
+  first and document full bundle as optional.
+- **If `.mlmodelc` bundle discovery is flaky:** require explicit resource URL
+  until app-bundle discovery is proven.
+- **If HF update is delayed:** keep `scripts/download_models.py` pointed at the
+  last known good model/voice revision and ship SDK source/docs separately; do
+  not update the model card to the new raw-text API until the matching SDK
+  release is available.
+- **If physical iPhone evidence is unavailable:** ship macOS-only or
+  prepared-input-only claims as appropriate; do not mark iOS SDK readiness
+  complete.
+- **If runtime asset provenance fails:** block bundle generation until the
+  symlink, unverified hash, or digest mismatch is fixed.
+
+**Rollback Plan:**
+
+- **How to revert:** revert SDK facade files and docs; keep existing
+  `KokoroPipeline` prepared-input API untouched.
+- **Time to rollback:** one normal git revert if phases stay additive.
+- **Data recovery needed:** No; all resources are generated or downloaded
+  artifacts.
+
+## Rollout and Gates
+
+- **Feature flag:** none for library code; public API appears only when tests
+  and docs are ready.
+- **Rollout strategy:** local smoke -> fresh consumer fixture -> example app ->
+  physical iPhone/macOS validation -> release artifact.
+- **Kill switch:** developers can keep using `KokoroPipeline` prepared-input API
+  directly if `KokoroTTS` text prep is not ready.
+- **Release blocker:** iOS release requires physical-device raw-text synthesis
+  evidence. Without it, the public claim must be macOS-only or explicitly
+  experimental for iOS.
+
+## Files Likely to Change
+
+| File | Change Type | Notes |
+| --- | --- | --- |
+| `scripts/kokoro-prepare-input.mjs` | Modify | Self-host current repo root and `--runtime-root`. |
+| `scripts/kokoro-prepare-input.py` | Modify | Same runtime-root behavior for Python oracle. |
+| `scripts/compare_botnet_prepare_input.mjs` | Create | Fixture parity against Botnet prep with `--botnet-root` and full-contract comparison. |
+| `scripts/verify_runtime_assets.py` | Create | Validate checked vocab/hn-NSF resources and reject symlinked configs. |
+| `scripts/inspect_hf_artifacts.py` | Create | Record HF repo/revision/package-list provenance. |
+| `scripts/hash_mlpackage_tree.py` | Create | Stable per-package tree digests for manifests. |
+| `scripts/build_sdk_bundle.mjs` | Create | Assemble and hash SDK resource bundles from pinned artifacts. |
+| `scripts/check_sdk_drift.mjs` | Create | Verify constants/docs/manifest/model-card snippets agree. |
+| `scripts/download_models.py` | Modify | Add repo/revision pinning and SDK download modes. |
+| `swift/Package.swift` | Maybe modify | Keep `KokoroPipeline`; only add shared low-level types if required. Do not add MisakiSwift. |
+| `swift-tts/Package.swift` | Create | Higher-level package exposing `KokoroTTS`, depending on `../swift` and MisakiSwift. |
+| `swift/Sources/KokoroPipeline/KokoroPreparedInput.swift` | Create | Low-level prepared-input type only. |
+| `swift-tts/Sources/KokoroTTS/Resources/KokoroRuntime/kokoro-vocab.json` | Create | Checked SDK vocab resource matching the Gist/Kokoro table. |
+| `swift-tts/Sources/KokoroTTS/Resources/KokoroRuntime/hnsf_weights.json` | Create | Checked verified hn-NSF weights resource. |
+| `swift-tts/Sources/KokoroTTS/KokoroTextProcessor.swift` | Create | Native text prep facade. |
+| `swift-tts/Sources/KokoroTTS/KokoroPhonemizer.swift` | Create | Protocol boundary for MisakiSwift now and future backends later. |
+| `swift-tts/Sources/KokoroTTS/KokoroMisakiPhonemizer.swift` | Create | Gist-style MisakiSwift phonemizer wrapper. |
+| `swift-tts/Sources/KokoroTTS/VoiceTable.swift` | Create | Gist-style voice `.bin` loader and row selection. |
+| `swift-tts/Sources/KokoroTTS/TextChunker.swift` | Create | Gist/fleet chunking behavior adapted for SDK use. |
+| `swift-tts/Sources/KokoroTTS/KokoroTTS.swift` | Create | Drop-in public API. |
+| `swift-tts/Sources/KokoroTTS/KokoroResourceProvider.swift` | Create | Bundle/directory/downloaded resource loading. |
+| `swift-tts/Sources/KokoroTTS/KokoroDownloadedModelStore.swift` | Create | Gist-style manifest download, compile, cache, and invalidation. |
+| `swift-tts/Sources/KokoroTTS/KokoroSDKModelProvider.swift` | Create | Lazy `.mlpackage`/`.mlmodelc` provider implementing `KokoroModelProvider`. |
+| `swift-tts/Sources/KokoroTTS/KokoroErrors.swift` | Create | Typed SDK errors. |
+| `swift/Tests/KokoroPipelineTests/*` | Modify/Create | Prepared-input compatibility stays green. |
+| `swift-tts/Tests/KokoroTTSTests/*` | Create | Text prep, resource, manifest, SDK API, and diagnostics tests. |
+| `Examples/KokoroDemoApp/**` | Create | Drop-in demo app. |
+| `README.md` | Modify | SDK quickstart. |
+| `README/hf-model-card.md` | Modify | Usage snippet must match actual API. |
+| `README/Notes/kokoro-drop-in-sdk-v1.md` | Create | Implementation decisions and evidence. |
+| `hnsf_weights.json` | Modify | Replace unverified root copy or point tooling to the verified SDK resource. |
+| `_kokoro_vocab.json` | Read/Maybe modify | Source for checked SDK vocab resource if upstream config is not copied. |
+
+## Risks and Mitigations
+
+- **Misaki-vs-eSpeak drift:** Audio quality or token IDs may differ from Botnet.
+  -> Produce a reviewed drift table in Phase 1 and audio/tokenization checks
+  before public API. Exact phoneme equality is not the V1 requirement.
+- **MisakiSwift packaging risk:** Resource layout, dynamic-library embedding, or
+  platform floor may not fit the SDK distribution target.
+  -> Reuse Gist's packaging fix where appropriate and treat license/provenance,
+  platform floor, code signing, and iOS simulator build as release gates.
+- **Resource bundle bloat:** App integration becomes impractical.
+  -> Provide starter/custom bundle profiles and explicit asset sizing.
+- **Unreproducible bundle:** Local symlinks, ignored outputs, or modified
+  `.mlpackage` files leak into release artifacts.
+  -> Reject symlinks/path escapes and require pinned HF revisions plus
+  per-package tree digests.
+- **Main-thread stalls:** First use blocks UI.
+  -> Async load/prewarm API and tests that assert no main-actor-only compile path.
+- **Hidden dependency creep:** SDK silently needs Node/Python/JavaScriptCore.
+  -> CI/smoke fixture must run iOS/macOS path without those dependencies in app
+  code.
+- **Docs overpromise:** Model card drifts from actual API.
+  -> Compile the documentation snippet in a consumer fixture.
+- **Compute-unit regressions:** Convenience API masks stage policy.
+  -> Keep existing compute policy defaults and benchmark controls available.
+- **Skipped iPhone proof:** Simulator smoke passes but real-device first load or
+  phonemizer resource packaging fails.
+  -> Physical-device raw-text smoke is a release blocker for iOS readiness.
+
+## Progress Tracker
+
+### Phase 0: Make the Copied Prep Layer Self-Hosting
+
+- [ ] Fix JS default runtime root.
+- [ ] Add `--runtime-root`.
+- [ ] Add `--botnet-root`.
+- [ ] Add dependency install/run path.
+- [ ] Add full-contract Botnet parity script and fixtures.
+
+### Phase 1: SDK Boundaries and Gist-Proven Phonemizer Spike
+
+- [ ] Create `swift-tts/Package.swift` and `KokoroTTS` product.
+- [ ] Keep `swift/Package.swift` free of MisakiSwift and raw-text targets.
+- [ ] Add MisakiSwift only to the `swift-tts/` package.
+- [ ] Prove MisakiSwift packaging/offline behavior on macOS and iOS simulator.
+- [ ] Record Botnet/eSpeak drift table.
+- [ ] Record license/provenance/App Store decision.
+- [ ] Define privacy-safe diagnostics policy.
+
+### Phase 2: Runtime Asset Source of Truth
+
+- [ ] Add checked SDK vocab resource.
+- [ ] Add checked verified hn-NSF weights resource.
+- [ ] Add runtime asset verifier.
+- [ ] Reject symlinked configs and unverified hashes.
+
+### Phase 3: Native Swift Text Prep and Public Types
+
+- [ ] Add public prepared-input and options types.
+- [ ] Adapt Gist `KokoroG2P`, `VoiceTable`, and `TextChunker` behavior.
+- [ ] Port deterministic non-phonemizer prep logic.
+- [ ] Prove Swift prep parity against Gist and approved drift against JS oracle.
+
+### Phase 4: Reproducible HF Downloads and SDK Bundle Builder
+
+- [ ] Add repo/revision-pinned HF downloader mode.
+- [ ] Add HF artifact inspection/provenance script.
+- [ ] Add per-`.mlpackage` tree hashing.
+- [ ] Add starter/custom/full bundle generator.
+- [ ] Add hosted-manifest generator.
+- [ ] Add runtime manifest validation.
+
+### Phase 5: SDK Model Provider and Drop-In API
+
+- [ ] Add resource provider.
+- [ ] Add downloaded-resource provider.
+- [ ] Add SDK model provider using `KokoroModelProvider`.
+- [ ] Support `.mlpackage` and `.mlmodelc`.
+- [ ] Add `KokoroTTS` facade.
+- [ ] Add chunk synthesis and PCM conveniences.
+- [ ] Add Gist-style staged compute policy and `.cpuOnly` retry.
+
+### Phase 6: Examples and macOS/iOS Validation
+
+- [ ] Add fresh consumer fixture.
+- [ ] Add example app and smoke executable.
+- [ ] Run macOS smoke.
+- [ ] Build iOS simulator app.
+- [ ] Run mandatory physical-device smoke or mark iOS release blocked.
+
+### Phase 7: Release Artifact and Documentation Pass
+
+- [ ] Add SDK docs.
+- [ ] Add implementation notes.
+- [ ] Add release checklist.
+- [ ] Add drift check.
+- [ ] Update README and model card.
+- [ ] Decide measured distribution format.
+
+## Debug Notes
+
+Append real issues encountered during implementation with fixes.
+
+### 2026-06-28 - Planning Baseline
+
+**Problem:** `scripts/kokoro-prepare-input.mjs` is present in this repo but
+fails by default because it still assumes Botnet's runtime package layout.
+**Root Cause:** The script was copied from Botnet without changing
+`DefaultRuntimeRoot`.
+**Fix:** Planned Phase 0 fix: self-host the current repo root and add an
+explicit `--runtime-root`.
+**Files:** `scripts/kokoro-prepare-input.mjs`
+
+---
+
+### 2026-06-28 - Cross-Agent Plan Audit Fixes
+
+**Problem:** Cross-agent audit graded the draft C overall because native
+phonemizer ownership, resource provenance, iOS physical-device proof, and SDK
+target boundaries were under-specified.
+**Root Cause:** The first draft mixed public API work with backend discovery,
+used generated/ignored runtime assets in clean-checkout claims, allowed iOS
+device proof to be deferred, and risked growing `KokoroPipeline` into a
+high-level SDK god object.
+**Fix:** Split the plan into stricter phases: prove raw-text phonemizer
+packaging before public API, add a separate `swift-tts/` package/provider
+boundary, promote checked runtime assets, require pinned HF revisions and
+per-package digests, make physical-device iPhone smoke a release gate, and add
+drift/provenance checks.
+**Files:** `README/Plans/kokoro-drop-in-sdk-v1.md`
+
+---
+
+### 2026-06-28 - Gist iOS Pattern Update
+
+**Problem:** The post-audit plan still treated native eSpeak parity as the V1
+app-path gate, even though the shipping Gist iOS app already uses pure Swift
+MisakiSwift G2P plus checked Kokoro vocab, Core ML runtime, and manifest-backed
+model download/cache.
+**Root Cause:** The plan over-weighted Botnet's controlled macOS Node bridge as
+the runtime shape instead of separating Botnet as an oracle from Gist as the
+iOS product precedent.
+**Fix:** Reoriented V1 around the Gist app pattern: MisakiSwift in `KokoroTTS`,
+Botnet JS/eSpeak as drift oracle only, Gist-style voice table/chunking/model
+store, hosted-manifest downloads, staged compute defaults, and explicit
+platform-floor documentation.
+**Files:** `README/Plans/kokoro-drop-in-sdk-v1.md`
+
+---
+
+### 2026-06-28 - `swift-tts/` Safer Default
+
+**Problem:** The plan still left room to start with same-package `KokoroTTS`
+and only split later if SwiftPM platform floors leaked.
+**Root Cause:** That made an avoidable packaging question part of execution
+risk, even though the desired boundary is already clear.
+**Fix:** Make `swift-tts/` the default from Phase 1. `swift/` remains the
+prepared-input package; `swift-tts/` depends on `../swift`, owns MisakiSwift,
+resources, hosted-manifest download/cache, public raw-text APIs, and its own
+platform floor.
+**Files:** `README/Plans/kokoro-drop-in-sdk-v1.md`
+
+---
+
+### 2026-06-28 - Plan Skill Routing
+
+**Problem:** The implementation phases named tasks and verification gates but
+did not tell the executor which repo skills to invoke for each phase.
+**Root Cause:** The plan followed the template structure but omitted the
+workflow routing needed by `execute-plan`, `phase-audit`, domain skills, notes,
+and release/documentation skills.
+**Fix:** Added a required skills section under `Implementation Phases` and a
+`Required skills` line to every phase, with side-effect boundaries for
+`execute-plan-hardcore`, `deploy`, `git-commit`, and `git-push`.
+**Files:** `README/Plans/kokoro-drop-in-sdk-v1.md`
+
+---
+
+## Critical Reminder
+
+> SIMPLER IS BETTER. If you are adding complexity, justify it. Most of the
+> time, the simplest solution wins.
