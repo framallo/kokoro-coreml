@@ -444,40 +444,40 @@ the Gist-proven Swift phonemizer path and checked runtime assets.
 
 **Tasks:**
 
-- [ ] Create `swift/Sources/KokoroPipeline/KokoroPreparedInput.swift` with the
+- [x] Create `swift/Sources/KokoroPipeline/KokoroPreparedInput.swift` with the
       low-level prepared-input contract only: token IDs, attention mask, `refS`,
       speed, optional `canonicalDurationSeconds`, optional `numTokens`, optional
       `hnsfWeightsSHA256`, and metadata needed for existing fixtures.
-- [ ] Create `swift-tts/Sources/KokoroTTS/KokoroVoiceID.swift`,
+- [x] Create `swift-tts/Sources/KokoroTTS/KokoroVoiceID.swift`,
       `KokoroSynthesisOptions.swift`, `KokoroAudio.swift`,
       `KokoroTextProcessor.swift`, and `KokoroPhonemizer.swift` in the
       `swift-tts/` package.
-- [ ] Adapt Gist's `KokoroG2P.swift` behavior: MisakiSwift phonemization,
+- [x] Adapt Gist's `KokoroG2P.swift` behavior: MisakiSwift phonemization,
       checked Kokoro vocab lookup, unknown-vocab drop behavior, BOS/EOS token
       framing, and phoneme UTF-16 count for voice-row selection.
-- [ ] Adapt Gist's `VoiceTable.swift` behavior: little-endian float32 `.bin`
+- [x] Adapt Gist's `VoiceTable.swift` behavior: little-endian float32 `.bin`
       loading, 256-float rows, supported voice list, and
       `rowIndex = clamp(phonemeCount - 1, 0, rowCount - 1)`.
-- [ ] Port Botnet's canonical
+- [x] Port Botnet's canonical
       `/Users/mm/Documents/GitHub/botnet/apps/kokoro-worker/Sources/KokoroWorkerCore/TextChunker.swift`
       into `swift-tts/Sources/KokoroTTS/TextChunker.swift`, preserving fleet
       sentence-boundary, abbreviation, protected punctuation, word-packing,
       character-window, whitespace-normalization, speed, and `maxCharacters`
       fallback behavior.
-- [ ] Apply only the Gist/iPhone-specific chunk cap change on top of the Botnet
+- [x] Apply only the Gist/iPhone-specific chunk cap change on top of the Botnet
       chunker: `maxChunkSeconds` is configurable and defaults to 15 seconds for
       the SDK starter profile instead of Botnet's static 30 seconds.
-- [ ] Add a chunker parity fixture/test set against the Botnet source behavior
+- [x] Add a chunker parity fixture/test set against the Botnet source behavior
       for abbreviations, initials, decimals, punctuation runs, protected
       commas, hyphenated words, whitespace normalization, long text, speed
       changes, and `maxCharacters` recursive token-budget fallback.
-- [ ] Port deterministic Botnet-compatible non-phonemizer prep logic to Swift:
+- [x] Port deterministic Botnet-compatible non-phonemizer prep logic to Swift:
       language gating, duration token-budget guard, metadata preservation, and
       typed validation.
-- [ ] Define unknown-token behavior as Gist-compatible by default: characters
+- [x] Define unknown-token behavior as Gist-compatible by default: characters
       without vocab entries are dropped during tokenization; throw only when no
       model tokens remain after phonemization/tokenization.
-- [ ] Keep Node/WASM and Python prep as test/dev oracles only; they must not be
+- [x] Keep Node/WASM and Python prep as test/dev oracles only; they must not be
       required by an iOS app.
 
 **Verification:** `swift test --package-path swift-tts --filter KokoroText` passes;
@@ -1014,10 +1014,10 @@ command or script; SDK constants/docs/model-card drift check passes.
 
 ### Phase 3: Native Swift Text Prep and Public Types
 
-- [ ] Add public prepared-input and options types.
-- [ ] Adapt Gist `KokoroG2P`, `VoiceTable`, and `TextChunker` behavior.
-- [ ] Port deterministic non-phonemizer prep logic.
-- [ ] Prove Swift prep parity against Gist and approved drift against JS oracle.
+- [x] Add public prepared-input and options types.
+- [x] Adapt Gist `KokoroG2P`, `VoiceTable`, and `TextChunker` behavior.
+- [x] Port deterministic non-phonemizer prep logic.
+- [x] Prove Swift prep parity against Gist and approved drift against JS oracle.
 
 ### Phase 4: Reproducible HF Downloads and SDK Bundle Builder
 

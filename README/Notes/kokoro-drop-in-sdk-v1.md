@@ -8,6 +8,130 @@ do not put local-only analysis in `README/Guides/`.
 
 ---
 
+## Issue: Phase 3 Native Swift Text Prep - Resolved
+
+**First spotted:** 2026-06-28
+**Resolved:** 2026-06-28
+**Status:** Resolved
+
+### Summary
+
+Phase 3 added the native prep contract needed before the SDK can expose
+`synthesize(text:)`. The low-level `swift/` package now has
+`KokoroPreparedInput`, which is only the prepared tensor contract and a bridge
+back to `KokoroSynthesisRequest`. The higher-floor `swift-tts/` package owns
+raw-text concerns: voice IDs, synthesis options, audio value type, checked vocab
+tokenization, voice-row loading, and Botnet-compatible chunking.
+
+The implementation follows Gist's app pattern: MisakiSwift remains behind
+`KokoroPhonemizer`, tokenization drops unknown phoneme characters, token IDs
+are framed with boundary token `0`, the unpadded token count is preserved as
+metadata, and voice row selection uses phoneme UTF-16 count:
+`rowIndex = clamp(phonemeCount - 1, 0, rowCount - 1)`.
+
+### Public Prep Surface
+
+Files added:
+
+- `swift/Sources/KokoroPipeline/KokoroPreparedInput.swift`
+- `swift-tts/Sources/KokoroTTS/KokoroVoiceID.swift`
+- `swift-tts/Sources/KokoroTTS/KokoroSynthesisOptions.swift`
+- `swift-tts/Sources/KokoroTTS/KokoroAudio.swift`
+- `swift-tts/Sources/KokoroTTS/KokoroTextProcessor.swift`
+- `swift-tts/Sources/KokoroTTS/VoiceTable.swift`
+- `swift-tts/Sources/KokoroTTS/TextChunker.swift`
+
+`TextChunker` is a direct port of Botnet's fleet chunker with one deliberate
+SDK change: `maxChunkSeconds` is configurable and defaults to 15 seconds. The
+Botnet 30-second value is still exposed as `TextChunker.botnetMaxChunkSeconds`
+for parity tests and caller overrides.
+
+`KokoroTextProcessor` is deterministic except for the injected phonemizer. Tests
+use a stub phonemizer, so tokenization and validation are covered without
+requiring MLX runtime resources. Misaki runtime proof remains xcodebuild/probe
+based, as recorded in Phase 1.
+
+### Verification
+
+Regression test:
+
+```bash
+swift test --package-path swift-tts
+```
+
+Result on 2026-06-28: passed 20 tests with 2 Misaki runtime tests skipped by
+default. New coverage includes checked vocab tokenization, unknown-token drop,
+BOS/EOS framing, enum padding, metadata preservation, typed validation,
+voice-row selection from real `.bin` files, and Botnet chunker fixtures.
+
+Regression test:
+
+```bash
+swift test --package-path swift
+```
+
+Result on 2026-06-28: passed 46 tests. The added low-level prepared-input test
+confirms `KokoroPreparedInput.synthesisRequest()` preserves input IDs,
+attention mask, `refS`, and speed.
+
+Regression test:
+
+```bash
+python3 scripts/verify_runtime_assets.py
+```
+
+Result on 2026-06-28: passed.
+
+App-style compile checks:
+
+```bash
+xcodebuild -quiet -scheme KokoroTTS \
+  -destination 'generic/platform=iOS Simulator' \
+  -derivedDataPath /tmp/kokoro-tts-iossim-dd build
+
+xcodebuild -quiet -scheme kokoro-misaki-probe \
+  -destination 'platform=macOS,arch=arm64' \
+  -derivedDataPath /tmp/kokoro-tts-dd build
+```
+
+Result on 2026-06-28: both returned success. The machine still reports
+CoreSimulator `1051.54.0 < 1051.55.0`; this remains a local simulator-service
+warning, not a compile failure.
+
+Drift report:
+
+```bash
+node scripts/compare_misaki_botnet_phonemes.mjs \
+  --probe-bin /tmp/kokoro-tts-dd/Build/Products/Debug/kokoro-misaki-probe \
+  --dyld-framework-path /tmp/kokoro-tts-dd/Build/Products/Debug/PackageFrameworks
+```
+
+Result on 2026-06-28: completed and reproduced the approved Misaki-vs-Botnet
+drift table. No fixture is exact; this remains an accepted V1 behavior choice
+unless later audio judgment says otherwise.
+
+Dependency scan:
+
+```bash
+rg -n "node|python|Botnet|KokoroWorkerCore|child_process|Process\(" \
+  swift-tts/Sources swift/Sources/KokoroPipeline
+```
+
+Result on 2026-06-28: found only documentation comments mentioning Botnet; no
+Node, Python, Botnet module, or process-spawning runtime imports were added.
+
+### If This Recurs
+
+- [ ] Keep `KokoroPhonemizer` injectable; do not make tests require MLX just to
+      validate tokenization.
+- [ ] Preserve UTF-16 phoneme length for voice-row selection.
+- [ ] Do not change Botnet chunker edge behavior inside Phase 3; pin observed
+      behavior first and only change it behind an explicit SDK policy later.
+- [ ] Keep raw-text SDK prep in `swift-tts/`; do not raise `KokoroPipeline`'s
+      platform floor.
+
+---
+
 ## Issue: Phase 2 Runtime Asset Source of Truth - Resolved
 
 **First spotted:** 2026-06-28
