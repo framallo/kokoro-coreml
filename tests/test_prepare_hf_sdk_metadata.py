@@ -51,6 +51,8 @@ def write_profile_bundle(
         for hosted_path in hosted_files:
             if hosted_path.startswith("coreml/") or hosted_path == "KokoroRuntimeManifest.json":
                 continue
+            if hosted_path.startswith("/") or "\\" in hosted_path or ".." in Path(hosted_path).parts:
+                continue
             path = root / hosted_path
             path.parent.mkdir(parents=True, exist_ok=True)
             path.write_text(f"{hosted_path}\n", encoding="utf-8")

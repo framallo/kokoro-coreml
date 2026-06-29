@@ -1,7 +1,7 @@
 # MoE SSD/DRAM Expert Prefetch Experiment Plan
 
 **Date:** 2026-06-29
-**Status:** Complete (Stage 0 killed: missing `fs_usage` proof)
+**Status:** In Progress (Stage 0 flagged: one-layer lead time insufficient)
 
 > This plan is intentionally gate-heavy. The goal is not to build an impressive
 > prefetcher. The goal is to cheaply decide whether learned expert prefetching
@@ -225,10 +225,12 @@ python scripts/moe_prefetch/summarize.py stage0 \
 python -m pytest tests/test_moe_prefetch_tools.py
 ```
 
-**Gate:** Killed on this host because `fs_usage` evidence is missing:
-non-interactive `sudo -n` reports that a password is required, and unprivileged
-`fs_usage` reports that it must be run as root. The timing rows are retained as
-invalid diagnostics only; Stage 1 must not start from them.
+**Gate:** Stage 0 now has valid `fs_usage` disk I/O proof and the oracle
+bandwidth ceiling clears the provisional target, but hideability is flagged:
+the measured one-layer compute budget is much smaller than the p95 expert-block
+read latency. Stage 1 may start, but it must treat one-layer-ahead prediction as
+insufficient and measure whether multi-layer-ahead prediction produces hideable
+recall that beats the trivial baselines.
 
 ---
 
@@ -358,8 +360,8 @@ simulation won, document the confound as the result.
 
 ### Hard Requirements (Must Pass)
 
-- [ ] Every accepted Stage 0 row has a matching `fs_usage -f diskio` artifact.
-- [ ] Stage 0 computes and records hideability plus oracle bandwidth ceiling.
+- [x] Every accepted Stage 0 row has a matching `fs_usage -f diskio` artifact.
+- [x] Stage 0 computes and records hideability plus oracle bandwidth ceiling.
 - [ ] Stage 1 reports hideable recall, not only raw recall.
 - [ ] Stage 2 includes demand-LRU, best trivial, selected predictor, and oracle.
 - [ ] Stage 2 reports tokens/sec and joules/token.

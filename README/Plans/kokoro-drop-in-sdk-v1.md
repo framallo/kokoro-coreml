@@ -1,7 +1,7 @@
 # Kokoro Drop-In SDK v1 Plan
 
 **Date:** 2026-06-28
-**Status:** Implemented locally; final audit/fix loop in progress
+**Status:** Implemented locally; final audit fixes in progress
 
 ## Executive Summary
 
@@ -818,7 +818,7 @@ evidence, and must be rerun before remote HF publication.
 - Regression test: `node scripts/compare_botnet_prepare_input.mjs --botnet-root /Users/mm/Documents/GitHub/botnet --fixtures tests/fixtures/kokoro-text-prep/*.json --compare full`
 - Regression test: `python scripts/kokoro-prepare-input.py --runtime-root <repo-root> --text-file <fixture> --output /tmp/kokoro-prep.json --key smoke --voice af_heart --speed 1`
 - Regression test: `python scripts/verify_runtime_assets.py`
-- Regression test: `python scripts/inspect_hf_artifacts.py --repo-id mattmireles/kokoro-coreml --revision <released-sha> --format markdown --append README/Notes/kokoro-drop-in-sdk-v1.md`
+- Regression test: `python3 scripts/inspect_hf_artifacts.py --repo-id mattmireles/kokoro-coreml --revision <released-sha> --verify-hosted-digests --output /tmp/kokoro-hf-artifacts.json`
 - Regression test: `python scripts/download_models.py --repo-id mattmireles/kokoro-coreml --revision <released-sha> --sdk-profile starter --manifest-out /tmp/kokoro-download-manifest.json`
 - Regression test: `node scripts/build_sdk_bundle.mjs --profile starter --compile-models 1 --output /tmp/kokoro-sdk-starter-compiled --repo-id mattmireles/kokoro-coreml --revision <released-sha> --download-manifest /tmp/kokoro-download-manifest.json`
 - Regression test: `python3 scripts/prepare_hf_sdk_metadata.py --repo-id mattmireles/kokoro-coreml --starter-bundle /tmp/kokoro-sdk-starter-compiled --full-bundle /tmp/kokoro-sdk-full-compiled --output /tmp/kokoro-hf-sdk-metadata`

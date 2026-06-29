@@ -55,7 +55,7 @@ The repo also includes `examples/KokoroConsumerFixture` and
 The current public starter manifest is:
 
 ```text
-https://huggingface.co/mattmireles/kokoro-coreml/resolve/ccaa3199213acb163b14477e1eaee8b896740e69/HostedManifest.json
+https://huggingface.co/mattmireles/kokoro-coreml/resolve/main/HostedManifest.json
 ```
 
 ## Build A Resource Bundle
@@ -126,7 +126,7 @@ manifest.
 import KokoroTTS
 
 let resources = try await KokoroDownloadedModelStore(
-    manifestURL: URL(string: "https://huggingface.co/mattmireles/kokoro-coreml/resolve/ccaa3199213acb163b14477e1eaee8b896740e69/HostedManifest.json")!,
+    manifestURL: URL(string: "https://huggingface.co/mattmireles/kokoro-coreml/resolve/main/HostedManifest.json")!,
     cacheDirectory: cacheURL
 ).hydrate()
 

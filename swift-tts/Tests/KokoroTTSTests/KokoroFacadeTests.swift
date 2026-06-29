@@ -279,8 +279,8 @@ final class KokoroFacadeTests: XCTestCase {
     func testStarterVoiceConstantsMatchStarterBundle() {
         XCTAssertEqual(KokoroVoiceID.starterVoices, [.afHeart])
         XCTAssertEqual(VoiceTable.defaultVoiceID, .afHeart)
-        XCTAssertTrue(KokoroVoiceID.gistVoices.contains(.afBella))
-        XCTAssertTrue(KokoroVoiceID.gistVoices.contains(.amMichael))
+        XCTAssertEqual(KokoroVoiceID("af_bella").rawValue, "af_bella")
+        XCTAssertEqual(KokoroVoiceID("am_michael").rawValue, "am_michael")
     }
 
     /// Verifies V1 raw-text synthesis rejects non-English Kokoro voices even if

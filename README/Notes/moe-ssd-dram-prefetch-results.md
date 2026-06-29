@@ -51,8 +51,10 @@ FLAG: bandwidth passes but one-layer lead time is insufficient.
 
 ## Stage 1: Router Trace and Predictor Replay
 
-**Status:** Not run. Stage 0 killed before router tracing because the session
-could not produce required `fs_usage` disk I/O proof.
+**Status:** Not run. Stage 0 now has valid `fs_usage` disk I/O proof and clears
+the provisional oracle bandwidth floor, but it flags one-layer lead time as
+insufficient. Stage 1 must measure whether multi-layer-ahead prediction can
+produce hideable recall that beats the trivial baselines.
 
 ## Stage 2: Offline Simulator
 
