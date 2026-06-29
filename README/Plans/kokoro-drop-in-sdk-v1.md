@@ -362,35 +362,39 @@ public SDK API work starts.
 
 **Tasks:**
 
-- [ ] Leave `swift/Package.swift` as the low-level prepared-input package for
+- [x] Leave `swift/Package.swift` as the low-level prepared-input package for
       `KokoroPipeline`; do not add MisakiSwift or raw-text targets there.
-- [ ] Create `swift-tts/Package.swift` with a `KokoroTTS` library product that
+- [x] Create `swift-tts/Package.swift` with a `KokoroTTS` library product that
       depends on `../swift` and imports `KokoroPipeline`.
-- [ ] Add a minimal `swift-tts/Sources/KokoroTTS` scaffold, but do not expose
+- [x] Add a minimal `swift-tts/Sources/KokoroTTS` scaffold, but do not expose
       `KokoroTTS.synthesize(text:)` yet.
-- [ ] Add MisakiSwift as the V1 raw-text phonemizer dependency in the
+- [x] Add MisakiSwift as the V1 raw-text phonemizer dependency in the
       `swift-tts/` package only. Do not add it to `KokoroPipeline`.
-- [ ] Reuse the Gist packaging decision where applicable: pin the fork/revision
+- [x] Reuse the Gist packaging decision where applicable: pin the fork/revision
       or upstream tag, include license notices, and confirm resource layout does
       not break iOS code signing.
-- [ ] Add `KokoroMisakiPhonemizer` behind a `KokoroPhonemizer` protocol so a
+- [x] Add `KokoroMisakiPhonemizer` behind a `KokoroPhonemizer` protocol so a
       future eSpeak backend can be added without changing the public API.
-- [ ] Add a short probe executable or test target that phonemizes the same
-      fixture texts on macOS and iOS simulator using MisakiSwift.
-- [ ] Compare probe output against Botnet's Node/eSpeak oracle and write a
+- [x] Add a short probe executable or test target that phonemizes the same
+      fixture texts on macOS using MisakiSwift, and compile-validates the
+      package for iOS Simulator.
+- [x] Compare probe output against Botnet's Node/eSpeak oracle and write a
       drift table: exact matches, acceptable phoneme differences, dropped
       characters, empty-output behavior, and voice-row-selection consequences.
-- [ ] Record the dependency, license, platform floor, bundle resource, and App
+- [x] Record the dependency, license, platform floor, bundle resource, and App
       Store decision to `README/Notes/kokoro-drop-in-sdk-v1.md`.
-- [ ] Define the SDK diagnostics policy: default diagnostics are counters,
+- [x] Define the SDK diagnostics policy: default diagnostics are counters,
       stable hashes, and typed error codes; raw text and phoneme strings require
       explicit caller opt-in and are never persisted by the SDK.
 
 **Verification:** `swift test --package-path swift` still builds the low-level
 package without MisakiSwift; `swift test --package-path swift-tts` builds the
 new raw-text package and imports `KokoroPipeline`; the MisakiSwift probe builds
-on macOS and iOS simulator, runs offline, records platform floor and
-license/provenance notes, and produces a reviewed drift table against the
+and runs offline on macOS; the package compile-validates for generic iOS
+Simulator; the notes record that MLX Swift does not support iOS Simulator
+runtime evaluation and therefore physical-device proof remains mandatory;
+the notes record platform floor and license/provenance decisions; and Phase 1
+produces a reviewed drift table against the
 Botnet JS/eSpeak oracle. If packaging, offline operation, or code signing
 fails, execution stops before Phase 2. Exact phoneme-string equality with
 eSpeak is not required for V1 unless the drift causes tokenization or
@@ -992,13 +996,14 @@ command or script; SDK constants/docs/model-card drift check passes.
 
 ### Phase 1: SDK Boundaries and Gist-Proven Phonemizer Spike
 
-- [ ] Create `swift-tts/Package.swift` and `KokoroTTS` product.
-- [ ] Keep `swift/Package.swift` free of MisakiSwift and raw-text targets.
-- [ ] Add MisakiSwift only to the `swift-tts/` package.
-- [ ] Prove MisakiSwift packaging/offline behavior on macOS and iOS simulator.
-- [ ] Record Botnet/eSpeak drift table.
-- [ ] Record license/provenance/App Store decision.
-- [ ] Define privacy-safe diagnostics policy.
+- [x] Create `swift-tts/Package.swift` and `KokoroTTS` product.
+- [x] Keep `swift/Package.swift` free of MisakiSwift and raw-text targets.
+- [x] Add MisakiSwift only to the `swift-tts/` package.
+- [x] Prove MisakiSwift packaging/offline behavior on macOS and compile
+      validation for generic iOS Simulator.
+- [x] Record Botnet/eSpeak drift table.
+- [x] Record license/provenance/App Store decision.
+- [x] Define privacy-safe diagnostics policy.
 
 ### Phase 2: Runtime Asset Source of Truth
 

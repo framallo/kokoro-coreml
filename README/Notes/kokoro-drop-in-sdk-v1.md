@@ -8,6 +8,162 @@ do not put local-only analysis in `README/Guides/`.
 
 ---
 
+## Issue: Phase 1 `swift-tts` Package Boundary - Resolved
+
+**First spotted:** 2026-06-28
+**Resolved:** 2026-06-28
+**Status:** Resolved
+
+### Summary
+
+Phase 1 created a separate raw-text Swift package at `swift-tts/` so
+`KokoroPipeline` can keep its lower iOS 16 / macOS 13 prepared-input boundary.
+The new package depends on `../swift`, imports `KokoroPipeline`, pins the same
+MisakiSwift fork/revision used by Gist, and exposes only the phonemizer spike,
+diagnostics policy, and package facade placeholder. It does not expose
+`KokoroTTS.synthesize(text:)` yet.
+
+### Dependency Decision
+
+**Package:** `https://github.com/mattmireles/MisakiSwift`
+**Revision:** `3a27756a780fc138e328a96e533fb440a3419d5b`
+**License:** Apache-2.0 from the resolved checkout's `LICENSE`
+**SDK floor:** `swift-tts` is macOS 15.0 / iOS 18.0. The low-level `swift/`
+package remains macOS 13 / iOS 16 and has no MisakiSwift dependency.
+
+This follows Gist's working app-level package decision. The fork is required
+because upstream MisakiSwift 1.0.0-1.0.6 copied resources as a shallow
+top-level `Resources` directory, which Gist found breaks iOS code signing. The
+fork copies resources under `MisakiData`, and Phase 1 observed that layout in
+both SwiftPM and xcodebuild products:
+
+```text
+MisakiSwift_MisakiSwift.bundle/MisakiData/us_bart_config.json
+MisakiSwift_MisakiSwift.bundle/MisakiData/us_bart.safetensors
+MisakiSwift_MisakiSwift.bundle/MisakiData/gb_bart_config.json
+MisakiSwift_MisakiSwift.bundle/MisakiData/gb_bart.safetensors
+```
+
+MisakiSwift declares a dynamic library product. App integrations must embed
+`MisakiSwift.framework`; Gist's XcodeGen spec already documents this as a
+launch-time requirement.
+
+### Packaging Findings
+
+MisakiSwift is not lexicon-only. `EnglishG2P` constructs
+`EnglishFallbackNetwork`, which imports MLX and loads BART fallback weights.
+That creates two practical SDK rules:
+
+- Plain `swift run` / shell `swift test` can compile the package, but runtime
+  Misaki calls fail unless the MLX `mlx-swift_Cmlx.bundle/default.metallib` is
+  built and discoverable.
+- xcodebuild is the correct proof path for app developers because it builds the
+  MLX shader bundle. On this machine, `xcodebuild -downloadComponent
+  MetalToolchain` was required before xcodebuild could compile the Metal
+  shaders.
+
+MLX's own docs state iOS Simulator cannot be used to run MLX applications.
+Phase 1 therefore treats iOS Simulator as compile/resource validation only.
+Runtime phonemization proof is macOS now; iPhone runtime proof remains a later
+mandatory physical-device gate before iOS release readiness.
+
+### Drift Table
+
+Generated with:
+
+```bash
+node scripts/compare_misaki_botnet_phonemes.mjs \
+  --probe-bin /tmp/kokoro-tts-dd/Build/Products/Debug/kokoro-misaki-probe \
+  --dyld-framework-path /tmp/kokoro-tts-dd/Build/Products/Debug/PackageFrameworks
+```
+
+| Text | Misaki Swift | Botnet JS/eSpeak | Drift | Voice row consequence |
+| --- | --- | --- | --- | --- |
+| Empty string |  |  | empty output | Misaki throws `emptyOutput`; Botnet length 0 |
+| Hello world. | həlˈO wˈɜɹld. | həlˈoʊ wˈɜːld. | phoneme drift | Misaki 13, Botnet 14 |
+| Dr. Smith paid $12.50 for apples. | dˈɑktəɹ smˈɪθ pˈAd  fɔɹ ˈæpᵊlz. | dˈɑːktɚ smˈɪθ pˈeɪd twˈɛlv dˈɑːlɚz ænd fˈɪfti sˈɛnts fɔːɹ ˈæpəlz. | phoneme and normalization drift | Misaki 31, Botnet 65 |
+| Visit https://example.com, then email me@example.com. | vˈɪzət t:ɪɡzˈæmpəlkˌɑm, ðˈɛn ˈimˌAl mˌiɪɡzˈæmpəlkˌɑm. | vˈɪzɪt ˌeɪtʃtˌiːtˈiːpˌiːˈɛs:slˈæʃslæʃ ɛɡzˈæmpəlkˈɑːm, ðˈɛn ˈiːmeɪl mˌiː æt ɛɡzˈæmpəlkˈɑːm. | phoneme and normalization drift | Misaki 53, Botnet 90 |
+| I live in Reading. | ˌI lˈɪv ɪn ɹˈidɪŋ. | aɪ lˈɪv ɪn ɹˈiːdɪŋ. | phoneme drift | Misaki 18, Botnet 19 |
+
+No fixture was an exact match. This means Swift prep must not pretend Misaki is
+byte-identical to Botnet/eSpeak. Later phases must evaluate whether this drift
+is acceptable perceptually, whether Gist-compatible Misaki behavior should be
+the SDK default, and whether an eSpeak-compatible backend is needed for strict
+fleet parity.
+
+### Diagnostics Policy
+
+`KokoroDiagnosticsPolicy.privacySafeDefault` allows counters, timings, stable
+hashes, model identifiers, and typed error codes. Raw text and phoneme strings
+require explicit caller opt-in through `interactiveDebugPayloads`. The SDK
+policy refuses raw-payload persistence.
+
+### Verification
+
+Regression test:
+
+```bash
+swift test --package-path swift-tts
+```
+
+Result on 2026-06-28: passed 5 tests with 2 Misaki runtime tests skipped by
+default. The skipped tests require `KOKORO_RUN_MISAKI_RUNTIME_TESTS=1` only
+when MLX shader resources are available.
+
+Regression test:
+
+```bash
+swift test --package-path swift
+```
+
+Result on 2026-06-28: passed 45 tests. This proves the lower-floor
+`KokoroPipeline` package still builds without MisakiSwift.
+
+Regression test:
+
+```bash
+xcodebuild -scheme kokoro-misaki-probe \
+  -destination 'platform=macOS,arch=arm64' \
+  -derivedDataPath /tmp/kokoro-tts-dd build
+```
+
+Result on 2026-06-28: succeeded after installing Xcode's Metal Toolchain.
+
+Runtime probe:
+
+```bash
+DYLD_FRAMEWORK_PATH=/tmp/kokoro-tts-dd/Build/Products/Debug/PackageFrameworks \
+  /tmp/kokoro-tts-dd/Build/Products/Debug/kokoro-misaki-probe \
+  'Hello world.'
+```
+
+Result on 2026-06-28: produced non-empty Misaki phonemes offline.
+
+Regression test:
+
+```bash
+xcodebuild -scheme KokoroTTS \
+  -destination 'generic/platform=iOS Simulator' \
+  -derivedDataPath /tmp/kokoro-tts-iossim-dd build
+```
+
+Result on 2026-06-28: succeeded for generic iOS Simulator compile/resource
+validation. The machine also reported CoreSimulator
+`1051.54.0 < 1051.55.0`, so named simulator execution is unavailable here.
+Independent of that local mismatch, MLX documents that iOS Simulator cannot run
+MLX apps, so physical-device runtime proof remains required.
+
+### If This Recurs
+
+- [ ] Check that Xcode's Metal Toolchain is installed:
+      `xcodebuild -downloadComponent MetalToolchain`.
+- [ ] Use xcodebuild, not plain `swift run`, for runtime Misaki/MLX probes.
+- [ ] Embed `MisakiSwift.framework` in app targets.
+- [ ] Treat iOS Simulator as compile/resource proof only; use a physical iPhone
+      for runtime phonemization and synthesis proof.
+
+---
+
 ## Issue: Phase 0 Prep Self-Hosting — Resolved
 
 **First spotted:** 2026-06-28
