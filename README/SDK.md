@@ -58,7 +58,7 @@ Download the model snapshot and build a starter bundle:
 ```bash
 python3 scripts/download_models.py \
   --repo-id mattmireles/kokoro-coreml \
-  --revision c02933e179932e51909ff3b29466a7debac7d0e6 \
+  --revision <hf-revision> \
   --sdk-profile starter \
   --manifest-out /tmp/kokoro-download-manifest.json
 
@@ -67,11 +67,14 @@ node scripts/build_sdk_bundle.mjs \
   --compile-models 1 \
   --output /tmp/kokoro-sdk-starter \
   --repo-id mattmireles/kokoro-coreml \
-  --revision c02933e179932e51909ff3b29466a7debac7d0e6 \
+  --revision <hf-revision> \
   --download-manifest /tmp/kokoro-download-manifest.json
 
 node scripts/validate_sdk_bundle.mjs /tmp/kokoro-sdk-starter
 ```
+
+Use the latest Hugging Face revision for normal development, or pin the
+revision recorded in `sdk/SDKReleaseManifest.json` when reproducing a release.
 
 Use `--profile full` for every checked bucket and every local voice file. Use
 `--profile custom --voices af_heart,af_bella --buckets 15,30` for an app-specific
