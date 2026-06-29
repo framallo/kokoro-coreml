@@ -180,6 +180,7 @@ outputs_mps/
 # SwiftPM build output
 swift/.build/
 swift-tts/.build/
+examples/*/.build/
 *.profraw
 
 # CoreML model packages — downloaded from HF Hub, not stored in git.

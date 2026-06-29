@@ -80,6 +80,10 @@ public struct KokoroDownloadedModelStore: Sendable {
 
     /// Downloads one file with a small fixed retry budget.
     private func downloadWithRetry(_ url: URL) async throws -> Data {
+        if url.isFileURL {
+            try Task.checkCancellation()
+            return try Data(contentsOf: url)
+        }
         var lastError: Error?
         for _ in 0..<3 {
             try Task.checkCancellation()

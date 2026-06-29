@@ -640,16 +640,16 @@ British Misaki phonemizer for `b*` voices.
 
 - [ ] Add `Examples/KokoroDemoApp` with a minimal iOS/macOS UI: text field,
       voice picker, synthesize button, progress/error display, and playback.
-- [ ] Include two resource modes in the example when feasible: bundled starter
+- [x] Include two resource modes in the example when feasible: bundled starter
       resources for offline demos and downloaded manifest resources for the
       Gist-style app flow.
-- [ ] Extend the Phase 5 `swift-tts` `kokoro-sdk-smoke` executable into a
+- [x] Extend the Phase 5 `swift-tts` `kokoro-sdk-smoke` executable into a
       Phase 6 app/fixture smoke that writes a WAV and exercises bundled and
       downloaded resources.
-- [ ] Add a fresh consumer fixture outside `swift/` that depends on the package
+- [x] Add a fresh consumer fixture outside `swift/` that depends on the package
       as a developer would and uses only public API.
-- [ ] Build and run macOS smoke with a generated starter bundle.
-- [ ] Build iOS simulator smoke for compile/resource validation, even though
+- [x] Build and run macOS smoke with a generated starter bundle.
+- [x] Build iOS simulator smoke for compile/resource validation, even though
       simulator performance is not meaningful.
 - [ ] Build the raw-text demo against the actual `KokoroTTS` platform floor
       chosen for reliability; do not imply iOS 16 raw-text support if the
@@ -666,6 +666,15 @@ British Misaki phonemizer for `b*` voices.
 raw-text smoke green with evidence before any iOS SDK claim; no performance
 claim is made without target-device timing. If no device is available, mark the
 plan blocked for iOS release rather than complete.
+
+**Progress:** `swift build --package-path examples/KokoroConsumerFixture`
+passes; Xcode-built `KokoroConsumerFixture` runs on macOS from the starter
+bundle and writes `/tmp/kokoro-consumer-fixture.wav`; Xcode-built
+`kokoro-sdk-smoke` writes WAV output in both `--bundle` and
+`--manifest-url file:///.../HostedManifest.json --cache-dir ...` modes; generic
+iOS Simulator build for `KokoroConsumerFixture` passes. A paired iPhone is
+visible via `xcrun devicectl list devices`, so physical-device readiness remains
+blocked on adding the real app target and running the device smoke.
 
 ---
 

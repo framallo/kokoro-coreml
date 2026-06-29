@@ -8,6 +8,66 @@ do not put local-only analysis in `README/Guides/`.
 
 ---
 
+## Issue: Phase 6 Consumer Fixture and Smoke Foundation - In Progress
+
+**First spotted:** 2026-06-28
+**Status:** In progress
+
+Phase 6 started with the smallest reliable proof that the SDK can be consumed
+outside the implementation package:
+
+- `swift-tts` `kokoro-sdk-smoke` now supports explicit `--bundle`, hosted
+  `--manifest-url` plus `--cache-dir`, `--text`, `--voice`, and `--out`.
+- The hosted mode works with `file://` manifests for local validation and uses
+  the same `KokoroDownloadedModelStore` path as an app would use for HTTPS.
+- WAV output is written as mono 16-bit little-endian PCM for quick listening or
+  later `audio-judge` checks.
+- `examples/KokoroConsumerFixture` is a standalone SwiftPM executable package
+  with a local path dependency on `swift-tts` and imports only public
+  `KokoroTTS` APIs.
+
+Validation on 2026-06-28:
+
+```bash
+swift build --package-path examples/KokoroConsumerFixture
+
+xcodebuild -quiet \
+  -scheme KokoroConsumerFixture \
+  -destination 'platform=macOS,arch=arm64' \
+  -derivedDataPath /tmp/kokoro-consumer-fixture-dd \
+  build
+
+DYLD_FRAMEWORK_PATH=/tmp/kokoro-consumer-fixture-dd/Build/Products/Debug/PackageFrameworks \
+  /tmp/kokoro-consumer-fixture-dd/Build/Products/Debug/kokoro-consumer-fixture \
+  --bundle /tmp/kokoro-sdk-starter-compiled \
+  --text 'Hello world.' \
+  --out /tmp/kokoro-consumer-fixture.wav
+
+xcodebuild -quiet \
+  -scheme KokoroConsumerFixture \
+  -destination 'generic/platform=iOS Simulator' \
+  -derivedDataPath /tmp/kokoro-consumer-fixture-ios-dd \
+  build
+```
+
+Results: macOS consumer fixture printed
+`samples=37800 sampleRate=24000 duration=1.575` and wrote a 75,644-byte WAV.
+Generic iOS Simulator compile succeeded. The machine emits a CoreSimulator
+version warning (`1051.54.0` job vs `1051.55.0` framework), but the generic
+simulator build still completed.
+
+The paired devices visible to `xcrun devicectl list devices` are:
+
+- `Commas?`, iPhone 15 Pro Max, available paired
+- `Webcam`, iPhone 12 Pro, available paired
+
+Do not mark Phase 6 or iOS readiness complete yet. The next slice must add the
+real `Examples/KokoroDemoApp` app target and run first-call, warm-call,
+long-text, cancellation, memory, and background/foreground checks on a physical
+iPhone.
+
+---
+
 ## Issue: Phase 5 SDK Facade, Provider, and Runtime Smoke - Resolved
 
 **First spotted:** 2026-06-28
