@@ -638,7 +638,7 @@ British Misaki phonemizer for `b*` voices.
 
 **Tasks:**
 
-- [ ] Add `Examples/KokoroDemoApp` with a minimal iOS/macOS UI: text field,
+- [x] Add `examples/KokoroDemoApp` with a minimal iOS UI: text field,
       voice picker, synthesize button, progress/error display, and playback.
 - [x] Include two resource modes in the example when feasible: bundled starter
       resources for offline demos and downloaded manifest resources for the
@@ -651,7 +651,7 @@ British Misaki phonemizer for `b*` voices.
 - [x] Build and run macOS smoke with a generated starter bundle.
 - [x] Build iOS simulator smoke for compile/resource validation, even though
       simulator performance is not meaningful.
-- [ ] Build the raw-text demo against the actual `KokoroTTS` platform floor
+- [x] Build the raw-text demo against the actual `KokoroTTS` platform floor
       chosen for reliability; do not imply iOS 16 raw-text support if the
       dependable path is iOS 18+.
 - [ ] Run mandatory physical-device smoke before iOS readiness: first call,
@@ -672,9 +672,13 @@ passes; Xcode-built `KokoroConsumerFixture` runs on macOS from the starter
 bundle and writes `/tmp/kokoro-consumer-fixture.wav`; Xcode-built
 `kokoro-sdk-smoke` writes WAV output in both `--bundle` and
 `--manifest-url file:///.../HostedManifest.json --cache-dir ...` modes; generic
-iOS Simulator build for `KokoroConsumerFixture` passes. A paired iPhone is
-visible via `xcrun devicectl list devices`, so physical-device readiness remains
-blocked on adding the real app target and running the device smoke.
+iOS Simulator builds for `KokoroConsumerFixture` and `KokoroDemoApp` pass.
+`KokoroDemoApp` builds, installs, and launches on paired iPhone 15 Pro Max
+`8A12AEE8-0136-50BE-8EB3-91650E467F15`; first-call downloaded-manifest
+synthesis completed with
+`KOKORO_DEMO_DONE samples=37800 sampleRate=24000 duration=1.575`. Physical
+readiness remains open until warm-call, long-text, cancellation,
+background/foreground, and memory-pressure checks run.
 
 ---
 

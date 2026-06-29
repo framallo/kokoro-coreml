@@ -1,0 +1,29 @@
+name: KokoroDemoApp
+options:
+  bundleIdPrefix: com.mattmireles
+  deploymentTarget:
+    iOS: "18.0"
+packages:
+  KokoroTTS:
+    path: ../../swift-tts
+targets:
+  KokoroDemoApp:
+    type: application
+    platform: iOS
+    sources:
+      - path: Sources
+    dependencies:
+      - package: KokoroTTS
+        product: KokoroTTS
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.mattmireles.KokoroDemoApp
+        DEVELOPMENT_TEAM: 6ETYBAJKY8
+        CODE_SIGN_STYLE: Automatic
+        GENERATE_INFOPLIST_FILE: YES
+        INFOPLIST_KEY_UILaunchScreen_Generation: YES
+        INFOPLIST_KEY_NSAppTransportSecurity_NSAllowsArbitraryLoads: YES
+        INFOPLIST_KEY_NSLocalNetworkUsageDescription: KokoroDemoApp downloads a local development model manifest from this Mac during SDK validation.
+        SWIFT_VERSION: "5.9"
+        IPHONEOS_DEPLOYMENT_TARGET: "18.0"
+        TARGETED_DEVICE_FAMILY: "1"

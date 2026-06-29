@@ -62,9 +62,57 @@ The paired devices visible to `xcrun devicectl list devices` are:
 - `Webcam`, iPhone 12 Pro, available paired
 
 Do not mark Phase 6 or iOS readiness complete yet. The next slice must add the
-real `Examples/KokoroDemoApp` app target and run first-call, warm-call,
-long-text, cancellation, memory, and background/foreground checks on a physical
-iPhone.
+remaining warm-call, long-text, cancellation, memory, and
+background/foreground checks on a physical iPhone.
+
+### Demo App Evidence
+
+`examples/KokoroDemoApp` was added as an XcodeGen iOS app target. It uses the
+public `KokoroTTS` API, a manifest URL field, text editor, voice picker,
+synthesize button, status text, and `AVAudioEngine` playback. Launch arguments
+support device automation:
+
+```bash
+xcodegen generate --spec examples/KokoroDemoApp/project.yml
+xcodebuild -quiet \
+  -scheme KokoroDemoApp \
+  -destination 'generic/platform=iOS Simulator' \
+  -derivedDataPath /tmp/kokoro-demo-ios-sim-dd \
+  build
+xcodebuild -quiet \
+  -scheme KokoroDemoApp \
+  -destination 'id=8A12AEE8-0136-50BE-8EB3-91650E467F15' \
+  -derivedDataPath /tmp/kokoro-demo-device-dd \
+  build
+xcrun devicectl device install app \
+  --device 8A12AEE8-0136-50BE-8EB3-91650E467F15 \
+  /tmp/kokoro-demo-device-dd/Build/Products/Debug-iphoneos/KokoroDemoApp.app
+xcrun devicectl device process launch \
+  --device 8A12AEE8-0136-50BE-8EB3-91650E467F15 \
+  --terminate-existing \
+  --console \
+  --timeout 120 \
+  com.mattmireles.KokoroDemoApp \
+  --auto-run \
+  --manifest-url http://192.168.4.47:8766/HostedManifest.json \
+  --text 'Hello world.'
+```
+
+First device run failed with `NSURLErrorDomain Code=-1009` and
+`Local network prohibited`. Adding `NSLocalNetworkUsageDescription` to the
+generated Info.plist fixed the local-network permission path.
+
+Second device run on `Commas?` (iPhone 15 Pro Max) succeeded:
+
+```text
+KOKORO_DEMO_DONE samples=37800 sampleRate=24000 duration=1.575
+```
+
+The local HTTP server observed the phone at `192.168.4.32` downloading
+`HostedManifest.json`, `KokoroRuntimeManifest.json`, all starter duration
+packages, `kokoro_f0ntrain_t600`, 15-second decoder-pre/HAR-post packages,
+`runtime/hnsf_weights.json`, `runtime/kokoro-vocab.json`, and
+`voices/af_heart.bin`.
 
 ---
 
