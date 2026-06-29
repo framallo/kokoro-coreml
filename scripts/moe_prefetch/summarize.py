@@ -139,6 +139,29 @@ def summarize_stage0(args: argparse.Namespace) -> int:
         if config.get("powermetrics_path")
         else config.get("powermetrics_error", "not captured or no error recorded")
     )
+    valid_rerun = ""
+    if fs_usage_missing:
+        output_dir = args.input.parent
+        valid_rerun = f"""
+### Valid Rerun Path
+
+Run Stage 0 from a terminal that can accept a sudo password prompt:
+
+```bash
+sudo -v
+python scripts/moe_prefetch/run_stage0_envelope.py \\
+  --thresholds outputs/moe_prefetch/stage0/thresholds.json \\
+  --output-dir {output_dir} \\
+  --fs-usage-sudo-mode interactive \\
+  --capture-powermetrics
+python scripts/moe_prefetch/summarize.py stage0 \\
+  --input {args.input} \\
+  --notes {args.notes}
+```
+
+Do not proceed to Stage 1 unless the summary reports `fs_usage proof` as true
+for every accepted read cell.
+"""
     stage0_markdown = f"""## Stage 0: Hardware Envelope
 
 **Status:** Complete.
@@ -169,6 +192,7 @@ Oracle bandwidth ceiling: `{ceiling_tps:.6f}` tokens/sec.
 ### Decision
 
 {decision}
+{valid_rerun}
 """
     args.notes.write_text(_replace_stage0_section(args.notes.read_text(), stage0_markdown))
     print(f"wrote {output}")

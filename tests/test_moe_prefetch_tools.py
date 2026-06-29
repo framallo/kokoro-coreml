@@ -3,6 +3,7 @@ import subprocess
 import sys
 from pathlib import Path
 
+from scripts.moe_prefetch.run_stage0_envelope import fs_usage_command
 from scripts.moe_prefetch.schema import (
     estimate_expert_bytes,
     model_inventory_payload,
@@ -69,6 +70,30 @@ def test_model_inventory_cli_writes_inventory_and_thresholds(tmp_path: Path) -> 
     assert inventory["active_expert_bytes_per_token"] == 5_637_144_576
     assert thresholds["speed_win_percent"] == 25.0
     assert thresholds["trivial_margin_percent"] == 10.0
+
+
+def test_stage0_fs_usage_command_supports_safe_and_interactive_sudo() -> None:
+    assert fs_usage_command(pid=123, timeout_s=20, sudo_mode="noninteractive") == [
+        "sudo",
+        "-n",
+        "fs_usage",
+        "-w",
+        "-f",
+        "diskio",
+        "-t",
+        "20",
+        "123",
+    ]
+    assert fs_usage_command(pid=123, timeout_s=20, sudo_mode="interactive") == [
+        "sudo",
+        "fs_usage",
+        "-w",
+        "-f",
+        "diskio",
+        "-t",
+        "20",
+        "123",
+    ]
 
 
 def test_stage0_summarize_kills_on_oracle_bandwidth_ceiling(tmp_path: Path) -> None:

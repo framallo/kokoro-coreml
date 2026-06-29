@@ -48,6 +48,25 @@ Oracle bandwidth ceiling: `1.082934` tokens/sec.
 
 KILL: missing fs_usage disk I/O proof for accepted measurements.
 
+### Valid Rerun Path
+
+Run Stage 0 from a terminal that can accept a sudo password prompt:
+
+```bash
+sudo -v
+python scripts/moe_prefetch/run_stage0_envelope.py \
+  --thresholds outputs/moe_prefetch/stage0/thresholds.json \
+  --output-dir outputs/moe_prefetch/stage0 \
+  --fs-usage-sudo-mode interactive \
+  --capture-powermetrics
+python scripts/moe_prefetch/summarize.py stage0 \
+  --input outputs/moe_prefetch/stage0/results.json \
+  --notes README/Notes/moe-ssd-dram-prefetch-results.md
+```
+
+Do not proceed to Stage 1 unless the summary reports `fs_usage proof` as true
+for every accepted read cell.
+
 ## Stage 1: Router Trace and Predictor Replay
 
 **Status:** Not run. Stage 0 killed before router tracing because the session

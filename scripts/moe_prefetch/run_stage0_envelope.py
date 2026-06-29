@@ -26,6 +26,16 @@ def _parse_args() -> argparse.Namespace:
     parser.add_argument("--queue-depth", type=int, default=1)
     parser.add_argument("--block-count", type=int, default=4)
     parser.add_argument("--skip-fs-usage", action="store_true")
+    parser.add_argument(
+        "--fs-usage-sudo-mode",
+        choices=("noninteractive", "interactive"),
+        default="noninteractive",
+        help=(
+            "Use sudo -n by default so automation never hangs. Use "
+            "'interactive' only from a human terminal that can answer the "
+            "sudo password prompt for root-only fs_usage capture."
+        ),
+    )
     parser.add_argument("--fs-usage-timeout-s", type=int, default=20)
     parser.add_argument("--capture-powermetrics", action="store_true")
     parser.add_argument("--powermetrics-sample-rate-ms", type=int, default=500)
@@ -56,6 +66,26 @@ def _ensure_random_file(path: Path, size: int) -> None:
             remaining -= len(chunk)
 
 
+def fs_usage_command(*, pid: int, timeout_s: int, sudo_mode: str) -> list[str]:
+    """Build the root-only `fs_usage -f diskio` command for a benchmark PID.
+
+    Called by `_run_cell` after launching `direct_read_bench`. The
+    noninteractive default is deliberately safe for automation; interactive
+    mode exists so a human terminal can provide the sudo password and produce
+    the required Stage 0 proof without changing the measurement contract.
+    """
+    sudo_cmd = ["sudo"] if sudo_mode == "interactive" else ["sudo", "-n"]
+    return sudo_cmd + [
+        "fs_usage",
+        "-w",
+        "-f",
+        "diskio",
+        "-t",
+        str(timeout_s),
+        str(pid),
+    ]
+
+
 def _run_cell(
     *,
     binary: Path,
@@ -66,6 +96,7 @@ def _run_cell(
     queue_depth: int,
     pattern: str,
     capture_fs_usage: bool,
+    fs_usage_sudo_mode: str,
     fs_usage_timeout_s: int,
 ) -> dict[str, Any]:
     command = [
@@ -92,17 +123,11 @@ def _run_cell(
     fs_usage_path = output_dir / f"fs_usage_{pattern}_qd{queue_depth}.txt"
     fs_usage_error = ""
     if capture_fs_usage:
-        fs_cmd = [
-            "sudo",
-            "-n",
-            "fs_usage",
-            "-w",
-            "-f",
-            "diskio",
-            "-t",
-            str(fs_usage_timeout_s),
-            str(bench.pid),
-        ]
+        fs_cmd = fs_usage_command(
+            pid=bench.pid,
+            timeout_s=fs_usage_timeout_s,
+            sudo_mode=fs_usage_sudo_mode,
+        )
         try:
             with fs_usage_path.open("w") as f:
                 subprocess.run(fs_cmd, stdout=f, stderr=subprocess.PIPE, text=True, check=True)
@@ -175,6 +200,7 @@ def main() -> int:
                     queue_depth=args.queue_depth,
                     pattern=pattern,
                     capture_fs_usage=not args.skip_fs_usage,
+                    fs_usage_sudo_mode=args.fs_usage_sudo_mode,
                     fs_usage_timeout_s=args.fs_usage_timeout_s,
                 )
             )
@@ -192,6 +218,7 @@ def main() -> int:
         "config": {
             "iterations": args.iterations,
             "queue_depth": args.queue_depth,
+            "fs_usage_sudo_mode": args.fs_usage_sudo_mode,
             "block_count": args.block_count,
             "data_file": str(data_file),
             "binary": str(binary),

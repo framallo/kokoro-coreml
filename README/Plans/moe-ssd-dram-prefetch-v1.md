@@ -210,6 +210,14 @@ python scripts/moe_prefetch/run_stage0_envelope.py \
   --thresholds outputs/moe_prefetch/stage0/thresholds.json \
   --output-dir outputs/moe_prefetch/stage0
 
+# If non-interactive sudo cannot run fs_usage, rerun from a human terminal:
+sudo -v
+python scripts/moe_prefetch/run_stage0_envelope.py \
+  --thresholds outputs/moe_prefetch/stage0/thresholds.json \
+  --output-dir outputs/moe_prefetch/stage0 \
+  --fs-usage-sudo-mode interactive \
+  --capture-powermetrics
+
 python scripts/moe_prefetch/summarize.py stage0 \
   --input outputs/moe_prefetch/stage0/results.json \
   --notes README/Notes/moe-ssd-dram-prefetch-results.md
