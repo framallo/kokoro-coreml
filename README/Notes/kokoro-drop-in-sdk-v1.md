@@ -48,7 +48,7 @@ swift build --package-path /tmp/kokoro-sdk-doc-check
 git diff --check
 ```
 
-Results: drift check passed; `swift-tts` passed 41 tests with 2 Misaki runtime
+Results: drift check passed; `swift-tts` passed 42 tests with 2 Misaki runtime
 tests skipped unless `KOKORO_RUN_MISAKI_RUNTIME_TESTS=1`; `swift` passed 46
 tests; Botnet parity compared 12 fixtures; runtime assets verified vocab and
 hn-NSF hashes; an external SwiftPM package using the documented local path and
@@ -326,8 +326,8 @@ swift test --package-path swift-tts \
 swift test --package-path swift-tts
 ```
 
-Results on 2026-06-28: the focused test passed; the full `swift-tts` suite
-passed 41 tests with 2 Misaki runtime tests skipped unless
+Results on 2026-06-28: the focused test passed; the full `swift-tts` suite now
+passes 42 tests with 2 Misaki runtime tests skipped unless
 `KOKORO_RUN_MISAKI_RUNTIME_TESTS=1`.
 
 The test uses the JS phonemizer output for `Hello world.`
@@ -412,6 +412,42 @@ voice, downloaded-cache, and model-package paths before reads or writes;
 validate duration and per-bucket stage packages at load; make hosted downloads
 preserve cancellation; honor `KokoroSynthesisOptions.maxChunkSeconds`; and add
 targeted tests for those edge cases.
+
+### Startup and Main-Actor Safety
+
+Follow-up work found that `KokoroTTS.load` was `async` but had no suspension
+point, so synchronous manifest/digest/vocab/hn-NSF setup could execute on the
+caller's executor. It also constructed `KokoroMisakiPhonemizer` eagerly, which
+constructed MisakiSwift `EnglishG2P` and touched MLX before any text prep. That
+is bad app startup behavior.
+
+Fixes applied on 2026-06-28:
+
+- `KokoroTTS.load(resources:computePolicy:)` now runs synchronous load work in
+  `Task.detached(priority: .userInitiated)` and cancels the detached load task
+  when the caller cancels.
+- `KokoroMisakiPhonemizer` now constructs `EnglishG2P` lazily on the first
+  `phonemize` call under `NSLock` and serializes each Misaki call because
+  Misaki owns mutable `NLTagger` state. Loading the SDK does not initialize
+  Misaki/MLX, and shared public phonemizer instances do not race setup or
+  tagging.
+- `KokoroFacadeTests/testFacadeLoadDefersModelCompilationAndMisakiSetup` calls
+  `KokoroTTS.load` from `MainActor` against fake `.mlpackage` directories. The
+  test would fail if `load` compiled Core ML models or eagerly touched Misaki.
+
+Validation:
+
+```bash
+swift test --package-path swift-tts \
+  --filter KokoroFacadeTests/testFacadeLoadDefersModelCompilationAndMisakiSetup
+swift test --package-path swift-tts
+node scripts/check_sdk_drift.mjs
+git diff --check
+```
+
+Results: focused test passed; full `swift-tts` passed 42 tests with 2 Misaki
+runtime tests skipped unless `KOKORO_RUN_MISAKI_RUNTIME_TESTS=1`; SDK drift
+check and whitespace check passed.
 
 A final focused cross-agent pass found release-safety issues in the bundle
 builder and SDK surface: destructive `--output` deletion, local artifact

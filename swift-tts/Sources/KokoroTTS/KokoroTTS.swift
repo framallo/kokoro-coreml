@@ -62,6 +62,28 @@ public actor KokoroTTS {
         resources: KokoroResourceProvider,
         computePolicy: KokoroComputePolicy = .gistDefault
     ) async throws -> KokoroTTS {
+        let loadTask: Task<KokoroTTS, Error> = Task.detached(priority: .userInitiated) {
+            try Task.checkCancellation()
+            return try loadSynchronously(resources: resources, computePolicy: computePolicy)
+        }
+        return try await withTaskCancellationHandler {
+            try await loadTask.value
+        } onCancel: {
+            loadTask.cancel()
+        }
+    }
+
+    /// Performs synchronous resource validation and facade construction.
+    ///
+    /// Called only from ``load(resources:computePolicy:)`` inside a detached
+    /// task so manifest reads, digest checks, vocab loading, and hn-NSF loading
+    /// cannot run on a caller's main-actor executor. Core ML compilation is not
+    /// performed here; callers use ``prewarm(text:voice:options:)`` to trigger
+    /// lazy model compilation before the first user-visible synthesis.
+    private static func loadSynchronously(
+        resources: KokoroResourceProvider,
+        computePolicy: KokoroComputePolicy
+    ) throws -> KokoroTTS {
         let modelProvider = try KokoroSDKModelProvider(resources: resources, computePolicy: computePolicy)
         let vocab = try modelProvider.vocab()
         let americanTextProcessor = KokoroTextProcessor(

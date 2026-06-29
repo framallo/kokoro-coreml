@@ -94,6 +94,11 @@ let audio = try await tts.synthesize("Hello world.", voice: .afHeart)
 let buffer = try audio.makePCMBuffer()
 ```
 
+`KokoroTTS.load` validates manifests, hashes, vocab, and hn-NSF weights without
+compiling Core ML models or initializing Misaki/MLX on the caller's main actor.
+Call `prewarm(...)` from app startup or another background task to compile and
+cache the selected models before the first user-visible synthesis.
+
 `KokoroAudio.samples` is mono Float PCM. `KokoroAudio.sampleRate` is `24000`.
 Use `makePCMBuffer()` when AVFoundation is available.
 

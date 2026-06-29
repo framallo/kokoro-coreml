@@ -50,7 +50,7 @@ developer diagnostic path, not an app runtime dependency.
 - [x] Keep `KokoroPipeline` compatible with iOS 16+ and macOS 13+ while making
       the sibling `swift-tts/` package explicitly target the newest OS floor
       that makes raw-text synthesis reliable.
-- [ ] Support explicit resource discovery, background model compilation, typed
+- [x] Support explicit resource discovery, background model compilation, typed
       errors, and no main-thread stalls.
 - [x] Provide an example iOS/macOS app and a CLI smoke test that a new developer
       can run without reading benchmark internals.
@@ -627,6 +627,13 @@ by adding a destructive-output guard and bundle marker, requiring
 `compiled/` from `HostedManifest.json`, rejecting symlinked roots, enforcing
 schema version 1, aligning starter constants to `af_heart`, and selecting the
 British Misaki phonemizer for `b*` voices.
+The startup path is now explicitly app-safe: `KokoroTTS.load` runs synchronous
+manifest/digest/vocab/hn-NSF validation inside `Task.detached`, does not compile
+Core ML models, and no longer initializes Misaki/MLX until text prep is
+actually requested. `KokoroFacadeTests/testFacadeLoadDefersModelCompilationAndMisakiSetup`
+loads a fake-model bundle from `MainActor`; it would fail if load compiled Core
+ML packages or touched eager Misaki runtime setup. `swift test --package-path
+swift-tts` passed 42 tests with 2 opt-in Misaki runtime skips after this fix.
 
 ---
 
@@ -693,8 +700,8 @@ and memory-pressure proof run. Prepared-input parity is covered by
 which uses the JS phonemizer output for `Hello world.` and proves Swift prep
 produces the legacy request-contract padded IDs, mask, voice row, speed, and
 `KokoroSynthesisRequest` when the phonemes and voice row match. It does not
-claim perceptual audio parity. `swift test --package-path swift-tts` passed 41
-tests with 2 Misaki runtime tests skipped after this coverage landed.
+claim perceptual audio parity. `swift test --package-path swift-tts` now passes
+42 tests with 2 Misaki runtime tests skipped after this coverage landed.
 `KokoroDemoApp` now emits `KOKORO_DEMO_SCENE_PHASE` sentinels on appear and
 scene-phase changes; generic iOS build with `CODE_SIGNING_ALLOWED=NO` passed
 after this change. A physical-device rerun against paired iPhone 12 Pro
@@ -797,7 +804,7 @@ evidence, and must be rerun before remote HF publication.
       without hard-coding Gist infrastructure.
 - [x] Long text is chunked deterministically and never silently truncates.
 - [x] Missing assets produce actionable typed errors.
-- [ ] First-run model compilation cannot block the main actor.
+- [x] First-run model compilation cannot block the main actor.
 - [x] Documentation and model card usage match the actual SDK package identity
       and public API.
 - [ ] iOS readiness includes physical-device background/foreground and

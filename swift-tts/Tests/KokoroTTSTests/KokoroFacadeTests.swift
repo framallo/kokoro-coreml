@@ -61,6 +61,13 @@ final class KokoroFacadeTests: XCTestCase {
         XCTAssertEqual(try provider.compiledModelsDirectoryURL(), compiled)
     }
 
+    /// Verifies facade load defers Core ML compilation and Misaki/MLX setup.
+    func testFacadeLoadDefersModelCompilationAndMisakiSetup() async throws {
+        let root = try makeBundleRoot()
+
+        _ = try await loadFacadeFromMainActor(resources: .directory(root))
+    }
+
     /// Verifies hosted manifest paths cannot escape the downloaded cache.
     func testDownloadedStoreRejectsPathEscapes() throws {
         let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
@@ -403,5 +410,17 @@ final class KokoroFacadeTests: XCTestCase {
     /// Computes a SHA-256 digest string.
     private func sha256(_ data: Data) -> String {
         SHA256.hash(data: data).map { String(format: "%02x", $0) }.joined()
+    }
+
+    /// Calls facade load while isolated to `MainActor`.
+    ///
+    /// The fake `.mlpackage` directories in `makeBundleRoot()` are not valid
+    /// Core ML packages. If `KokoroTTS.load` compiles models, this helper throws
+    /// before returning. The SwiftPM test environment also lacks Misaki's MLX
+    /// runtime bundle, so eager Misaki setup would fail here. Both costs belong
+    /// to `prewarm`, `prepare`, or synthesis.
+    @MainActor
+    private func loadFacadeFromMainActor(resources: KokoroResourceProvider) async throws -> KokoroTTS {
+        try await KokoroTTS.load(resources: resources)
     }
 }
