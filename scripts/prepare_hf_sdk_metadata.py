@@ -9,8 +9,9 @@ This script intentionally uploads only lightweight metadata and docs:
 - sdk/<profile>/KokoroRuntimeManifest.json for each checked bundle profile.
 - sdk/SDKReleaseManifest.json, which records checksums and profile summaries.
 
-Model packages and voice binaries remain the canonical large artifacts already
-hosted in the Hugging Face model repo.
+Model packages remain the canonical large artifacts already hosted in the
+Hugging Face model repo. Starter runtime and voice files are copied to the HF
+root so the top-level HostedManifest.json is directly hydratable.
 """
 
 from __future__ import annotations
@@ -187,6 +188,27 @@ def copy_manifest_pair(profile: ProfileInput, output: Path, sdk_commit: str, rep
     }
 
 
+def copy_top_level_hosted_files(starter_bundle: Path, output: Path) -> list[dict[str, Any]]:
+    """Copy starter hosted files that are not already canonical HF model paths."""
+
+    hosted = load_json(starter_bundle / "HostedManifest.json")
+    records = []
+    for entry in hosted.get("files") or []:
+        relative_path = entry.get("path")
+        if not isinstance(relative_path, str):
+            continue
+        if relative_path == "KokoroRuntimeManifest.json" or relative_path.startswith("coreml/"):
+            continue
+        source = starter_bundle / relative_path
+        if not source.is_file():
+            raise SystemExit(f"starter HostedManifest references missing local file: {relative_path}")
+        destination = output / relative_path
+        destination.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copy2(source, destination)
+        records.append(file_record(output, destination))
+    return sorted(records, key=lambda record: record["path"])
+
+
 def prepare_payload(args: argparse.Namespace) -> Path:
     """Create a deterministic Hugging Face metadata payload directory."""
 
@@ -216,10 +238,7 @@ def prepare_payload(args: argparse.Namespace) -> Path:
     starter_profile_dir = output / "sdk" / "starter"
     shutil.copy2(args.starter_bundle.resolve() / "HostedManifest.json", output / "HostedManifest.json")
     shutil.copy2(starter_profile_dir / "KokoroRuntimeManifest.json", output / "KokoroRuntimeManifest.json")
-    runtime_dir = output / "runtime"
-    runtime_dir.mkdir()
-    shutil.copy2(args.starter_bundle.resolve() / "runtime" / "kokoro-vocab.json", runtime_dir / "kokoro-vocab.json")
-    shutil.copy2(args.starter_bundle.resolve() / "runtime" / "hnsf_weights.json", runtime_dir / "hnsf_weights.json")
+    top_level_hosted_files = copy_top_level_hosted_files(args.starter_bundle.resolve(), output)
 
     manifest = {
         "schema_version": 1,
@@ -229,10 +248,7 @@ def prepare_payload(args: argparse.Namespace) -> Path:
         "model_card": file_record(output, readme_dest),
         "top_level_hosted_manifest": file_record(output, output / "HostedManifest.json"),
         "top_level_runtime_manifest": file_record(output, output / "KokoroRuntimeManifest.json"),
-        "top_level_runtime_files": [
-            file_record(output, runtime_dir / "kokoro-vocab.json"),
-            file_record(output, runtime_dir / "hnsf_weights.json"),
-        ],
+        "top_level_hosted_files": top_level_hosted_files,
         "profiles": profile_records,
     }
     release_manifest = output / "sdk" / "SDKReleaseManifest.json"

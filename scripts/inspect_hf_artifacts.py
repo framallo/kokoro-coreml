@@ -73,7 +73,7 @@ def inspect_artifacts(info: dict[str, Any], repo_id: str, revision: str | None) 
         "files": [],
     })
     voices = []
-    top_level_runtime_metadata = set()
+    sdk_metadata = set()
     sibling_paths = set()
 
     for sibling in siblings:
@@ -103,14 +103,16 @@ def inspect_artifacts(info: dict[str, Any], repo_id: str, revision: str | None) 
             "HostedManifest.json",
             "runtime/kokoro-vocab.json",
             "runtime/hnsf_weights.json",
+            "voices/af_heart.bin",
             "sdk/SDKReleaseManifest.json",
             "sdk/starter/KokoroRuntimeManifest.json",
             "sdk/full/KokoroRuntimeManifest.json",
         }:
-            top_level_runtime_metadata.add(path)
+            sdk_metadata.add(path)
 
     resolved_revision = info.get("sha")
     hosted_manifest = None
+    sdk_release_manifest = None
     unresolved_hosted_files = []
     if isinstance(resolved_revision, str) and "HostedManifest.json" in sibling_paths:
         hosted_manifest = fetch_repo_json(repo_id, resolved_revision, "HostedManifest.json")
@@ -119,12 +121,15 @@ def inspect_artifacts(info: dict[str, Any], repo_id: str, revision: str | None) 
                 hosted_path = entry.get("path")
                 if isinstance(hosted_path, str) and hosted_path not in sibling_paths:
                     unresolved_hosted_files.append(hosted_path)
+    if isinstance(resolved_revision, str) and "sdk/SDKReleaseManifest.json" in sibling_paths:
+        sdk_release_manifest = fetch_repo_json(repo_id, resolved_revision, "sdk/SDKReleaseManifest.json")
 
     required_sdk_metadata = {
         "KokoroRuntimeManifest.json",
         "HostedManifest.json",
         "runtime/kokoro-vocab.json",
         "runtime/hnsf_weights.json",
+        "voices/af_heart.bin",
         "sdk/SDKReleaseManifest.json",
         "sdk/starter/KokoroRuntimeManifest.json",
         "sdk/full/KokoroRuntimeManifest.json",
@@ -150,9 +155,10 @@ def inspect_artifacts(info: dict[str, Any], repo_id: str, revision: str | None) 
             for path, value in sorted(packages.items())
         ],
         "voices": sorted(voices, key=lambda item: item["path"]),
-        "missing_sdk_metadata": sorted(required_sdk_metadata - top_level_runtime_metadata),
+        "missing_sdk_metadata": sorted(required_sdk_metadata - sdk_metadata),
         "hosted_manifest_file_count": len((hosted_manifest or {}).get("files") or []),
         "unresolved_hosted_files": sorted(unresolved_hosted_files),
+        "sdk_release_manifest": sdk_release_manifest,
     }
     return report
 
