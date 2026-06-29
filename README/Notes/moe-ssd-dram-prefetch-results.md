@@ -42,7 +42,7 @@ Oracle bandwidth ceiling: `1.082934` tokens/sec.
 
 - `fs_usage`: missing for at least one accepted read cell. This run is not
   valid SSD proof.
-- `powermetrics`: `not captured or no error recorded`
+- `powermetrics`: captured at `outputs/moe_prefetch/stage0/powermetrics_stage0.plist`
 
 ### Decision
 

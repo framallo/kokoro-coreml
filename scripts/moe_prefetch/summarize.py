@@ -110,6 +110,12 @@ def summarize_stage0(args: argparse.Namespace) -> int:
         )
         for cell in cells
     )
+    config = payload.get("config", {})
+    powermetrics_status = (
+        f"captured at `{config['powermetrics_path']}`"
+        if config.get("powermetrics_path")
+        else config.get("powermetrics_error", "not captured or no error recorded")
+    )
     stage0_markdown = f"""## Stage 0: Hardware Envelope
 
 **Status:** Complete.
@@ -135,7 +141,7 @@ Oracle bandwidth ceiling: `{ceiling_tps:.6f}` tokens/sec.
 
 - `fs_usage`: missing for at least one accepted read cell. This run is not
   valid SSD proof.
-- `powermetrics`: `{payload.get("config", {}).get("powermetrics_error", "") or "not captured or no error recorded"}`
+- `powermetrics`: {powermetrics_status}
 
 ### Decision
 
