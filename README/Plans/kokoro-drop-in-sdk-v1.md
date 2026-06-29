@@ -647,10 +647,11 @@ swift-tts` passed 42 tests with 2 opt-in Misaki runtime skips after this fix.
 
 - [x] Add `examples/KokoroDemoApp` with a minimal iOS UI: text field,
       voice picker, synthesize button, progress/error display, and playback.
-- [ ] Include two resource modes in the example when feasible: bundled starter
+- [x] Include two resource modes in the example when feasible: bundled starter
       resources for offline demos and downloaded manifest resources for the
-      Gist-style app flow. The CLI/fixture covers both modes; the iOS demo app
-      currently covers downloaded manifest mode only.
+      Gist-style app flow. The iOS demo app now has Download/Bundled modes;
+      bundled mode loads `.appBundle(.main, subdirectory:)` when an app target
+      includes a generated runtime directory.
 - [x] Extend the Phase 5 `swift-tts` `kokoro-sdk-smoke` executable into a
       Phase 6 app/fixture smoke that writes a WAV and exercises bundled and
       downloaded resources.
@@ -709,6 +710,10 @@ after this change. A physical-device rerun against paired iPhone 12 Pro
 the device was locked and unavailable. iOS release readiness remains blocked
 until an unlocked physical iPhone produces scene-phase background/foreground
 logs and real memory-pressure evidence.
+The demo app also now exposes both resource modes: `--resource-mode downloaded
+--manifest-url ...` for hosted-manifest validation and `--resource-mode bundled
+--bundle-subdirectory KokoroRuntime` for apps that embed a generated runtime
+directory. Generic iOS build passed after this UI/automation change.
 
 ---
 

@@ -175,6 +175,16 @@ The demo uses `NSAllowsLocalNetworking` for local manifest testing. A fresh
 install may still require the user to accept the iOS local-network permission
 prompt.
 
+The demo supports both resource paths:
+
+```bash
+--resource-mode downloaded --manifest-url http://<mac-ip>:8766/HostedManifest.json
+--resource-mode bundled --bundle-subdirectory KokoroRuntime
+```
+
+Use bundled mode only after adding a generated runtime directory with
+`KokoroRuntimeManifest.json` to the app target.
+
 ## Release Checklist
 
 Run these before publishing a new SDK snapshot:

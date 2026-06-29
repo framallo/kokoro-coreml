@@ -315,6 +315,41 @@ is intentionally blocked until an unlocked physical iPhone records
 event. Prior process suspend/resume and physical-footprint logging remain useful
 smoke evidence, but they are not substitutes for those two missing proofs.
 
+### Demo App Resource Modes
+
+The iOS demo app now supports both V1 resource modes:
+
+- `downloaded`: the existing hosted-manifest path using
+  `KokoroDownloadedModelStore`.
+- `bundled`: an offline app-bundle path using
+  `.appBundle(.main, subdirectory:)`.
+
+Manual UI uses a segmented resource-mode picker. Launch automation accepts:
+
+```bash
+--resource-mode downloaded --manifest-url http://<mac-ip>:8766/HostedManifest.json
+--resource-mode bundled --bundle-subdirectory KokoroRuntime
+```
+
+The bundled path requires the app target to include a generated runtime
+directory containing `KokoroRuntimeManifest.json`. This change proves the demo
+app exposes the same two resource-provider modes as the SDK; the prior physical
+iPhone evidence still proves downloaded mode only.
+
+Validation on 2026-06-28:
+
+```bash
+xcodebuild -quiet \
+  -project examples/KokoroDemoApp/KokoroDemoApp.xcodeproj \
+  -scheme KokoroDemoApp \
+  -destination 'generic/platform=iOS' \
+  -derivedDataPath /tmp/kokoro-demo-ios-generic-dd \
+  CODE_SIGNING_ALLOWED=NO \
+  build
+```
+
+Result: generic iOS build passed.
+
 ### Prepared-Input Boundary Evidence
 
 Prepared-input parity is now covered by a Swift regression test instead of a

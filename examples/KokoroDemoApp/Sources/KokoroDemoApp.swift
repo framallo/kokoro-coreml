@@ -20,10 +20,22 @@ struct DemoView: View {
     var body: some View {
         NavigationStack {
             Form {
-                Section("Manifest") {
-                    TextField("URL", text: $model.manifestURLString, axis: .vertical)
-                        .textInputAutocapitalization(.never)
-                        .autocorrectionDisabled()
+                Section("Resources") {
+                    Picker("Mode", selection: $model.resourceMode) {
+                        ForEach(DemoResourceMode.allCases) { mode in
+                            Text(mode.title).tag(mode)
+                        }
+                    }
+                    .pickerStyle(.segmented)
+                    if model.resourceMode == .downloaded {
+                        TextField("URL", text: $model.manifestURLString, axis: .vertical)
+                            .textInputAutocapitalization(.never)
+                            .autocorrectionDisabled()
+                    } else {
+                        TextField("Bundle subdirectory", text: $model.bundleSubdirectory)
+                            .textInputAutocapitalization(.never)
+                            .autocorrectionDisabled()
+                    }
                 }
                 Section("Text") {
                     TextEditor(text: $model.text)
@@ -55,15 +67,45 @@ struct DemoView: View {
     }
 }
 
+enum DemoResourceMode: String, CaseIterable, Identifiable {
+    case downloaded
+    case bundled
+
+    var id: String { rawValue }
+
+    var title: String {
+        switch self {
+        case .downloaded:
+            return "Download"
+        case .bundled:
+            return "Bundled"
+        }
+    }
+
+    init?(argument: String) {
+        switch argument {
+        case "downloaded", "download":
+            self = .downloaded
+        case "bundled", "bundle":
+            self = .bundled
+        default:
+            return nil
+        }
+    }
+}
+
 @MainActor
 final class DemoModel: ObservableObject {
+    @Published var resourceMode: DemoResourceMode = .downloaded
     @Published var manifestURLString = ProcessInfo.processInfo.environment["KOKORO_MANIFEST_URL"] ?? ""
+    @Published var bundleSubdirectory = ProcessInfo.processInfo.environment["KOKORO_BUNDLE_SUBDIRECTORY"] ?? "KokoroRuntime"
     @Published var text = "Hello world."
     @Published var voice = "af_heart"
     @Published var status = "Idle"
     @Published var isRunning = false
 
     private let scenario: String
+    private let invalidResourceMode: String?
     private let engine = AVAudioEngine()
     private let player = AVAudioPlayerNode()
     private var didAutoRun = false
@@ -74,6 +116,19 @@ final class DemoModel: ObservableObject {
         let args = CommandLine.arguments
         if let manifest = Self.value(after: "--manifest-url", in: args) {
             manifestURLString = manifest
+        }
+        if let mode = Self.value(after: "--resource-mode", in: args) {
+            if let parsed = DemoResourceMode(argument: mode) {
+                resourceMode = parsed
+                invalidResourceMode = nil
+            } else {
+                invalidResourceMode = mode
+            }
+        } else {
+            invalidResourceMode = nil
+        }
+        if let subdirectory = Self.value(after: "--bundle-subdirectory", in: args) {
+            bundleSubdirectory = subdirectory
         }
         if let text = Self.value(after: "--text", in: args) {
             self.text = text
@@ -110,19 +165,14 @@ final class DemoModel: ObservableObject {
         guard !isRunning else {
             return
         }
-        guard let manifestURL = URL(string: manifestURLString), !manifestURLString.isEmpty else {
-            status = "Missing manifest URL"
-            print("KOKORO_DEMO_ERROR missing-manifest-url")
+        if let invalidResourceMode {
+            print("KOKORO_DEMO_ERROR resource-mode=\(invalidResourceMode) \(DemoScenarioError.unsupportedResourceMode(invalidResourceMode))")
             return
         }
         isRunning = true
-        status = "Downloading resources..."
+        status = "Loading resources..."
         do {
-            let cache = try Self.cacheDirectory()
-            let resources = try await KokoroDownloadedModelStore(
-                manifestURL: manifestURL,
-                cacheDirectory: cache
-            ).hydrate()
+            let resources = try await loadResources()
             status = "Loading SDK..."
             let tts = try await KokoroTTS.load(resources: resources)
             status = "Synthesizing..."
@@ -145,19 +195,15 @@ final class DemoModel: ObservableObject {
             print("KOKORO_DEMO_ERROR scenario=\(scenario) \(DemoScenarioError.unsupportedScenario(scenario))")
             return
         }
-        guard let manifestURL = URL(string: manifestURLString), !manifestURLString.isEmpty else {
-            status = "Missing manifest URL"
-            print("KOKORO_DEMO_ERROR scenario=\(scenario) missing-manifest-url")
+        if let invalidResourceMode {
+            print("KOKORO_DEMO_ERROR scenario=\(scenario) resource-mode=\(invalidResourceMode) \(DemoScenarioError.unsupportedResourceMode(invalidResourceMode))")
             return
         }
         isRunning = true
         do {
-            print("KOKORO_DEMO_PID pid=\(getpid()) scenario=\(scenario)")
-            status = "Hydrating resources..."
-            let resources = try await KokoroDownloadedModelStore(
-                manifestURL: manifestURL,
-                cacheDirectory: try Self.cacheDirectory()
-            ).hydrate()
+            print("KOKORO_DEMO_PID pid=\(getpid()) scenario=\(scenario) resourceMode=\(resourceMode.rawValue)")
+            status = "Loading resources..."
+            let resources = try await loadResources()
             status = "Loading SDK..."
             let tts = try await KokoroTTS.load(resources: resources)
             switch scenario {
@@ -189,6 +235,26 @@ final class DemoModel: ObservableObject {
             print("KOKORO_DEMO_ERROR scenario=\(scenario) \(error)")
         }
         isRunning = false
+    }
+
+    private func loadResources() async throws -> KokoroResourceProvider {
+        if let invalidResourceMode {
+            throw DemoScenarioError.unsupportedResourceMode(invalidResourceMode)
+        }
+        print("KOKORO_DEMO_RESOURCE_MODE mode=\(resourceMode.rawValue)")
+        switch resourceMode {
+        case .downloaded:
+            guard let manifestURL = URL(string: manifestURLString), !manifestURLString.isEmpty else {
+                throw DemoScenarioError.missingManifestURL
+            }
+            return try await KokoroDownloadedModelStore(
+                manifestURL: manifestURL,
+                cacheDirectory: try Self.cacheDirectory()
+            ).hydrate()
+        case .bundled:
+            let subdirectory = bundleSubdirectory.trimmingCharacters(in: .whitespacesAndNewlines)
+            return .appBundle(.main, subdirectory: subdirectory.isEmpty ? nil : subdirectory)
+        }
     }
 
     private func runSynthesis(tts: KokoroTTS, text: String, label: String) async throws -> KokoroAudio {
@@ -286,6 +352,8 @@ final class DemoModel: ObservableObject {
 
 enum DemoScenarioError: Error, LocalizedError {
     case unsupportedScenario(String)
+    case unsupportedResourceMode(String)
+    case missingManifestURL
     case cancellationDidNotThrow
     case memoryFootprintUnavailable(kern_return_t)
 
@@ -293,6 +361,10 @@ enum DemoScenarioError: Error, LocalizedError {
         switch self {
         case .unsupportedScenario(let scenario):
             return "Unsupported scenario: \(scenario)"
+        case .unsupportedResourceMode(let mode):
+            return "Unsupported resource mode: \(mode)"
+        case .missingManifestURL:
+            return "Missing manifest URL for downloaded resource mode."
         case .cancellationDidNotThrow:
             return "Cancellation scenario completed without throwing a known cancellation error."
         case .memoryFootprintUnavailable(let result):
