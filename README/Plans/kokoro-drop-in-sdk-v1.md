@@ -765,6 +765,10 @@ runs above.
       JS/Python prep constants, runtime manifest keys, SwiftPM package identity,
       SDK docs, and model-card snippets agree on token caps, bucket sets, voice
       dimension, sample rate, and public API.
+- [x] Add `scripts/prepare_hf_sdk_metadata.py` to assemble the lightweight HF
+      metadata payload from validated starter/full SDK bundles, including the
+      top-level starter manifests, profile manifests, release manifest,
+      checksums, and model-card README.
 - [ ] Update the HF repo only after the public SDK API compiles: upload the SDK
       manifest, bundle-profile metadata, checksums, and model-card README that
       match the released SDK commit.
@@ -782,6 +786,8 @@ artifact. `README/hf-model-card.md` now points app developers at `KokoroTTS`
 and marks old `KokoroPipeline` snippets as low-level. Remote HF upload remains
 pending until the final release commit and final artifact checks are ready.
 The physical iOS readiness gate is now closed by iPhone 15 Pro Max evidence.
+The HF metadata payload helper is ready, but the actual upload is still pending
+because this machine has no `HF_TOKEN` or Hugging Face login cache configured.
 Verification after the docs/drift slice: `node
 scripts/check_sdk_drift.mjs`, `swift test --package-path swift-tts`, `swift
 test --package-path swift`, `node scripts/compare_botnet_prepare_input.mjs
@@ -807,6 +813,7 @@ evidence, and must be rerun before remote HF publication.
 - Regression test: `python scripts/inspect_hf_artifacts.py --repo-id mattmireles/kokoro-coreml --revision <released-sha> --format markdown --append README/Notes/kokoro-drop-in-sdk-v1.md`
 - Regression test: `python scripts/download_models.py --repo-id mattmireles/kokoro-coreml --revision <released-sha> --sdk-profile starter --manifest-out /tmp/kokoro-download-manifest.json`
 - Regression test: `node scripts/build_sdk_bundle.mjs --profile starter --compile-models 1 --output /tmp/kokoro-sdk-starter-compiled --repo-id mattmireles/kokoro-coreml --revision <released-sha> --download-manifest /tmp/kokoro-download-manifest.json`
+- Regression test: `python3 scripts/prepare_hf_sdk_metadata.py --repo-id mattmireles/kokoro-coreml --starter-bundle /tmp/kokoro-sdk-starter-compiled --full-bundle /tmp/kokoro-sdk-full-compiled --output /tmp/kokoro-hf-sdk-metadata`
 - Regression test: `python scripts/hash_mlpackage_tree.py coreml/kokoro_duration_t512.mlpackage`
 - Regression test: `swift test --package-path swift`
 - Regression test: `swift test --package-path swift-tts --filter KokoroText`
@@ -1079,6 +1086,7 @@ evidence, and must be rerun before remote HF publication.
 | `scripts/hash_mlpackage_tree.py` | Create | Stable per-package tree digests for manifests. |
 | `scripts/build_sdk_bundle.mjs` | Create | Assemble and hash SDK resource bundles from pinned artifacts. |
 | `scripts/check_sdk_drift.mjs` | Create | Verify constants/docs/manifest/model-card snippets agree. |
+| `scripts/prepare_hf_sdk_metadata.py` | Create | Assemble and optionally upload the lightweight HF SDK metadata payload. |
 | `scripts/download_models.py` | Modify | Add repo/revision pinning and SDK download modes. |
 | `swift/Package.swift` | Maybe modify | Keep `KokoroPipeline`; only add shared low-level types if required. Do not add MisakiSwift. |
 | `swift-tts/Package.swift` | Create | Higher-level package exposing `KokoroTTS`, depending on `../swift` and MisakiSwift. |

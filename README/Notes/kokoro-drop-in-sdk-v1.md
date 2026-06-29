@@ -8,6 +8,64 @@ do not put local-only analysis in `README/Guides/`.
 
 ---
 
+## Issue: HF SDK Metadata Payload Prepared - Upload Needs Credentials
+
+### Context
+
+Phase 7 needs the Hugging Face model repo to publish the SDK-facing metadata
+that matches the released SDK commit: model card README, hosted manifest,
+runtime manifest, profile metadata, and checksums. The live repo was checked
+through `scripts/inspect_hf_artifacts.py` after the iPhone readiness commit.
+
+### Findings
+
+Current live HF state:
+
+```text
+repo_id: mattmireles/kokoro-coreml
+resolved_revision: c02933e179932e51909ff3b29466a7debac7d0e6
+last_modified: 2026-06-10T05:43:09.000Z
+missing_sdk_metadata: HostedManifest.json, KokoroRuntimeManifest.json
+model_packages: 23
+voices: 54
+```
+
+This machine does not currently have upload credentials:
+
+```text
+HF_TOKEN env: false
+cached token: false
+whoami: LocalTokenNotFoundError
+```
+
+### Fix
+
+Added `scripts/prepare_hf_sdk_metadata.py`. It prepares a lightweight payload
+from validated starter/full SDK bundles:
+
+- `README.md` from `README/hf-model-card.md`
+- top-level `HostedManifest.json` and `KokoroRuntimeManifest.json` for the
+  starter profile
+- `sdk/starter/HostedManifest.json`
+- `sdk/starter/KokoroRuntimeManifest.json`
+- `sdk/full/HostedManifest.json`
+- `sdk/full/KokoroRuntimeManifest.json`
+- `sdk/SDKReleaseManifest.json` with checksums and profile summaries
+
+The script refuses to write inside the repo checkout, verifies each profile's
+`KokoroRuntimeManifest.json` has the expected `sdk_commit`, and can upload the
+payload with `--upload` once `HF_TOKEN` or a Hugging Face login cache is
+available.
+
+### Decision
+
+Do not mark the Phase 7 HF upload checkbox complete until the payload is
+actually uploaded and `scripts/inspect_hf_artifacts.py` confirms the live repo
+has the SDK metadata. Local payload preparation is progress, not a substitute
+for the remote update.
+
+---
+
 ## Issue: iPhone 15 Pro Max Physical Lifecycle and Bounded Memory Smoke
 
 ### Context

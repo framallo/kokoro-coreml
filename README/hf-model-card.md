@@ -125,10 +125,11 @@ The alignment matrix and the hn-NSF harmonic source are not models -- they're a 
 
 ## Usage (Swift SDK)
 
-This section is the SDK README candidate for the next Hugging Face upload. Do
-not upload it to Hugging Face until the matching Git release commit, SDK bundle
-manifests, and checksums are published. If you are using an older HF snapshot,
-use the low-level `KokoroPipeline` snippets from that snapshot instead.
+This section is the Swift SDK contract for the matching Git release commit. The
+repo publishes SDK bundle manifests and checksums at the top level for the
+starter profile and under `sdk/starter/` and `sdk/full/` for profile-specific
+metadata. If you are using an older HF snapshot, use the low-level
+`KokoroPipeline` snippets from that snapshot instead.
 
 ```swift
 import KokoroTTS
