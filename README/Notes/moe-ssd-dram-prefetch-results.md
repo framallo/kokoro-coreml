@@ -33,39 +33,21 @@ starts. A kill decision is a valid result.
 
 | Pattern | Bandwidth GB/s | p50 latency ns | p95 latency ns | fs_usage proof |
 | --- | ---: | ---: | ---: | --- |
-| sequential | 6.055 | 13830000 | 17113000 | False |
-| random | 6.105 | 13833000 | 16681000 | False |
+| sequential | 5.929 | 14167000 | 17164000 | True |
+| random | 5.962 | 14241000 | 16671000 | True |
 
-Oracle bandwidth ceiling: `1.082934` tokens/sec.
+Oracle bandwidth ceiling: `1.057558` tokens/sec.
+One-layer compute p50: `1.773188` ms (`outputs/moe_prefetch/stage0/compute.json`).
+Hideability ratio (max read p95 / compute p50): `9.679741`.
 
 ### Privileged Capture Status
 
-- `fs_usage`: missing for at least one accepted read cell. This run is not
-  valid SSD proof.
+- `fs_usage`: present for every accepted read cell.
 - `powermetrics`: captured at `outputs/moe_prefetch/stage0/powermetrics_stage0.plist`
 
 ### Decision
 
-KILL: missing fs_usage disk I/O proof for accepted measurements.
-
-### Valid Rerun Path
-
-Run Stage 0 from a terminal that can accept a sudo password prompt:
-
-```bash
-sudo -v
-python scripts/moe_prefetch/run_stage0_envelope.py \
-  --thresholds outputs/moe_prefetch/stage0/thresholds.json \
-  --output-dir outputs/moe_prefetch/stage0 \
-  --fs-usage-sudo-mode interactive \
-  --capture-powermetrics
-python scripts/moe_prefetch/summarize.py stage0 \
-  --input outputs/moe_prefetch/stage0/results.json \
-  --notes README/Notes/moe-ssd-dram-prefetch-results.md
-```
-
-Do not proceed to Stage 1 unless the summary reports `fs_usage proof` as true
-for every accepted read cell.
+FLAG: bandwidth passes but one-layer lead time is insufficient.
 
 ## Stage 1: Router Trace and Predictor Replay
 

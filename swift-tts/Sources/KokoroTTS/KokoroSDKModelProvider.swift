@@ -322,6 +322,7 @@ final class KokoroSDKModelProvider: KokoroModelProvider {
     private static func containedURL(rootURL: URL, relativePath: String) throws -> URL {
         let components = relativePath.split(separator: "/", omittingEmptySubsequences: false)
         guard !relativePath.hasPrefix("/"),
+              !relativePath.contains("\\"),
               !components.isEmpty,
               components.allSatisfy({ !$0.isEmpty && $0 != "." && $0 != ".." }) else {
             throw KokoroError.pathEscape(relativePath)

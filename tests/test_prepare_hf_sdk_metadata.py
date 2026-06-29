@@ -136,3 +136,32 @@ def test_prepare_payload_copies_top_level_hosted_runtime_and_voice_files(tmp_pat
         "runtime/hnsf_weights.json",
         "voices/af_heart.bin",
     }
+
+
+@pytest.mark.parametrize("unsafe_path", ["../outside.txt", "/tmp/outside.txt", "voices\\af_heart.bin"])
+def test_prepare_payload_rejects_unsafe_top_level_hosted_paths(tmp_path, unsafe_path):
+    helper = load_helper()
+    starter = tmp_path / "starter"
+    full = tmp_path / "full"
+    write_profile_bundle(
+        starter,
+        "starter",
+        "abc123",
+        "mattmireles/kokoro-coreml",
+        "rev-a",
+        ["KokoroRuntimeManifest.json", unsafe_path],
+    )
+    write_profile_bundle(full, "full", "abc123", "mattmireles/kokoro-coreml", "rev-a")
+    model_card = tmp_path / "README.md"
+    model_card.write_text("# card\n", encoding="utf-8")
+    args = type("Args", (), {
+        "repo_id": "mattmireles/kokoro-coreml",
+        "output": tmp_path / "payload",
+        "starter_bundle": starter,
+        "full_bundle": full,
+        "model_card": model_card,
+        "sdk_commit": "abc123",
+    })()
+
+    with pytest.raises(SystemExit, match="unsafe hosted manifest path|escapes payload root"):
+        helper.prepare_payload(args)

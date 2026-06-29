@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 """Download CoreML models and voice files from Hugging Face Hub.
 
-Models are stored on HF instead of Git LFS to avoid storage costs.
-This script downloads them to the local paths the pipeline expects.
+Models are stored on Hugging Face, not in this git repo. This script downloads
+them to the local paths the pipeline expects.
 
 Usage::
 
@@ -24,6 +24,7 @@ import hashlib
 import json
 import os
 import sys
+from collections.abc import Iterable
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -298,34 +299,69 @@ def _matches_any(path: str, patterns: list[str]) -> bool:
     return any(fnmatch.fnmatch(path, pattern) for pattern in patterns)
 
 
+def _repo_files_for_patterns(repo_id: str, revision: str | None, patterns: list[str], token: str | None) -> list[dict]:
+    """Return HF file metadata for the exact repo files matched by allow patterns."""
+
+    from huggingface_hub import HfApi
+
+    api = HfApi(token=token)
+    files = []
+    for item in api.list_repo_tree(
+        repo_id=repo_id,
+        repo_type="model",
+        revision=revision,
+        recursive=True,
+        expand=True,
+    ):
+        path = getattr(item, "path", None)
+        if not isinstance(path, str):
+            continue
+        if not _matches_any(path, patterns) or _matches_any(path, IGNORE_PATTERNS):
+            continue
+        size = getattr(item, "size", None)
+        lfs = getattr(item, "lfs", None)
+        sha256 = None
+        if isinstance(lfs, dict):
+            sha256 = lfs.get("sha256")
+            size = size if size is not None else lfs.get("size")
+        elif lfs is not None:
+            sha256 = getattr(lfs, "sha256", None)
+            size = size if size is not None else getattr(lfs, "size", None)
+        if not sha256:
+            local = _REPO_ROOT / path
+            if local.is_file():
+                sha256 = _sha256_file(local)
+        if size is None:
+            local = _REPO_ROOT / path
+            if local.is_file():
+                size = local.stat().st_size
+        if size is None or not sha256:
+            raise SystemExit(f"could not determine HF digest metadata for {path}")
+        files.append({
+            "path": path,
+            "bytes": int(size),
+            "sha256": sha256,
+        })
+    return sorted(files, key=lambda item: item["path"])
+
+
 def _write_download_manifest(
     manifest_path: Path,
     repo_id: str,
     revision: str | None,
     patterns: list[str],
+    files: Iterable[dict],
 ) -> None:
-    """Write a local manifest for files present after a download run."""
+    """Write a manifest for the exact HF files resolved by this download run."""
 
-    files = []
-    for path in sorted(_REPO_ROOT.rglob("*")):
-        if path.is_symlink() or not path.is_file():
-            continue
-        rel = path.relative_to(_REPO_ROOT).as_posix()
-        if not _matches_any(rel, patterns):
-            continue
-        stat = path.stat()
-        files.append({
-            "path": rel,
-            "bytes": stat.st_size,
-            "sha256": _sha256_file(path),
-        })
+    records = sorted(files, key=lambda item: item["path"])
     manifest = {
         "schema_version": 1,
         "repo_id": repo_id,
         "revision": revision,
         "generated_at": datetime.now(timezone.utc).isoformat(),
         "allow_patterns": patterns,
-        "files": files,
+        "files": records,
     }
     manifest_path.parent.mkdir(parents=True, exist_ok=True)
     manifest_path.write_text(json.dumps(manifest, indent=2, sort_keys=True) + "\n", encoding="utf-8")
@@ -430,7 +466,8 @@ def main() -> None:
         if n_repaired:
             print(f"Repaired {n_repaired} package(s) with missing Manifest.json.")
         if args.manifest_out:
-            _write_download_manifest(args.manifest_out, args.repo_id, args.revision, patterns)
+            files = _repo_files_for_patterns(args.repo_id, args.revision, patterns, token)
+            _write_download_manifest(args.manifest_out, args.repo_id, args.revision, patterns, files)
             print(f"Wrote download manifest: {args.manifest_out}")
     except Exception as exc:
         print(f"\nDownload failed: {exc}", file=sys.stderr)

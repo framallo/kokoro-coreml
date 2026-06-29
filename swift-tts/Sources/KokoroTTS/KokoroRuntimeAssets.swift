@@ -6,7 +6,7 @@ import Foundation
 /// Core ML packages and voice embeddings are added by later bundle/download
 /// phases, but text prep needs these assets to be canonical before synthesis is
 /// exposed.
-public enum KokoroRuntimeAsset: String, CaseIterable, Sendable {
+enum KokoroRuntimeAsset: String, CaseIterable, Sendable {
     /// Kokoro phoneme vocabulary JSON used to convert phonemes into token IDs.
     case vocab = "kokoro-vocab.json"
 
@@ -17,18 +17,18 @@ public enum KokoroRuntimeAsset: String, CaseIterable, Sendable {
     case manifest = "KokoroRuntimeAssets.json"
 
     /// File name stored inside the package resource directory.
-    public var fileName: String {
+    var fileName: String {
         rawValue
     }
 }
 
 /// Resource lookup failure for bundled SDK runtime assets.
-public enum KokoroRuntimeAssetError: Error, Equatable, LocalizedError {
+enum KokoroRuntimeAssetError: Error, Equatable, LocalizedError {
     /// The Swift package resource bundle did not contain the requested asset.
     case missingResource(String)
 
     /// Human-readable error text for app logs and tests.
-    public var errorDescription: String? {
+    var errorDescription: String? {
         switch self {
         case .missingResource(let name):
             return "KokoroTTS runtime asset is missing from the package bundle: \(name)"
@@ -37,9 +37,9 @@ public enum KokoroRuntimeAssetError: Error, Equatable, LocalizedError {
 }
 
 /// Accessor for small checked runtime assets in the `KokoroTTS` Swift package.
-public enum KokoroRuntimeAssets {
+enum KokoroRuntimeAssets {
     /// Resource subdirectory containing Kokoro SDK runtime inputs.
-    public static let directoryName = "KokoroRuntime"
+    static let directoryName = "KokoroRuntime"
 
     /// Returns the package-bundled URL for a checked runtime asset.
     ///
@@ -47,7 +47,7 @@ public enum KokoroRuntimeAssets {
     /// - Returns: File URL inside the SwiftPM resource bundle.
     /// - Throws: ``KokoroRuntimeAssetError/missingResource(_:)`` when the asset
     ///   was not copied into the package bundle.
-    public static func url(for asset: KokoroRuntimeAsset) throws -> URL {
+    static func url(for asset: KokoroRuntimeAsset) throws -> URL {
         let fileURL = URL(fileURLWithPath: asset.fileName)
         let stem = fileURL.deletingPathExtension().lastPathComponent
         let ext = fileURL.pathExtension.isEmpty ? nil : fileURL.pathExtension

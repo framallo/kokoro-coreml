@@ -120,6 +120,21 @@ def file_record(root: Path, path: Path) -> dict[str, Any]:
     }
 
 
+def contained_payload_path(root: Path, relative_path: str) -> Path:
+    """Resolve a payload path while rejecting absolute paths and lexical escapes."""
+
+    if not relative_path or relative_path.startswith("/") or "\\" in relative_path:
+        raise SystemExit(f"unsafe hosted manifest path: {relative_path}")
+    parts = Path(relative_path).parts
+    if any(part in {"", ".", ".."} for part in parts):
+        raise SystemExit(f"unsafe hosted manifest path: {relative_path}")
+    resolved_root = root.resolve()
+    candidate = (resolved_root / relative_path).resolve()
+    if candidate != resolved_root and resolved_root not in candidate.parents:
+        raise SystemExit(f"hosted manifest path escapes payload root: {relative_path}")
+    return candidate
+
+
 def load_json(path: Path) -> dict[str, Any]:
     """Load one JSON object from disk."""
 
@@ -199,10 +214,10 @@ def copy_top_level_hosted_files(starter_bundle: Path, output: Path) -> list[dict
             continue
         if relative_path == "KokoroRuntimeManifest.json" or relative_path.startswith("coreml/"):
             continue
-        source = starter_bundle / relative_path
+        source = contained_payload_path(starter_bundle, relative_path)
         if not source.is_file():
             raise SystemExit(f"starter HostedManifest references missing local file: {relative_path}")
-        destination = output / relative_path
+        destination = contained_payload_path(output, relative_path)
         destination.parent.mkdir(parents=True, exist_ok=True)
         shutil.copy2(source, destination)
         records.append(file_record(output, destination))
@@ -280,6 +295,19 @@ def upload_payload(repo_id: str, payload: Path) -> None:
         ignore_patterns=[PAYLOAD_MARKER],
         commit_message="Publish KokoroTTS SDK metadata",
     )
+    for stale_path in ("sdk/starter/HostedManifest.json", "sdk/full/HostedManifest.json"):
+        try:
+            api.delete_file(
+                stale_path,
+                repo_id=repo_id,
+                repo_type="model",
+                commit_message=f"Remove stale {stale_path}",
+            )
+            print(f"removed stale HF file: {stale_path}")
+        except Exception as exc:
+            message = str(exc)
+            if "404" not in message and "EntryNotFound" not in message:
+                raise
     print(f"uploaded HF SDK metadata payload to {repo_id}")
 
 

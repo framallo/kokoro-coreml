@@ -51,6 +51,15 @@ final class KokoroFacadeTests: XCTestCase {
         }
     }
 
+    /// Verifies runtime manifest digest paths use the same slash-only grammar as hosted manifests.
+    func testModelProviderRejectsBackslashDigestPath() throws {
+        let root = try makeBundleRoot(voicePath: "voices\\af_heart.bin")
+
+        XCTAssertThrowsError(try KokoroSDKModelProvider(resources: .directory(root))) { error in
+            XCTAssertEqual(error as? KokoroError, .pathEscape("voices\\af_heart.bin"))
+        }
+    }
+
     /// Verifies downloaded resources carry an explicit compiled-model cache.
     func testDownloadedResourceProviderUsesCompiledCacheDirectory() throws {
         let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)

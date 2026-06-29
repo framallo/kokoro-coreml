@@ -2,7 +2,7 @@ import Foundation
 import KokoroPipeline
 
 /// Errors raised while loading Kokoro voice embedding tables.
-public enum KokoroVoiceTableError: Error, Equatable, LocalizedError {
+enum KokoroVoiceTableError: Error, Equatable, LocalizedError {
     /// The requested `.bin` file was absent.
     case missingVoice(String)
 
@@ -10,7 +10,7 @@ public enum KokoroVoiceTableError: Error, Equatable, LocalizedError {
     case malformedVoice(String)
 
     /// Human-readable explanation for app logs and tests.
-    public var errorDescription: String? {
+    var errorDescription: String? {
         switch self {
         case .missingVoice(let voice):
             return "Kokoro voice embedding file is missing for \(voice)."
@@ -25,15 +25,15 @@ public enum KokoroVoiceTableError: Error, Equatable, LocalizedError {
 /// Each voice file is a little-endian float32 matrix with 256 columns. The row
 /// selected for a text chunk uses the Gist/Botnet fleet rule:
 /// `rowIndex = clamp(phonemeUTF16Count - 1, 0, rowCount - 1)`.
-public struct VoiceTable {
+struct VoiceTable {
     /// Number of floats per Kokoro voice embedding row.
-    public static let embeddingDim = PipelineConstants.voiceEmbeddingDim
+    static let embeddingDim = PipelineConstants.voiceEmbeddingDim
 
     /// Default voice bundled by the starter SDK profile.
-    public static let defaultVoiceID = KokoroVoiceID.afHeart
+    static let defaultVoiceID = KokoroVoiceID.afHeart
 
     /// Voice IDs bundled by the starter SDK profile.
-    public static let supportedVoiceIDs = KokoroVoiceID.starterVoices
+    static let supportedVoiceIDs = KokoroVoiceID.starterVoices
 
     /// Directory containing `<voice>.bin` files.
     private let voicesDirectory: URL
@@ -45,7 +45,7 @@ public struct VoiceTable {
     ///
     /// - Parameter voicesDirectory: Directory containing Kokoro voice `.bin`
     ///   files.
-    public init(voicesDirectory: URL) {
+    init(voicesDirectory: URL) {
         self.voicesDirectory = voicesDirectory
     }
 
@@ -55,7 +55,7 @@ public struct VoiceTable {
     ///   - voiceID: Kokoro voice identifier.
     ///   - phonemeCount: UTF-16 phoneme string length before BOS/EOS framing.
     /// - Returns: Selected voice embedding row.
-    public mutating func refS(voiceID: KokoroVoiceID, phonemeCount: Int) throws -> [Float] {
+    mutating func refS(voiceID: KokoroVoiceID, phonemeCount: Int) throws -> [Float] {
         let rows = try table(for: voiceID)
         let rowCount = rows.count / Self.embeddingDim
         let rowIndex = max(0, min(rowCount - 1, phonemeCount - 1))
@@ -67,7 +67,7 @@ public struct VoiceTable {
     ///
     /// - Parameter voiceID: Kokoro voice identifier.
     /// - Returns: Flat row-major float matrix.
-    public mutating func table(for voiceID: KokoroVoiceID) throws -> [Float] {
+    mutating func table(for voiceID: KokoroVoiceID) throws -> [Float] {
         if let cached = tables[voiceID] {
             return cached
         }

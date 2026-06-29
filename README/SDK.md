@@ -52,6 +52,12 @@ Mirroring only `swift-tts` is not enough.
 The repo also includes `examples/KokoroConsumerFixture` and
 `examples/KokoroDemoApp` as integration fixtures.
 
+The current public starter manifest is:
+
+```text
+https://huggingface.co/mattmireles/kokoro-coreml/resolve/ccaa3199213acb163b14477e1eaee8b896740e69/HostedManifest.json
+```
+
 ## Build A Resource Bundle
 
 Download the model snapshot and build a starter bundle:
@@ -120,7 +126,7 @@ manifest.
 import KokoroTTS
 
 let resources = try await KokoroDownloadedModelStore(
-    manifestURL: URL(string: "https://example.com/kokoro/HostedManifest.json")!,
+    manifestURL: URL(string: "https://huggingface.co/mattmireles/kokoro-coreml/resolve/ccaa3199213acb163b14477e1eaee8b896740e69/HostedManifest.json")!,
     cacheDirectory: cacheURL
 ).hydrate()
 
@@ -227,11 +233,13 @@ node scripts/build_sdk_bundle.mjs \
   --download-manifest /tmp/kokoro-download-manifest.json
 
 node scripts/validate_sdk_bundle.mjs /tmp/kokoro-sdk-starter
+pushd swift-tts
 xcodebuild -quiet \
   -scheme kokoro-sdk-smoke \
   -destination 'platform=macOS,arch=arm64' \
   -derivedDataPath /tmp/kokoro-tts-smoke-dd \
   build
+popd
 
 DYLD_FRAMEWORK_PATH=/tmp/kokoro-tts-smoke-dd/Build/Products/Debug/PackageFrameworks \
   /tmp/kokoro-tts-smoke-dd/Build/Products/Debug/kokoro-sdk-smoke \
@@ -258,6 +266,22 @@ node scripts/build_sdk_bundle.mjs \
   --download-manifest /tmp/kokoro-download-manifest-full.json
 
 node scripts/validate_sdk_bundle.mjs /tmp/kokoro-sdk-full
+```
+
+Then publish and inspect the lightweight Hugging Face SDK metadata payload:
+
+```bash
+python3 scripts/prepare_hf_sdk_metadata.py \
+  --repo-id mattmireles/kokoro-coreml \
+  --starter-bundle /tmp/kokoro-sdk-starter \
+  --full-bundle /tmp/kokoro-sdk-full \
+  --output /tmp/kokoro-hf-sdk-metadata \
+  --upload
+
+python3 scripts/inspect_hf_artifacts.py \
+  --repo-id mattmireles/kokoro-coreml \
+  --verify-hosted-digests \
+  --output /tmp/kokoro-hf-artifacts.json
 ```
 
 Before claiming iOS readiness, run the physical-device demo smoke and record the

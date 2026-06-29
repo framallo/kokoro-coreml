@@ -21,6 +21,7 @@ def _parse_args() -> argparse.Namespace:
     stage0.add_argument("--input", type=Path, required=True)
     stage0.add_argument("--notes", type=Path, required=True)
     stage0.add_argument("--output", type=Path, default=None)
+    stage0.add_argument("--compute", type=Path, default=None)
     stage0.add_argument("--one-layer-compute-ms", type=float, default=None)
     return parser.parse_args()
 
@@ -87,6 +88,9 @@ def summarize_stage0(args: argparse.Namespace) -> int:
     payload = load_json(args.input)
     inventory = payload["inventory"]
     thresholds = payload["thresholds"]
+    compute_payload = load_json(args.compute) if args.compute else None
+    if args.compute and args.one_layer_compute_ms is not None:
+        raise SystemExit("provide --compute or --one-layer-compute-ms, not both")
     cells = [_cell_summary(cell) for cell in payload.get("cells", [])]
     usable = [cell for cell in cells if cell["returncode"] == 0 and cell["failed_reads"] == 0]
     random_cells = [cell for cell in usable if cell["pattern"] == "random"]
@@ -99,15 +103,19 @@ def summarize_stage0(args: argparse.Namespace) -> int:
     target_tps = float(inventory["target_tokens_per_second"])
     fs_usage_missing = any(not cell["has_fs_usage"] for cell in usable)
     bandwidth_kill = ceiling_tps < target_tps
+    one_layer_compute_ms = args.one_layer_compute_ms
+    if compute_payload:
+        one_layer_compute_ms = float(compute_payload["latency_p50_ms"])
+    hideability = None
+    max_latency_ns = max((cell["latency_p95_ns"] for cell in usable), default=0.0)
     if fs_usage_missing:
         decision = "KILL: missing fs_usage disk I/O proof for accepted measurements."
     elif bandwidth_kill:
         decision = "KILL: oracle bandwidth ceiling is below target tokens/sec."
-    elif args.one_layer_compute_ms is None:
+    elif one_layer_compute_ms is None:
         decision = "HOLD: bandwidth passes, but one-layer compute time is required for hideability."
     else:
-        max_latency_ns = max((cell["latency_p95_ns"] for cell in usable), default=0.0)
-        compute_ns = args.one_layer_compute_ms * 1_000_000.0
+        compute_ns = one_layer_compute_ms * 1_000_000.0
         hideability = max_latency_ns / compute_ns if compute_ns > 0 else 0.0
         decision = (
             "GO: bandwidth passes and hideability <= 1."
@@ -122,6 +130,17 @@ def summarize_stage0(args: argparse.Namespace) -> int:
         "cells": cells,
         "oracle_bandwidth_ceiling_tokens_per_second": ceiling_tps,
         "target_tokens_per_second": target_tps,
+        "one_layer_compute_ms": one_layer_compute_ms,
+        "hideability_fetch_latency_p95_ns": max_latency_ns if one_layer_compute_ms else None,
+        "hideability_ratio": hideability,
+        "compute": {
+            "path": str(args.compute) if args.compute else "",
+            "benchmark": compute_payload.get("benchmark", "") if compute_payload else "",
+            "latency_p50_ms": compute_payload.get("latency_p50_ms") if compute_payload else None,
+            "latency_p95_ms": compute_payload.get("latency_p95_ms") if compute_payload else None,
+            "config": compute_payload.get("config", {}) if compute_payload else {},
+            "model_shape": compute_payload.get("model_shape", {}) if compute_payload else {},
+        },
         "decision": decision,
     }
     output = args.output or args.input.parent / "summary.json"
@@ -139,6 +158,22 @@ def summarize_stage0(args: argparse.Namespace) -> int:
         if config.get("powermetrics_path")
         else config.get("powermetrics_error", "not captured or no error recorded")
     )
+    fs_usage_status = (
+        "missing for at least one accepted read cell. This run is not\n"
+        "  valid SSD proof."
+        if fs_usage_missing
+        else "present for every accepted read cell."
+    )
+    if one_layer_compute_ms is None:
+        compute_section = "One-layer compute: not measured."
+    else:
+        compute_section = (
+            f"One-layer compute p50: `{one_layer_compute_ms:.6f}` ms"
+            + (
+                f" (`{args.compute}`)." if args.compute else "."
+            )
+            + f"\nHideability ratio (max read p95 / compute p50): `{hideability:.6f}`."
+        )
     valid_rerun = ""
     if fs_usage_missing:
         output_dir = args.input.parent
@@ -182,11 +217,11 @@ for every accepted read cell.
 {rows}
 
 Oracle bandwidth ceiling: `{ceiling_tps:.6f}` tokens/sec.
+{compute_section}
 
 ### Privileged Capture Status
 
-- `fs_usage`: missing for at least one accepted read cell. This run is not
-  valid SSD proof.
+- `fs_usage`: {fs_usage_status}
 - `powermetrics`: {powermetrics_status}
 
 ### Decision
