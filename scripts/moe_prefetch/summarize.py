@@ -33,6 +33,26 @@ def _percentile(values: list[float], percentile: float) -> float:
     return ordered[index]
 
 
+def _has_fs_usage_diskio_proof(path_text: str) -> bool:
+    """Return whether an `fs_usage -f diskio` artifact contains disk I/O rows.
+
+    Called by `_cell_summary` for Stage 0 acceptance. A filesystem path alone is
+    not proof: failed privileged captures can leave an empty file behind, and
+    the MoE SSD/DRAM plan explicitly forbids treating timing rows as SSD data
+    without `fs_usage` evidence.
+    """
+    if not path_text:
+        return False
+    path = Path(path_text)
+    if not path.exists() or path.stat().st_size == 0:
+        return False
+    diskio_markers = ("RdData", "WrData", "RdMeta", "WrMeta")
+    return any(
+        any(marker in line for marker in diskio_markers)
+        for line in path.read_text(errors="replace").splitlines()
+    )
+
+
 def _cell_summary(cell: dict[str, Any]) -> dict[str, Any]:
     measurement = cell.get("measurement") or {}
     latencies = [float(v) for v in measurement.get("latencies_ns", [])]
@@ -40,6 +60,9 @@ def _cell_summary(cell: dict[str, Any]) -> dict[str, Any]:
     wall_ns = float(measurement.get("wall_time_ns", 0))
     bandwidth_gbps = (total_bytes / wall_ns) if wall_ns > 0 else 0.0
     # bytes/ns is numerically equal to GB/s when using decimal GB.
+    fs_usage_path = cell.get("fs_usage_path", "")
+    fs_usage_error = cell.get("fs_usage_error", "")
+    has_fs_usage = not fs_usage_error and _has_fs_usage_diskio_proof(fs_usage_path)
     return {
         "pattern": cell.get("pattern"),
         "returncode": cell.get("returncode"),
@@ -48,9 +71,9 @@ def _cell_summary(cell: dict[str, Any]) -> dict[str, Any]:
         "bandwidth_gbps": bandwidth_gbps,
         "latency_p50_ns": statistics.median(latencies) if latencies else 0.0,
         "latency_p95_ns": _percentile(latencies, 0.95),
-        "fs_usage_path": cell.get("fs_usage_path", ""),
-        "fs_usage_error": cell.get("fs_usage_error", ""),
-        "has_fs_usage": bool(cell.get("fs_usage_path")) and not cell.get("fs_usage_error"),
+        "fs_usage_path": fs_usage_path,
+        "fs_usage_error": fs_usage_error,
+        "has_fs_usage": has_fs_usage,
     }
 
 

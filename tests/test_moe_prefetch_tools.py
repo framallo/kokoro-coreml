@@ -125,3 +125,60 @@ def test_stage0_summarize_kills_on_oracle_bandwidth_ceiling(tmp_path: Path) -> N
     assert summary["oracle_bandwidth_ceiling_tokens_per_second"] < 1.0
     assert summary["decision"].startswith("KILL: oracle bandwidth ceiling")
     assert "Oracle bandwidth ceiling" in notes.read_text()
+
+
+def test_stage0_summarize_rejects_empty_fs_usage_capture(tmp_path: Path) -> None:
+    results = tmp_path / "results.json"
+    notes = tmp_path / "notes.md"
+    notes.write_text(
+        "# Results\n\n"
+        "## Stage 0: Hardware Envelope\n\n"
+        "Pending.\n\n"
+        "## Stage 1: Router Trace and Predictor Replay\n\n"
+        "Blocked.\n"
+    )
+    empty_trace = tmp_path / "fs_usage_empty.txt"
+    empty_trace.write_text("")
+    payload = {
+        "inventory": {
+            "model_id": "test/moe",
+            "expert_bytes": 88_080_384,
+            "active_expert_bytes_per_token": 5_637_144_576,
+            "target_tokens_per_second": 1.0,
+        },
+        "thresholds": thresholds_payload(),
+        "cells": [
+            {
+                "pattern": "random",
+                "returncode": 0,
+                "fs_usage_path": str(empty_trace),
+                "fs_usage_error": "",
+                "measurement": {
+                    "successful_reads": 1,
+                    "failed_reads": 0,
+                    "total_bytes_read": 8_000_000_000,
+                    "wall_time_ns": 1_000_000_000,
+                    "latencies_ns": [1_000_000],
+                },
+            }
+        ],
+    }
+    results.write_text(json.dumps(payload))
+
+    subprocess.run(
+        [
+            sys.executable,
+            "scripts/moe_prefetch/summarize.py",
+            "stage0",
+            "--input",
+            str(results),
+            "--notes",
+            str(notes),
+        ],
+        check=True,
+    )
+
+    summary = json.loads((tmp_path / "summary.json").read_text())
+    assert summary["oracle_bandwidth_ceiling_tokens_per_second"] > 1.0
+    assert summary["cells"][0]["has_fs_usage"] is False
+    assert summary["decision"].startswith("KILL: missing fs_usage")
