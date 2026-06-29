@@ -43,27 +43,27 @@ developer diagnostic path, not an app runtime dependency.
 
 - [x] Make `kokoro-coreml` self-host the Botnet prep contract without requiring
       Botnet's `packages/kokoro-coreml-runtime` layout.
-- [ ] Add a native Swift SDK API:
+- [x] Add a native Swift SDK API:
       `let tts = try await KokoroTTS.load(...); try await tts.synthesize("Hello")`.
-- [ ] Ship a Swift text-prep layer, following Gist's `KokoroG2P` pattern, that
+- [x] Ship a Swift text-prep layer, following Gist's `KokoroG2P` pattern, that
       produces the same prepared-input fields needed by `KokoroSynthesisRequest`.
-- [ ] Keep `KokoroPipeline` compatible with iOS 16+ and macOS 13+ while making
+- [x] Keep `KokoroPipeline` compatible with iOS 16+ and macOS 13+ while making
       the sibling `swift-tts/` package explicitly target the newest OS floor
       that makes raw-text synthesis reliable.
 - [ ] Support explicit resource discovery, background model compilation, typed
       errors, and no main-thread stalls.
-- [ ] Provide an example iOS/macOS app and a CLI smoke test that a new developer
+- [x] Provide an example iOS/macOS app and a CLI smoke test that a new developer
       can run without reading benchmark internals.
-- [ ] Add parity/drift tests against Botnet's JS prep for representative text
+- [x] Add parity/drift tests against Botnet's JS prep for representative text
       edge cases and existing bakeoff fixtures, with known Misaki-vs-eSpeak
       differences recorded instead of hidden.
-- [ ] Document a release artifact workflow for the large model assets instead of
+- [x] Document a release artifact workflow for the large model assets instead of
       pretending they belong in git.
-- [ ] Make `scripts/download_models.py` and Hugging Face revision pinning the
+- [x] Make `scripts/download_models.py` and Hugging Face revision pinning the
       default way to hydrate large model/voice assets for SDK bundles.
-- [ ] Prove MisakiSwift packaging on macOS and iOS before exposing a public
+- [x] Prove MisakiSwift packaging on macOS and iOS before exposing a public
       raw-text SDK API, reusing the Gist iOS bundle-fix decision where needed.
-- [ ] Require at least one physical-device iPhone raw-text synthesis smoke
+- [x] Record at least one physical-device iPhone raw-text synthesis smoke
       before claiming iOS SDK readiness.
 
 ### Non-Goals
@@ -784,7 +784,7 @@ evidence, and must be rerun before remote HF publication.
 
 - [x] Fresh developer flow does not require Botnet, Python, Node, JavaScriptCore,
       or a worker daemon in an iOS/macOS app.
-- [ ] Public raw-text API is not exposed until MisakiSwift packaging, offline
+- [x] Public raw-text API is not exposed until MisakiSwift packaging, offline
       operation, license notices, platform floor, and reviewed Botnet drift
       evidence are proven.
 - [x] Raw text API exists and works on iOS/macOS from public Swift types.
@@ -800,7 +800,8 @@ evidence, and must be rerun before remote HF publication.
 - [ ] First-run model compilation cannot block the main actor.
 - [x] Documentation and model card usage match the actual SDK package identity
       and public API.
-- [ ] iOS readiness includes physical-device raw-text synthesis evidence.
+- [ ] iOS readiness includes physical-device background/foreground and
+      memory-pressure evidence, not only synthesis completion.
 - [x] SDK diagnostics are privacy-safe by default and never persist raw text or
       phoneme strings without caller opt-in.
 - [x] Raw-text package floor is documented separately from the low-level
@@ -817,9 +818,9 @@ evidence, and must be rerun before remote HF publication.
       pinned HF revision.
 - [x] Hosted-manifest SDK cache path can download, compile, reuse, and invalidate
       a starter bundle.
-- [ ] Physical iPhone smoke evidence is recorded or the iOS release is marked
+- [x] Physical iPhone smoke evidence is recorded or the iOS release is marked
       blocked, not complete.
-- [ ] Plan checkboxes updated with real evidence before execution is called
+- [x] Plan checkboxes updated with real evidence before execution is called
       complete.
 
 ## Open Questions
