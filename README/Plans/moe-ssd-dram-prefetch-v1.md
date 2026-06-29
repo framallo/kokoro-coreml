@@ -1,7 +1,7 @@
 # MoE SSD/DRAM Expert Prefetch Experiment Plan
 
 **Date:** 2026-06-29
-**Status:** In Progress (Stage 0 flagged: one-layer lead time insufficient)
+**Status:** Complete (Stage 1 killed: planned prefetch depths cannot hide reads)
 
 > This plan is intentionally gate-heavy. The goal is not to build an impressive
 > prefetcher. The goal is to cheaply decide whether learned expert prefetching
@@ -241,16 +241,16 @@ in the selected model/workloads.
 
 **Tasks:**
 
-- [ ] Add `scripts/moe_prefetch/trace_routers.py` using Hugging Face/PyTorch
+- [x] Add `scripts/moe_prefetch/trace_routers.py` using Hugging Face/PyTorch
       forward hooks to capture `(request_id, domain, token_index, layer_index,
       router_input_shape, actual_topk_expert_ids, layer_compute_ns)`.
-- [ ] Add prompt fixtures for code, math, and long-form prose under
+- [x] Add prompt fixtures for code, math, and long-form prose under
       `scripts/moe_prefetch/prompt_suites/`.
-- [ ] Add `scripts/moe_prefetch/predictors.py` with demand-LRU, last-token,
+- [x] Add `scripts/moe_prefetch/predictors.py` with demand-LRU, last-token,
       global-frequency, Markov/n-gram, EAM, and oracle policies.
-- [ ] Add `scripts/moe_prefetch/summarize.py stage1` to report recall@k,
+- [x] Add `scripts/moe_prefetch/summarize.py stage1` to report recall@k,
       precision, hideable recall, wasted predictions, and per-domain variance.
-- [ ] Append Stage 1 results and a go/kill decision to
+- [x] Append Stage 1 results and a go/kill decision to
       `README/Notes/moe-ssd-dram-prefetch-results.md`.
 
 **Verification:**
@@ -263,7 +263,7 @@ python scripts/moe_prefetch/trace_routers.py \
 
 python scripts/moe_prefetch/summarize.py stage1 \
   --trace outputs/moe_prefetch/stage1/router_trace.jsonl \
-  --stage0 outputs/moe_prefetch/stage0/results.json \
+  --stage0 outputs/moe_prefetch/stage0/summary.json \
   --output outputs/moe_prefetch/stage1/predictability.json \
   --notes README/Notes/moe-ssd-dram-prefetch-results.md
 
@@ -272,7 +272,9 @@ python -m pytest tests/test_moe_prefetch_tools.py
 
 **Gate:** Kill if EAM or learned prediction does not beat the best trivial
 baseline by the frozen margin on hideable recall. High raw recall does not pass
-if reads cannot arrive in time.
+if reads cannot arrive in time. Stage 1 killed the planned path because Stage 0
+requires roughly 10 layers of lead time, while the planned prefetch depths
+`{1,2,3}` produce zero hideable recall for every policy, including oracle.
 
 ---
 
@@ -362,19 +364,19 @@ simulation won, document the confound as the result.
 
 - [x] Every accepted Stage 0 row has a matching `fs_usage -f diskio` artifact.
 - [x] Stage 0 computes and records hideability plus oracle bandwidth ceiling.
-- [ ] Stage 1 reports hideable recall, not only raw recall.
+- [x] Stage 1 reports hideable recall, not only raw recall.
 - [ ] Stage 2 includes demand-LRU, best trivial, selected predictor, and oracle.
 - [ ] Stage 2 reports tokens/sec and joules/token.
 - [ ] Stage 3 is not started until Stage 0-2 gates pass.
 
 ### Definition of Done
 
-- [ ] One of these outcomes is recorded in
+- [x] One of these outcomes is recorded in
       `README/Notes/moe-ssd-dram-prefetch-results.md`: Stage 0 kill, Stage 1
       kill, Stage 2 kill, or Stage 3 real-hardware decision.
-- [ ] Generated artifacts are present under `outputs/moe_prefetch/` and remain
+- [x] Generated artifacts are present under `outputs/moe_prefetch/` and remain
       uncommitted.
-- [ ] The final decision references exact commands, machine info, model info,
+- [x] The final decision references exact commands, machine info, model info,
       thresholds, and artifact paths.
 
 ## Open Questions

@@ -3,6 +3,7 @@ import subprocess
 import sys
 from pathlib import Path
 
+from scripts.moe_prefetch.predictors import evaluate_policies
 from scripts.moe_prefetch.run_stage0_envelope import fs_usage_command
 from scripts.moe_prefetch.schema import (
     estimate_expert_bytes,
@@ -327,3 +328,99 @@ def test_stage0_summarize_flags_insufficient_hideability_from_compute(
     note_text = notes.read_text()
     assert "`fs_usage`: present for every accepted read cell." in note_text
     assert "Hideability ratio" in note_text
+
+
+def test_stage1_policy_eval_zeroes_hideable_recall_when_depth_is_too_small() -> None:
+    rows = [
+        {
+            "request_id": "r0",
+            "token_index": 0,
+            "layer_index": 0,
+            "actual_topk_expert_ids": [1, 2],
+        },
+        {
+            "request_id": "r0",
+            "token_index": 0,
+            "layer_index": 1,
+            "actual_topk_expert_ids": [1, 3],
+        },
+    ]
+
+    metrics = evaluate_policies(rows, prefetch_depth=1, required_depth=2)
+
+    assert metrics["oracle"]["recall"] == 1.0
+    assert metrics["oracle"]["hideable_recall"] == 0.0
+    assert metrics["eam"]["recall"] == 0.25
+    assert metrics["eam"]["hideable_recall"] == 0.0
+
+
+def test_stage1_summarize_kills_when_planned_depths_cannot_hide_reads(
+    tmp_path: Path,
+) -> None:
+    trace = tmp_path / "trace.jsonl"
+    stage0 = tmp_path / "stage0_summary.json"
+    output = tmp_path / "predictability.json"
+    notes = tmp_path / "notes.md"
+    trace.write_text(
+        "\n".join(
+            json.dumps(row)
+            for row in [
+                {
+                    "request_id": "code-0",
+                    "domain": "code",
+                    "model_id": "test/moe",
+                    "token_index": 0,
+                    "layer_index": 0,
+                    "actual_topk_expert_ids": [1, 2],
+                },
+                {
+                    "request_id": "code-0",
+                    "domain": "code",
+                    "model_id": "test/moe",
+                    "token_index": 0,
+                    "layer_index": 1,
+                    "actual_topk_expert_ids": [1, 3],
+                },
+            ]
+        )
+        + "\n"
+    )
+    stage0.write_text(
+        json.dumps(
+            {
+                "hideability_ratio": 4.2,
+                "thresholds": {"trivial_margin_percent": 10.0},
+            }
+        )
+    )
+    notes.write_text(
+        "# Results\n\n"
+        "## Stage 1: Router Trace and Predictor Replay\n\n"
+        "Pending.\n\n"
+        "## Stage 2: Offline Simulator\n\n"
+        "Blocked.\n"
+    )
+
+    subprocess.run(
+        [
+            sys.executable,
+            "scripts/moe_prefetch/summarize.py",
+            "stage1",
+            "--trace",
+            str(trace),
+            "--stage0",
+            str(stage0),
+            "--output",
+            str(output),
+            "--notes",
+            str(notes),
+            "--prefetch-depths",
+            "1,2,3",
+        ],
+        check=True,
+    )
+
+    payload = json.loads(output.read_text())
+    assert payload["required_prefetch_depth"] == 5
+    assert payload["decision"].startswith("KILL: planned prefetch depths")
+    assert "Hideable recall" in notes.read_text()
