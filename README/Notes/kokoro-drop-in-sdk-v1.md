@@ -48,7 +48,7 @@ swift build --package-path /tmp/kokoro-sdk-doc-check
 git diff --check
 ```
 
-Results: drift check passed; `swift-tts` passed 40 tests with 2 Misaki runtime
+Results: drift check passed; `swift-tts` passed 41 tests with 2 Misaki runtime
 tests skipped unless `KOKORO_RUN_MISAKI_RUNTIME_TESTS=1`; `swift` passed 46
 tests; Botnet parity compared 12 fixtures; runtime assets verified vocab and
 hn-NSF hashes; an external SwiftPM package using the documented local path and
@@ -258,6 +258,87 @@ The local HTTP server observed the phone at `192.168.4.32` downloading
 packages, `kokoro_f0ntrain_t600`, 15-second decoder-pre/HAR-post packages,
 `runtime/hnsf_weights.json`, `runtime/kokoro-vocab.json`, and
 `voices/af_heart.bin`.
+
+### Scene-Phase Harness and Blocked Device Attempt
+
+`KokoroDemoApp` now emits a stable lifecycle sentinel whenever SwiftUI reports
+the scene phase on appear or change:
+
+```text
+KOKORO_DEMO_SCENE_PHASE reason=<appear|change> phase=<active|inactive|background|unknown>
+```
+
+Generic iOS compile still passes after adding the sentinel:
+
+```bash
+xcodebuild -quiet \
+  -project examples/KokoroDemoApp/KokoroDemoApp.xcodeproj \
+  -scheme KokoroDemoApp \
+  -destination 'generic/platform=iOS' \
+  -derivedDataPath /tmp/kokoro-demo-ios-generic-dd \
+  CODE_SIGNING_ALLOWED=NO \
+  build
+```
+
+The physical rerun attempted to use paired iPhone 12 Pro `Webcam`
+(`F383FC46-FD64-5346-AEC6-59E3E2F8C9CA`, iOS 26.5) because the earlier iPhone
+15 Pro Max was unavailable. The local starter bundle server was started from
+`/tmp/kokoro-sdk-starter-compiled`:
+
+```bash
+python3 -m http.server 8766 --bind 0.0.0.0
+```
+
+The signed device build command was:
+
+```bash
+xcodebuild -quiet \
+  -project examples/KokoroDemoApp/KokoroDemoApp.xcodeproj \
+  -scheme KokoroDemoApp \
+  -destination 'id=F383FC46-FD64-5346-AEC6-59E3E2F8C9CA' \
+  -derivedDataPath /tmp/kokoro-demo-webcam-dd \
+  KOKORO_DEMO_DEVELOPMENT_TEAM=6ETYBAJKY8 \
+  KOKORO_DEMO_BUNDLE_ID=com.mattmireles.KokoroDemoApp \
+  build
+```
+
+It failed before install/launch because the device was locked:
+
+```text
+xcodebuild: error: Timed out waiting for all destinations matching the provided destination specifier to become available
+Webcam may need to be unlocked to recover from previously reported preparation errors
+```
+
+Do not mark iOS release readiness complete from this attempt. The release gate
+is intentionally blocked until an unlocked physical iPhone records
+`KOKORO_DEMO_SCENE_PHASE` background/foreground logs and a real memory-pressure
+event. Prior process suspend/resume and physical-footprint logging remain useful
+smoke evidence, but they are not substitutes for those two missing proofs.
+
+### Prepared-Input Boundary Evidence
+
+Prepared-input parity is now covered by a Swift regression test instead of a
+manual audio comparison:
+
+```bash
+swift test --package-path swift-tts \
+  --filter KokoroTextProcessorTests/testPreparedInputBoundaryMatchesLegacyPreparedRequestContract
+swift test --package-path swift-tts
+```
+
+Results on 2026-06-28: the focused test passed; the full `swift-tts` suite
+passed 41 tests with 2 Misaki runtime tests skipped unless
+`KOKORO_RUN_MISAKI_RUNTIME_TESTS=1`.
+
+The test uses the JS phonemizer output for `Hello world.`
+(`həlˈoʊ wˈɜːld.`), the checked Kokoro vocab IDs, the real `af_heart` voice row
+selected by UTF-16 phoneme count, and the shared
+`KokoroPreparedInput.synthesisRequest()` bridge. It proves the SDK raw-text
+path emits the legacy prepared-request-contract padded IDs, attention mask,
+voice embedding row, speed, and executor request fields when phonemes and voice
+row match. It does not invoke the JS prep script at test time and does not
+claim perceptual audio parity. End-to-end smoke covers synthesis completion;
+perceptual parity remains unproven until listening or `audio-judge` evidence.
 
 ---
 

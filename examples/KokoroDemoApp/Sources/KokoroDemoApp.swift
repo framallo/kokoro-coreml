@@ -15,6 +15,7 @@ struct KokoroDemoApp: App {
 
 struct DemoView: View {
     @StateObject var model: DemoModel
+    @Environment(\.scenePhase) private var scenePhase
 
     var body: some View {
         NavigationStack {
@@ -44,6 +45,12 @@ struct DemoView: View {
         }
         .task {
             await model.runLaunchAutomationIfRequested()
+        }
+        .onAppear {
+            model.logScenePhase(scenePhase, reason: "appear")
+        }
+        .onChange(of: scenePhase) { _, phase in
+            model.logScenePhase(phase, reason: "change")
         }
     }
 }
@@ -93,6 +100,10 @@ final class DemoModel: ObservableObject {
         }
         didAutoRun = true
         await runScenario(named: scenario)
+    }
+
+    func logScenePhase(_ phase: ScenePhase, reason: String) {
+        print("KOKORO_DEMO_SCENE_PHASE reason=\(reason) phase=\(Self.label(for: phase))")
     }
 
     func synthesize() async {
@@ -257,6 +268,19 @@ final class DemoModel: ObservableObject {
             return nil
         }
         return args[index + 1]
+    }
+
+    private static func label(for phase: ScenePhase) -> String {
+        switch phase {
+        case .active:
+            return "active"
+        case .inactive:
+            return "inactive"
+        case .background:
+            return "background"
+        @unknown default:
+            return "unknown"
+        }
     }
 }
 

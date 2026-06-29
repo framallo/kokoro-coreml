@@ -60,6 +60,54 @@ final class KokoroTextProcessorTests: XCTestCase {
         XCTAssertTrue(prepared.attentionMask.dropFirst(tokenCount).allSatisfy { $0 == 0 })
     }
 
+    /// Verifies raw-text SDK prep matches the legacy prepared-input pipeline boundary.
+    ///
+    /// The old JS path emitted `KokoroPreparedInput`-compatible tensors directly.
+    /// For matching phonemes and voice rows, the SDK path must produce an
+    /// identical `KokoroSynthesisRequest`, so existing `KokoroPipeline`
+    /// execution remains a drop-in implementation detail.
+    func testPreparedInputBoundaryMatchesLegacyPreparedRequestContract() throws {
+        let phonemes = "həlˈoʊ wˈɜːld."
+        let expectedTokenIDs: [Int32] = [50, 83, 54, 156, 57, 135, 16, 65, 156, 87, 158, 54, 46, 4]
+        let expectedInputIDs: [Int32] = [0] + expectedTokenIDs + [0]
+        let expectedPaddedInputIDs = expectedInputIDs + Array(repeating: Int32(0), count: 16)
+        let expectedAttentionMask = Array(repeating: Int32(1), count: expectedInputIDs.count)
+            + Array(repeating: Int32(0), count: 16)
+        let processor = try KokoroTextProcessor(phonemizer: StubPhonemizer(phonemes: phonemes))
+        var voiceTable = VoiceTable(voicesDirectory: repoRoot.appendingPathComponent("kokoro.js/voices"))
+        let refS = try voiceTable.refS(voiceID: .afHeart, phonemeCount: phonemes.utf16.count)
+
+        let sdkPrepared = try processor.prepare(
+            text: "  Hello   world. ",
+            voice: .afHeart,
+            refS: refS,
+            options: KokoroSynthesisOptions(speed: 1.0),
+            key: "hello-world",
+            phonemeResult: KokoroPhonemeResult(phonemes: phonemes)
+        )
+        let legacyPrepared = KokoroPreparedInput(
+            key: "hello-world",
+            text: "Hello world.",
+            voice: "af_heart",
+            inputIds: expectedPaddedInputIDs,
+            attentionMask: expectedAttentionMask,
+            refS: refS,
+            speed: 1.0,
+            canonicalDurationSeconds: nil,
+            numTokens: expectedInputIDs.count,
+            hnsfWeightsSHA256: KokoroTextProcessor.hnsfWeightsSHA256
+        )
+
+        XCTAssertEqual(KokoroTextProcessor.boundaryTokenID, 0)
+        XCTAssertEqual(processor.tokenIDs(forPhonemes: phonemes), expectedTokenIDs)
+        XCTAssertTrue(expectedPaddedInputIDs.dropFirst(expectedInputIDs.count).allSatisfy { $0 == 0 })
+        XCTAssertEqual(sdkPrepared, legacyPrepared)
+        XCTAssertEqual(sdkPrepared.synthesisRequest().inputIds, legacyPrepared.synthesisRequest().inputIds)
+        XCTAssertEqual(sdkPrepared.synthesisRequest().attentionMask, legacyPrepared.synthesisRequest().attentionMask)
+        XCTAssertEqual(sdkPrepared.synthesisRequest().refS, legacyPrepared.synthesisRequest().refS)
+        XCTAssertEqual(sdkPrepared.synthesisRequest().speed, legacyPrepared.synthesisRequest().speed)
+    }
+
     /// Verifies all-unknown phonemes fail instead of creating boundary-only inputs.
     func testPrepareRejectsEmptyTokenizationAfterUnknownDrop() throws {
         let processor = try KokoroTextProcessor(phonemizer: StubPhonemizer(phonemes: "🙂"))

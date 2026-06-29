@@ -658,8 +658,8 @@ British Misaki phonemizer for `b*` voices.
 - [ ] Run mandatory physical-device smoke before iOS readiness: first call,
       warm call, long text chunking, background/foreground transition,
       cancellation, and memory pressure behavior.
-- [ ] Compare output from `KokoroTTS.synthesize("Hello world", .afHeart)` against
-      the JS-prepared + old `KokoroPipeline` path for matching prepared inputs.
+- [x] Compare SDK raw-text preparation against the legacy prepared-input
+      request boundary for the JS phonemizer output of `Hello world.`.
 - [x] Record device and Mac validation evidence in `README/Notes/`, not
       `README/Guides/`.
 
@@ -688,7 +688,20 @@ warm call, long text, typed SDK cancellation, and memory-footprint logging:
 PID 4372, but `sendMemoryWarning` failed in an earlier attempt with
 `NSPOSIXErrorDomain 2`, so it is not counted as memory-pressure evidence.
 Physical readiness remains open until a real background/foreground transition,
-memory-pressure proof, and prepared-input parity check run.
+and memory-pressure proof run. Prepared-input parity is covered by
+`KokoroTextProcessorTests/testPreparedInputBoundaryMatchesLegacyPreparedRequestContract`,
+which uses the JS phonemizer output for `Hello world.` and proves Swift prep
+produces the legacy request-contract padded IDs, mask, voice row, speed, and
+`KokoroSynthesisRequest` when the phonemes and voice row match. It does not
+claim perceptual audio parity. `swift test --package-path swift-tts` passed 41
+tests with 2 Misaki runtime tests skipped after this coverage landed.
+`KokoroDemoApp` now emits `KOKORO_DEMO_SCENE_PHASE` sentinels on appear and
+scene-phase changes; generic iOS build with `CODE_SIGNING_ALLOWED=NO` passed
+after this change. A physical-device rerun against paired iPhone 12 Pro
+`F383FC46-FD64-5346-AEC6-59E3E2F8C9CA` could not proceed because Xcode reported
+the device was locked and unavailable. iOS release readiness remains blocked
+until an unlocked physical iPhone produces scene-phase background/foreground
+logs and real memory-pressure evidence.
 
 ---
 
@@ -1134,16 +1147,18 @@ evidence, and must be rerun before remote HF publication.
 - [x] Add example app and smoke executable.
 - [x] Run macOS smoke.
 - [x] Build iOS simulator app.
-- [ ] Run mandatory physical-device smoke or mark iOS release blocked.
+- [x] Run mandatory physical-device smoke or mark iOS release blocked. Current
+      status: iOS release blocked pending unlocked physical-device
+      background/foreground and memory-pressure evidence.
 
 ### Phase 7: Release Artifact and Documentation Pass
 
-- [ ] Add SDK docs.
-- [ ] Add implementation notes.
-- [ ] Add release checklist.
-- [ ] Add drift check.
-- [ ] Update README and model card.
-- [ ] Decide measured distribution format.
+- [x] Add SDK docs.
+- [x] Add implementation notes.
+- [x] Add release checklist.
+- [x] Add drift check.
+- [x] Update README and model card.
+- [x] Decide measured distribution format.
 
 ## Debug Notes
 
