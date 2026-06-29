@@ -1,13 +1,47 @@
 #!/usr/bin/env node
 
 import { createHash } from 'node:crypto';
-import { readFile, readdir, stat } from 'node:fs/promises';
+import { lstat, readFile, readdir, realpath, stat } from 'node:fs/promises';
 import path from 'node:path';
 import process from 'node:process';
 
 /** Computes SHA-256 for one file. */
 async function sha256File(filePath) {
   return createHash('sha256').update(await readFile(filePath)).digest('hex');
+}
+
+/** Resolves a manifest-relative path under a bundle root without escapes. */
+async function containedPath(bundleRoot, relativePath) {
+  const parts = relativePath.split('/');
+  if (
+    path.isAbsolute(relativePath) ||
+    relativePath.includes('\\') ||
+    parts.length === 0 ||
+    parts.some((part) => part.length === 0 || part === '.' || part === '..')
+  ) {
+    throw new Error(`manifest path escapes bundle root: ${relativePath}`);
+  }
+  const rootReal = await realpath(bundleRoot);
+  const target = path.join(bundleRoot, ...parts);
+  let current = bundleRoot;
+  for (const part of parts) {
+    current = path.join(current, part);
+    try {
+      if ((await lstat(current)).isSymbolicLink()) {
+        throw new Error(`symlink not allowed in manifest path: ${relativePath}`);
+      }
+    } catch (error) {
+      if (error && error.code === 'ENOENT') {
+        break;
+      }
+      throw error;
+    }
+  }
+  const parentReal = await realpath(path.dirname(target));
+  if (parentReal !== rootReal && !parentReal.startsWith(`${rootReal}${path.sep}`)) {
+    throw new Error(`manifest path escapes bundle root: ${relativePath}`);
+  }
+  return target;
 }
 
 /** Lists all regular files in a bundle tree. */
@@ -53,8 +87,11 @@ async function hashPackage(packagePath) {
 
 /** Verifies one file digest entry relative to the bundle root. */
 async function verifyFile(bundleRoot, entry) {
-  const filePath = path.join(bundleRoot, entry.path);
+  const filePath = await containedPath(bundleRoot, entry.path);
   const fileStat = await stat(filePath);
+  if (!fileStat.isFile()) {
+    throw new Error(`manifest path is not a regular file: ${entry.path}`);
+  }
   const actualHash = await sha256File(filePath);
   if (fileStat.size !== entry.bytes || actualHash !== entry.sha256) {
     throw new Error(`digest drift for ${entry.path}`);
@@ -66,7 +103,7 @@ async function validateBundle(bundleRoot) {
   const manifest = JSON.parse(await readFile(path.join(bundleRoot, 'KokoroRuntimeManifest.json'), 'utf8'));
   const hosted = JSON.parse(await readFile(path.join(bundleRoot, 'HostedManifest.json'), 'utf8'));
   for (const pkg of manifest.model_packages) {
-    const actual = await hashPackage(path.join(bundleRoot, pkg.path));
+    const actual = await hashPackage(await containedPath(bundleRoot, pkg.path));
     if (
       actual.tree_sha256 !== pkg.tree_sha256 ||
       actual.file_count !== pkg.file_count ||

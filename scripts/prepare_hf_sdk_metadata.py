@@ -6,8 +6,7 @@ This script intentionally uploads only lightweight metadata and docs:
 - README.md, sourced from README/hf-model-card.md.
 - Top-level HostedManifest.json and KokoroRuntimeManifest.json for the starter
   profile, preserving the current public discovery contract.
-- sdk/<profile>/HostedManifest.json and sdk/<profile>/KokoroRuntimeManifest.json
-  for each checked bundle profile.
+- sdk/<profile>/KokoroRuntimeManifest.json for each checked bundle profile.
 - sdk/SDKReleaseManifest.json, which records checksums and profile summaries.
 
 Model packages and voice binaries remain the canonical large artifacts already
@@ -30,6 +29,7 @@ from typing import Any
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
 DEFAULT_REPO_ID = "mattmireles/kokoro-coreml"
+PAYLOAD_MARKER = ".kokoro-hf-sdk-metadata"
 
 
 @dataclass(frozen=True)
@@ -89,6 +89,25 @@ def sha256_file(path: Path) -> str:
     return digest.hexdigest()
 
 
+def assert_safe_output_directory(output: Path) -> None:
+    """Refuse destructive writes outside a marked metadata payload directory."""
+
+    resolved = output.resolve()
+    home = Path.home().resolve()
+    dangerous = {
+        Path(resolved.anchor).resolve(),
+        home,
+        REPO_ROOT,
+        REPO_ROOT.parent,
+    }
+    if resolved in dangerous:
+        raise SystemExit(f"refusing dangerous HF payload output path: {resolved}")
+    if REPO_ROOT in resolved.parents:
+        raise SystemExit("refusing to write HF payload inside the repo checkout")
+    if resolved.exists() and not (resolved / PAYLOAD_MARKER).exists():
+        raise SystemExit(f"refusing to overwrite unmarked payload directory: {resolved}")
+
+
 def file_record(root: Path, path: Path) -> dict[str, Any]:
     """Return a checksum record for one file relative to a payload root."""
 
@@ -126,7 +145,7 @@ def load_hf_token() -> str | None:
         return None
 
 
-def copy_manifest_pair(profile: ProfileInput, output: Path, sdk_commit: str) -> dict[str, Any]:
+def copy_manifest_pair(profile: ProfileInput, output: Path, sdk_commit: str, repo_id: str) -> dict[str, Any]:
     """Copy profile manifests into the payload and return release metadata."""
 
     runtime_src = profile.bundle / "KokoroRuntimeManifest.json"
@@ -141,13 +160,16 @@ def copy_manifest_pair(profile: ProfileInput, output: Path, sdk_commit: str) -> 
         raise SystemExit(
             f"{profile.name} manifest sdk_commit mismatch: expected {sdk_commit}, observed {observed_commit}"
         )
+    if runtime.get("hf_repo_id") != repo_id:
+        raise SystemExit(
+            f"{profile.name} manifest hf_repo_id mismatch: expected {repo_id}, "
+            f"observed {runtime.get('hf_repo_id')}"
+        )
 
     profile_dir = output / "sdk" / profile.name
     profile_dir.mkdir(parents=True, exist_ok=True)
     runtime_dest = profile_dir / "KokoroRuntimeManifest.json"
-    hosted_dest = profile_dir / "HostedManifest.json"
     shutil.copy2(runtime_src, runtime_dest)
-    shutil.copy2(hosted_src, hosted_dest)
 
     return {
         "profile": profile.name,
@@ -155,13 +177,13 @@ def copy_manifest_pair(profile: ProfileInput, output: Path, sdk_commit: str) -> 
         "hf_repo_id": runtime.get("hf_repo_id"),
         "hf_revision": runtime.get("hf_revision"),
         "hosted_version": hosted.get("version"),
+        "hosted_manifest_scope": "top-level starter manifest is directly hydratable; profile manifests are metadata",
         "minimum_platforms": runtime.get("minimum_platforms"),
         "buckets": runtime.get("buckets"),
         "duration_token_sizes": runtime.get("duration_token_sizes"),
         "model_package_count": len(runtime.get("model_packages") or []),
         "voice_count": len(runtime.get("voices") or []),
         "runtime_manifest": file_record(output, runtime_dest),
-        "hosted_manifest": file_record(output, hosted_dest),
     }
 
 
@@ -170,11 +192,11 @@ def prepare_payload(args: argparse.Namespace) -> Path:
 
     sdk_commit = args.sdk_commit or git_head()
     output = args.output.resolve()
-    if output == REPO_ROOT or REPO_ROOT in output.parents:
-        raise SystemExit("refusing to write HF payload inside the repo checkout")
+    assert_safe_output_directory(output)
     if output.exists():
         shutil.rmtree(output)
     output.mkdir(parents=True)
+    (output / PAYLOAD_MARKER).write_text("kokoro-hf-sdk-metadata\n", encoding="utf-8")
 
     readme_dest = output / "README.md"
     shutil.copy2(args.model_card, readme_dest)
@@ -183,11 +205,21 @@ def prepare_payload(args: argparse.Namespace) -> Path:
         ProfileInput("starter", args.starter_bundle.resolve()),
         ProfileInput("full", args.full_bundle.resolve()),
     ]
-    profile_records = [copy_manifest_pair(profile, output, sdk_commit) for profile in profiles]
+    profile_records = [copy_manifest_pair(profile, output, sdk_commit, args.repo_id) for profile in profiles]
+    revisions = {profile["hf_revision"] for profile in profile_records}
+    repo_ids = {profile["hf_repo_id"] for profile in profile_records}
+    if repo_ids != {args.repo_id}:
+        raise SystemExit(f"profile HF repo IDs do not all match {args.repo_id}: {sorted(repo_ids)}")
+    if len(revisions) != 1:
+        raise SystemExit(f"profile HF revisions do not match: {sorted(revisions)}")
 
     starter_profile_dir = output / "sdk" / "starter"
-    shutil.copy2(starter_profile_dir / "HostedManifest.json", output / "HostedManifest.json")
+    shutil.copy2(args.starter_bundle.resolve() / "HostedManifest.json", output / "HostedManifest.json")
     shutil.copy2(starter_profile_dir / "KokoroRuntimeManifest.json", output / "KokoroRuntimeManifest.json")
+    runtime_dir = output / "runtime"
+    runtime_dir.mkdir()
+    shutil.copy2(args.starter_bundle.resolve() / "runtime" / "kokoro-vocab.json", runtime_dir / "kokoro-vocab.json")
+    shutil.copy2(args.starter_bundle.resolve() / "runtime" / "hnsf_weights.json", runtime_dir / "hnsf_weights.json")
 
     manifest = {
         "schema_version": 1,
@@ -197,6 +229,10 @@ def prepare_payload(args: argparse.Namespace) -> Path:
         "model_card": file_record(output, readme_dest),
         "top_level_hosted_manifest": file_record(output, output / "HostedManifest.json"),
         "top_level_runtime_manifest": file_record(output, output / "KokoroRuntimeManifest.json"),
+        "top_level_runtime_files": [
+            file_record(output, runtime_dir / "kokoro-vocab.json"),
+            file_record(output, runtime_dir / "hnsf_weights.json"),
+        ],
         "profiles": profile_records,
     }
     release_manifest = output / "sdk" / "SDKReleaseManifest.json"
@@ -225,6 +261,7 @@ def upload_payload(repo_id: str, payload: Path) -> None:
         repo_id=repo_id,
         repo_type="model",
         folder_path=str(payload),
+        ignore_patterns=[PAYLOAD_MARKER],
         commit_message="Publish KokoroTTS SDK metadata",
     )
     print(f"uploaded HF SDK metadata payload to {repo_id}")

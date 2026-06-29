@@ -283,7 +283,10 @@ async function resolveVoices(config) {
   }
   const voiceDir = path.join(repoRoot, 'kokoro.js/voices');
   const entries = await readdir(voiceDir);
-  return entries.filter((entry) => entry.endsWith('.bin')).map((entry) => path.basename(entry, '.bin')).sort();
+  return entries
+    .filter((entry) => /^[ab][fm]_.+\.bin$/.test(entry))
+    .map((entry) => path.basename(entry, '.bin'))
+    .sort();
 }
 
 /** Runs the downloader when required local artifacts are absent. */

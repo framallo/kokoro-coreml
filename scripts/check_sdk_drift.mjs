@@ -13,6 +13,7 @@ const files = {
   consumerFixturePackage: 'examples/KokoroConsumerFixture/Package.swift',
   voice: 'swift-tts/Sources/KokoroTTS/KokoroVoiceID.swift',
   textChunker: 'swift-tts/Sources/KokoroTTS/TextChunker.swift',
+  synthesisOptions: 'swift-tts/Sources/KokoroTTS/KokoroSynthesisOptions.swift',
   manifestDecoder: 'swift-tts/Sources/KokoroTTS/KokoroRuntimeManifest.swift',
   manifestSchema: 'schemas/KokoroRuntimeManifest.schema.json',
   buildBundle: 'scripts/build_sdk_bundle.mjs',
@@ -36,7 +37,7 @@ function parseIntConstant(source, name) {
 }
 
 function parseDoubleConstant(source, name) {
-  const match = source.match(new RegExp(`static let ${name} = ([0-9.]+)`));
+  const match = source.match(new RegExp(`(?:public )?static let ${name} = ([0-9.]+)`));
   if (!match) {
     fail(`missing Swift Double constant ${name}`);
   }
@@ -150,7 +151,7 @@ const contract = {
   fullBuckets: parseSwiftIntArray(sources.pipeline, 'defaultBuckets'),
   starterBuckets: [15],
   starterVoice: 'af_heart',
-  defaultChunkSeconds: parseDoubleConstant(sources.textChunker, 'defaultMaxChunkSeconds'),
+  defaultChunkSeconds: parseDoubleConstant(sources.synthesisOptions, 'defaultMaxChunkSeconds'),
 };
 
 assertArrayEqual(

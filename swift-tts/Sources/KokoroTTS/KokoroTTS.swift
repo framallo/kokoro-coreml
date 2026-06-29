@@ -118,6 +118,9 @@ public actor KokoroTTS {
         voice: KokoroVoiceID = .afHeart,
         options: KokoroSynthesisOptions = KokoroSynthesisOptions()
     ) throws -> [KokoroPreparedInput] {
+        guard voice.isSupportedRawTextLanguage else {
+            throw KokoroError.unsupportedVoice(voice.rawValue)
+        }
         guard modelProvider.manifest.voices.contains(where: { $0.path == "voices/\(voice.rawValue).bin" }) else {
             throw KokoroError.unsupportedVoice(voice.rawValue)
         }
@@ -270,7 +273,7 @@ public actor KokoroTTS {
                 return KokoroError.missingModel("bucket")
             }
         }
-        return error
+        return KokoroError.coreMLPredictionFailed(String(describing: error))
     }
 
     /// Maps lower-level preparation failures onto public SDK errors.

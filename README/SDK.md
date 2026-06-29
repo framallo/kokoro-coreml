@@ -45,8 +45,9 @@ local path dependency. For V1 this repo publishes source plus downloadable
 resource bundles. It does
 not publish a SwiftPM binary/resource artifact yet; choose that only after
 package size and Xcode resource behavior are measured. If you need a remote
-SwiftPM dependency before that, mirror `swift-tts` into its own package repo or
-vendor it into your app workspace.
+SwiftPM dependency before that, mirror this repo layout so `swift-tts` can still
+resolve its sibling `../swift` package, or publish both packages explicitly.
+Mirroring only `swift-tts` is not enough.
 
 The repo also includes `examples/KokoroConsumerFixture` and
 `examples/KokoroDemoApp` as integration fixtures.
@@ -76,9 +77,11 @@ node scripts/validate_sdk_bundle.mjs /tmp/kokoro-sdk-starter
 Use the latest Hugging Face revision for normal development, or pin the
 revision recorded in `sdk/SDKReleaseManifest.json` when reproducing a release.
 
-Use `--profile full` for every checked bucket and every local voice file. Use
-`--profile custom --voices af_heart,af_bella --buckets 15,30` for an app-specific
-bundle.
+Use `--profile full` for every checked bucket and every supported English voice
+file. V1 raw-text synthesis rejects non-English voice prefixes even if a custom
+bundle includes their embeddings. Use
+`--profile custom --voices af_heart,af_bella --buckets 15,30` for an
+app-specific bundle.
 
 `HostedManifest.json` is for downloaded-resource mode. It intentionally excludes
 `compiled/`; each app keeps its own writable compiled-model cache.
@@ -108,7 +111,10 @@ Use `makePCMBuffer()` when AVFoundation is available.
 ## Use Downloaded Resources
 
 For apps that stage model assets after install, hydrate a hosted manifest into a
-writable cache:
+writable cache. In production, serve this manifest over HTTPS and pin either the
+HF revision or the `sdk/SDKReleaseManifest.json` checksum you expect; per-file
+hashes protect against transfer corruption, not a malicious replacement
+manifest.
 
 ```swift
 import KokoroTTS
@@ -221,11 +227,16 @@ node scripts/build_sdk_bundle.mjs \
   --download-manifest /tmp/kokoro-download-manifest.json
 
 node scripts/validate_sdk_bundle.mjs /tmp/kokoro-sdk-starter
-swift run --package-path swift-tts kokoro-sdk-smoke \
-  --bundle /tmp/kokoro-sdk-starter \
-  --text "Hello world." \
-  --voice af_heart \
-  --out /tmp/kokoro-sdk-smoke.wav
+xcodebuild -quiet \
+  -scheme kokoro-sdk-smoke \
+  -destination 'platform=macOS,arch=arm64' \
+  -derivedDataPath /tmp/kokoro-tts-smoke-dd \
+  build
+
+DYLD_FRAMEWORK_PATH=/tmp/kokoro-tts-smoke-dd/Build/Products/Debug/PackageFrameworks \
+  /tmp/kokoro-tts-smoke-dd/Build/Products/Debug/kokoro-sdk-smoke \
+  /tmp/kokoro-sdk-starter \
+  "Hello world."
 ```
 
 Generate the full bundle before publishing a release that claims full bucket or

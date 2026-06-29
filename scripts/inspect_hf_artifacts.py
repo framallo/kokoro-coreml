@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import urllib.error
 import urllib.parse
 import urllib.request
 from collections import defaultdict
@@ -37,6 +38,22 @@ def fetch_model_info(repo_id: str, revision: str | None) -> dict[str, Any]:
         return json.load(response)
 
 
+def fetch_repo_json(repo_id: str, revision: str, path: str) -> dict[str, Any] | None:
+    """Fetch a JSON file from a model repo revision, returning None on 404."""
+
+    quoted = urllib.parse.quote(repo_id, safe="/")
+    quoted_revision = urllib.parse.quote(revision, safe="")
+    quoted_path = urllib.parse.quote(path, safe="/")
+    url = f"https://huggingface.co/{quoted}/resolve/{quoted_revision}/{quoted_path}"
+    try:
+        with urllib.request.urlopen(url, timeout=30) as response:
+            return json.load(response)
+    except urllib.error.HTTPError as exc:
+        if exc.code == 404:
+            return None
+        raise
+
+
 def package_name(path: str) -> str | None:
     """Return the `.mlpackage` path prefix for a repo file path."""
 
@@ -57,11 +74,13 @@ def inspect_artifacts(info: dict[str, Any], repo_id: str, revision: str | None) 
     })
     voices = []
     top_level_runtime_metadata = set()
+    sibling_paths = set()
 
     for sibling in siblings:
         path = sibling.get("rfilename")
         if not isinstance(path, str):
             continue
+        sibling_paths.add(path)
         size = int(sibling.get("size") or sibling.get("lfs", {}).get("size") or 0)
         pkg = package_name(path)
         if pkg:
@@ -79,15 +98,44 @@ def inspect_artifacts(info: dict[str, Any], repo_id: str, revision: str | None) 
                 "bytes": size,
                 "sha256": sibling.get("lfs", {}).get("sha256"),
             })
-        elif path in {"KokoroRuntimeManifest.json", "HostedManifest.json"}:
+        elif path in {
+            "KokoroRuntimeManifest.json",
+            "HostedManifest.json",
+            "runtime/kokoro-vocab.json",
+            "runtime/hnsf_weights.json",
+            "sdk/SDKReleaseManifest.json",
+            "sdk/starter/KokoroRuntimeManifest.json",
+            "sdk/full/KokoroRuntimeManifest.json",
+        }:
             top_level_runtime_metadata.add(path)
+
+    resolved_revision = info.get("sha")
+    hosted_manifest = None
+    unresolved_hosted_files = []
+    if isinstance(resolved_revision, str) and "HostedManifest.json" in sibling_paths:
+        hosted_manifest = fetch_repo_json(repo_id, resolved_revision, "HostedManifest.json")
+        if hosted_manifest:
+            for entry in hosted_manifest.get("files") or []:
+                hosted_path = entry.get("path")
+                if isinstance(hosted_path, str) and hosted_path not in sibling_paths:
+                    unresolved_hosted_files.append(hosted_path)
+
+    required_sdk_metadata = {
+        "KokoroRuntimeManifest.json",
+        "HostedManifest.json",
+        "runtime/kokoro-vocab.json",
+        "runtime/hnsf_weights.json",
+        "sdk/SDKReleaseManifest.json",
+        "sdk/starter/KokoroRuntimeManifest.json",
+        "sdk/full/KokoroRuntimeManifest.json",
+    }
 
     report = {
         "schema_version": 1,
         "generated_at": datetime.now(timezone.utc).isoformat(),
         "repo_id": repo_id,
         "requested_revision": revision,
-        "resolved_revision": info.get("sha"),
+        "resolved_revision": resolved_revision,
         "last_modified": info.get("lastModified"),
         "private": info.get("private"),
         "gated": info.get("gated"),
@@ -102,9 +150,9 @@ def inspect_artifacts(info: dict[str, Any], repo_id: str, revision: str | None) 
             for path, value in sorted(packages.items())
         ],
         "voices": sorted(voices, key=lambda item: item["path"]),
-        "missing_sdk_metadata": sorted(
-            {"KokoroRuntimeManifest.json", "HostedManifest.json"} - top_level_runtime_metadata
-        ),
+        "missing_sdk_metadata": sorted(required_sdk_metadata - top_level_runtime_metadata),
+        "hosted_manifest_file_count": len((hosted_manifest or {}).get("files") or []),
+        "unresolved_hosted_files": sorted(unresolved_hosted_files),
     }
     return report
 

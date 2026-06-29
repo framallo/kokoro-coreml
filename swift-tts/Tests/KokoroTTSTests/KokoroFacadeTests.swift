@@ -274,6 +274,21 @@ final class KokoroFacadeTests: XCTestCase {
         XCTAssertTrue(KokoroVoiceID.gistVoices.contains(.amMichael))
     }
 
+    /// Verifies V1 raw-text synthesis rejects non-English Kokoro voices even if
+    /// a custom bundle accidentally includes their embedding files.
+    func testPrepareRejectsNonEnglishVoicePrefixes() async throws {
+        let root = try makeBundleRoot()
+        let tts = try await loadFacadeFromMainActor(resources: .directory(root))
+
+        XCTAssertFalse(KokoroVoiceID("jf_alpha").isSupportedRawTextLanguage)
+        do {
+            _ = try await tts.prepare("Hello world.", voice: KokoroVoiceID("jf_alpha"))
+            XCTFail("expected unsupportedVoice")
+        } catch {
+            XCTAssertEqual(error as? KokoroError, .unsupportedVoice("jf_alpha"))
+        }
+    }
+
     /// Creates a minimal generated-bundle shape for provider validation tests.
     private func makeBundleRoot(
         removeVoiceFile: Bool = false,

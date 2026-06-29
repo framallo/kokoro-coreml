@@ -1,7 +1,7 @@
 # Kokoro Drop-In SDK v1 Plan
 
 **Date:** 2026-06-28
-**Status:** Planned
+**Status:** Implemented locally; final audit/fix loop in progress
 
 ## Executive Summary
 
@@ -34,7 +34,7 @@ developer diagnostic path, not an app runtime dependency.
 | App-bundled resources | App target or package resource bundle contains models, voices, vocab, and hn-NSF weights. | Required for offline iOS/macOS use and App Store-friendly behavior. |
 | Directory resources | SDK loads source `.mlpackage` files from an explicit URL and may reuse source-hash-matched `.mlmodelc` caches. | Keeps local development, benchmarks, and downloaded model bundles simple without trusting standalone compiled artifacts. |
 | Hugging Face resources | Repo tools hydrate model and voice assets from `mattmireles/kokoro-coreml`. | Keeps large binaries out of git while giving developers one canonical download source. |
-| Gist-style downloaded resources | App downloads a signed/hashed manifest of `.mlpackage` directories, voices, vocab, and hn-NSF weights, then compiles and caches `.mlmodelc` locally. | This is the shipping iOS precedent and avoids coupling release artifacts to one OS-compiled `.mlmodelc`. |
+| Gist-style downloaded resources | App downloads a hashed manifest of `.mlpackage` directories, voices, vocab, and hn-NSF weights over a trusted channel, then compiles and caches `.mlmodelc` locally. | This is the shipping iOS precedent and avoids coupling release artifacts to one OS-compiled `.mlmodelc`; production callers must pin the release manifest or HF revision they trust. |
 | Node oracle mode | Node runs Botnet-compatible prep in tests, scripts, CI, or macOS developer diagnostics. | Useful for drift detection; forbidden as a required iOS app dependency. |
 
 ## Goals and Non-Goals
@@ -787,15 +787,14 @@ and marks old `KokoroPipeline` snippets as low-level. Remote HF upload remains
 pending until the final release commit and final artifact checks are ready.
 The physical iOS readiness gate is now closed by iPhone 15 Pro Max evidence.
 The HF metadata payload helper shares the downloader's env, repo `.env`, and
-Hugging Face cache token lookup. The final HF metadata upload succeeded. Live
-HF revision `272dca12ba29d956dae5e4a0841789f99131fb40` has no missing SDK
-metadata, keeps 23 model packages and 54 voices, and publishes
-`sdk/SDKReleaseManifest.json` for SDK commit
-`ec2412b32931034c3ec6dbf5cbb6a00175f75c39`. The release manifest records
-starter `starter-ec2412b32931` with 10 models / 1 voice and full
-`full-ec2412b32931` with 22 models / 54 voices. A final starter download,
-bundle build, compile, and validation from HF revision
-`272dca12ba29d956dae5e4a0841789f99131fb40` passed.
+Hugging Face cache token lookup. The first HF metadata upload reached live
+revision `272dca12ba29d956dae5e4a0841789f99131fb40`, but the final audit
+superseded it: the hardened upload must include the starter runtime files at
+the HF root, expose only the top-level starter `HostedManifest.json` as the
+directly hydratable manifest, publish full profile metadata for supported
+English voices only, and point `sdk/SDKReleaseManifest.json` at the final SDK
+hardening commit. Replace this paragraph with the new live revision after the
+fixed payload upload and inspection pass.
 Verification after the docs/drift slice: `node
 scripts/check_sdk_drift.mjs`, `swift test --package-path swift-tts`, `swift
 test --package-path swift`, `node scripts/compare_botnet_prepare_input.mjs
@@ -958,19 +957,18 @@ evidence, and must be rerun before remote HF publication.
   returns empty output. Unknown vocab symbols are dropped, BOS/EOS still apply,
   and diagnostics report counters without persisting raw text or phonemes.
 
-### Unresolved
+### Resolved Decisions
 
 - **Q:** Should release bundles include every voice by default?
-- **Options:** all voices, English-only voices, or single default voice. Current
-  lean: starter bundle with Gist's supported production voices
-  (`af_bella`, `am_michael`, `af_heart`) or a single default voice if package
-  size forces it; full bundle with all supported English voices.
+- **A:** No. The starter bundle ships `af_heart`. The full bundle ships all
+  supported English voices (`af_*`, `am_*`, `bf_*`, `bm_*`) because V1 raw-text
+  synthesis is English-only. Non-English voice prefixes are rejected by the SDK
+  even when a custom bundle includes their embedding files.
 
 - **Q:** Should the package publish resource bundles through SwiftPM?
-- **Options:** SwiftPM resources, GitHub Release zip, binary/resource artifact,
-  or app-provided resource directory only. Current lean: app-provided bundle for
-  V1 plus a generator script; measure SwiftPM artifact behavior before promising
-  it.
+- **A:** Not in V1. V1 publishes source plus generated downloadable resource
+  directories. A SwiftPM binary/resource artifact waits until package size and
+  Xcode resource behavior are measured.
 
 - **Q:** What exact platform floor should `KokoroTTS` raw-text V1 advertise?
 - **A:** Use the newest OS floor that makes the system reliable, even if that

@@ -44,6 +44,12 @@ COREML_PATTERNS = [
 VOICE_PATTERNS = [
     "kokoro.js/voices/*.bin",
 ]
+ENGLISH_VOICE_PATTERNS = [
+    "kokoro.js/voices/af_*.bin",
+    "kokoro.js/voices/am_*.bin",
+    "kokoro.js/voices/bf_*.bin",
+    "kokoro.js/voices/bm_*.bin",
+]
 STARTER_BUCKET_SECONDS = [15]
 SDK_DURATION_TOKEN_SIZES = [32, 64, 128, 256, 320, 384, 512]
 STARTER_VOICES = ["af_heart"]
@@ -199,7 +205,7 @@ def _sdk_patterns(profile: str, voices: list[str], buckets: list[int]) -> list[s
     """Return HF allow patterns for an SDK download profile."""
 
     if profile == "full":
-        return COREML_PATTERNS + VOICE_PATTERNS
+        return COREML_PATTERNS + ENGLISH_VOICE_PATTERNS
     if profile == "starter":
         voices = voices or STARTER_VOICES
         buckets = buckets or STARTER_BUCKET_SECONDS

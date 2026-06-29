@@ -51,4 +51,16 @@ public struct KokoroVoiceID: RawRepresentable, Equatable, Hashable, Sendable, Ex
     public var usesBritishEnglish: Bool {
         languageCode == "b"
     }
+
+    /// Whether V1 raw-text preparation supports this voice's language prefix.
+    ///
+    /// V1 ships English Misaki phonemization only. The SDK rejects other Kokoro
+    /// voice prefixes even when their embedding files are present in a custom
+    /// bundle so callers do not get English phonemes with a non-English voice.
+    public var isSupportedRawTextLanguage: Bool {
+        rawValue.hasPrefix("af_")
+            || rawValue.hasPrefix("am_")
+            || rawValue.hasPrefix("bf_")
+            || rawValue.hasPrefix("bm_")
+    }
 }

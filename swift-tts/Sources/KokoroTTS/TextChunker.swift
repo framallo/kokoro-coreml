@@ -1,15 +1,15 @@
 import Foundation
 
 /// Botnet-compatible text chunker with an SDK-specific configurable duration cap.
-public struct TextChunker: Sendable {
+struct TextChunker: Sendable {
     /// SDK starter-profile chunk cap.
-    public static let defaultMaxChunkSeconds = 15.0
+    static let defaultMaxChunkSeconds = KokoroSynthesisOptions.defaultMaxChunkSeconds
 
     /// Botnet fleet chunk cap preserved for parity tests and overrides.
-    public static let botnetMaxChunkSeconds = 30.0
+    static let botnetMaxChunkSeconds = 30.0
 
     /// Maximum estimated output duration returned by duration estimates.
-    public static let maxOutputSeconds = 900
+    static let maxOutputSeconds = 900
 
     /// Character-rate heuristic copied from Botnet's fleet chunker.
     private static let estimatedCharactersPerSecond = 14.0
@@ -20,12 +20,12 @@ public struct TextChunker: Sendable {
     ]
 
     /// Maximum estimated seconds allowed in one chunk.
-    public let maxChunkSeconds: Double
+    let maxChunkSeconds: Double
 
     /// Creates a text chunker.
     ///
     /// - Parameter maxChunkSeconds: Maximum estimated seconds per chunk.
-    public init(maxChunkSeconds: Double = Self.defaultMaxChunkSeconds) {
+    init(maxChunkSeconds: Double = Self.defaultMaxChunkSeconds) {
         self.maxChunkSeconds = max(0.25, maxChunkSeconds)
     }
 
@@ -33,7 +33,7 @@ public struct TextChunker: Sendable {
     ///
     /// - Parameter text: Text to map to pseudo-token IDs.
     /// - Returns: Deterministic scalar-derived token IDs.
-    public func tokenize(_ text: String) -> [Int] {
+    func tokenize(_ text: String) -> [Int] {
         text.unicodeScalars.map { Int($0.value % 255) + 1 }
     }
 
@@ -41,7 +41,7 @@ public struct TextChunker: Sendable {
     ///
     /// - Parameter text: Raw text to split.
     /// - Returns: Single-spaced chunks.
-    public func chunks(for text: String) -> [String] {
+    func chunks(for text: String) -> [String] {
         chunks(for: text, speed: 1.0)
     }
 
@@ -51,7 +51,7 @@ public struct TextChunker: Sendable {
     ///   - text: Raw text to split.
     ///   - speed: Speech speed multiplier.
     /// - Returns: Single-spaced chunks.
-    public func chunks(for text: String, speed: Double) -> [String] {
+    func chunks(for text: String, speed: Double) -> [String] {
         chunks(for: text, speed: speed, maxCharacters: nil)
     }
 
@@ -62,7 +62,7 @@ public struct TextChunker: Sendable {
     ///   - speed: Speech speed multiplier.
     ///   - maxCharacters: Optional hard character cap for recursive fallback.
     /// - Returns: Single-spaced chunks.
-    public func chunks(for text: String, speed: Double, maxCharacters: Int?) -> [String] {
+    func chunks(for text: String, speed: Double, maxCharacters: Int?) -> [String] {
         let normalized = KokoroTextProcessor.normalizeWhitespace(text)
         guard !normalized.isEmpty else {
             return []

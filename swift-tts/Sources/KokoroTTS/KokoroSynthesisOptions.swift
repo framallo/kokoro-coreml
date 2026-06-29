@@ -2,6 +2,9 @@ import Foundation
 
 /// Caller-controlled options for raw-text Kokoro synthesis preparation.
 public struct KokoroSynthesisOptions: Equatable, Sendable {
+    /// Default SDK starter-profile chunk cap.
+    public static let defaultMaxChunkSeconds = 15.0
+
     /// Duration-model speed multiplier.
     public let speed: Float
 
@@ -22,7 +25,7 @@ public struct KokoroSynthesisOptions: Equatable, Sendable {
     public init(
         speed: Float = 1.0,
         maxCharacters: Int? = nil,
-        maxChunkSeconds: Double = TextChunker.defaultMaxChunkSeconds
+        maxChunkSeconds: Double = Self.defaultMaxChunkSeconds
     ) {
         self.speed = speed
         self.maxCharacters = maxCharacters

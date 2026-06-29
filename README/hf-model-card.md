@@ -170,8 +170,10 @@ node scripts/build_sdk_bundle.mjs \
 node scripts/validate_sdk_bundle.mjs /tmp/kokoro-sdk-starter
 ```
 
-Downloaded-resource apps can hydrate `HostedManifest.json` with
-`KokoroDownloadedModelStore`. Bundled-resource apps can use
+Downloaded-resource apps can hydrate the top-level starter
+`HostedManifest.json` with `KokoroDownloadedModelStore`. Production apps should
+serve manifests over HTTPS and pin the expected HF revision or
+`sdk/SDKReleaseManifest.json` checksum. Bundled-resource apps can use
 `KokoroResourceProvider.directory`, `.appBundle`, or `.packageBundle`.
 
 Previous snippets that used `KokoroPipeline` directly are now low-level

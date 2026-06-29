@@ -44,6 +44,9 @@ public enum KokoroError: Error, Equatable, LocalizedError {
     /// Core ML could not compile or load a model.
     case coreMLLoadFailed(String)
 
+    /// Core ML loaded but prediction failed during synthesis.
+    case coreMLPredictionFailed(String)
+
     /// The synthesis task was cancelled before completion.
     case synthesisCancelled
 
@@ -81,6 +84,8 @@ public enum KokoroError: Error, Equatable, LocalizedError {
             return "Kokoro input has \(tokens) tokens, but the largest loaded duration model supports \(maxTokens)."
         case .coreMLLoadFailed(let model):
             return "Core ML could not compile or load Kokoro model: \(model)."
+        case .coreMLPredictionFailed(let detail):
+            return "Core ML Kokoro prediction failed: \(detail)."
         case .synthesisCancelled:
             return "Kokoro synthesis was cancelled."
         case .invalidAudioOutput:
